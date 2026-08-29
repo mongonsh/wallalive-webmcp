@@ -4,6 +4,10 @@
 
 CutRoom
 
+## Live URL
+
+https://cutroom-webmcp.mungunshagai-tb.chatgpt.site
+
 ## One-line description
 
 A human-agent storyboard studio where directors lock creative intent and browser agents safely expand, branch, and continuity-check the cut through WebMCP.

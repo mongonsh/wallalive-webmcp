@@ -2,6 +2,8 @@
 
 **Direct the intention. Let the agent find the coverage.**
 
+**Live demo:** https://cutroom-webmcp.mungunshagai-tb.chatgpt.site
+
 CutRoom is a human-agent storyboard studio built for the WebMCP Challenge. A filmmaker sets the creative anchor, then any compatible browser agent can inspect the board, propose coverage, lock decisions, branch an alternate cut, and audit continuity inside the same visible interface.
 
 The product does not embed a model or require an API key. The visiting browser agent supplies the intelligence; CutRoom supplies the shared state, narrow tools, creative guardrails, and provenance.
