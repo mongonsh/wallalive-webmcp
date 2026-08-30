@@ -48,7 +48,7 @@ All tools use strict schemas, `additionalProperties: false`, cancellation signal
 
 - Camera start and capture are human-only UI gestures.
 - Segmentation, semantic-part recognition, and the first preview happen locally.
-- The 1.54 MiB dual-resolution ONNX pair is served from WallAlive’s own origin and runs with WebAssembly; it does not send the image to an inference API. The older fallback checkpoints load only when v3 misses a basic facial or limb anchor.
+- The 3.23 MiB three-model ONNX stack is served from WallAlive’s own origin and runs with WebAssembly; it does not send the image to an inference API. The 96² and 128² face logits are validation-calibrated and blended locally. Older fallback checkpoints load only when the primary stack misses a basic facial or limb anchor.
 - The agent never receives live frames or raw image pixels.
 - Neural generation requires a separate visible human approval.
 - Only the isolated drawing is sent to the selected AniGen Space.
@@ -75,9 +75,11 @@ human camera gesture + tap
 local target-aware drawing isolation
         │
         ▼
-WallAlive ChildlikeSHAPES PartUNet v3 (local ONNX/WASM)
+WallAlive ChildlikeSHAPES local ONNX/WASM stack
         ├── 96² full character: body + head/torso + limbs
-        └── 96² enlarged head crop: eyes + cheeks + mouth + ears
+        └── validation-calibrated face ensemble
+            ├── 96² v3 enlarged head crop
+            └── 128² v4 rare-feature head crop
         │
         ├── exact pixel snap: position + outline + color
         └─────────────────────────────────────────────► rough private preview
@@ -95,7 +97,7 @@ rigged GLB → local Blob URL → Three.js GLTFLoader / SkinnedMesh
 
 - React 19 + TypeScript, built with vinext for Cloudflare/Sites
 - Three.js `GLTFLoader`, `SkinnedMesh`, procedural bone actions, and WebXR hit testing
-- WallAlive ChildlikeSHAPES PartUNet v3: a 288,109-parameter whole-character network plus a 109,832-parameter enlarged-face network, both at 96×96, lazy-loaded through `onnxruntime-web`
+- WallAlive ChildlikeSHAPES stack: a 288,109-parameter whole-character network, a 109,832-parameter 96² face network, and a 435,624-parameter 128² residual-SE face network, lazy-loaded through `onnxruntime-web`
 - Instance-aware decoding preserves multiple same-side arms/legs and separate facial features; every detected region snaps back to high-resolution pixel geometry before rendering
 - Raised face meshes and detected contour tubes add real eye/cheek/mouth parallax to the private preview instead of leaving the features flat
 - Lazy-loaded `@gradio/client` connection to AniGen
@@ -105,9 +107,9 @@ rigged GLB → local Blob URL → Three.js GLTFLoader / SkinnedMesh
 
 ## Local model training
 
-`ml/train_childlike_detector.py` trains the checked-in v3 models from the official pixel-labeled ChildlikeSHAPES release. The reproducible split uses 12,992 official training drawings, 1,000 disjoint validation drawings for checkpoint/threshold selection, all 1,986 official test drawings only after selection, and 3,000 synthetic upright, horizontal, quadruped, side-faced, tall, and multi-arm characters. Training augments color, paper grids, rotation, compression damage, shadows, missing/asymmetric parts, and distractor strokes.
+`ml/train_childlike_detector.py` trains the checked-in v3 models from the official pixel-labeled ChildlikeSHAPES release. `ml/train_face_detector_v4.py` adds a 128² residual-SE face parser with rare-class sampling, boundary/Tversky loss, graph-paper augmentation, label hard negatives, a three-epoch high-recall warmup, and five moderate-weight refinement epochs. `ml/evaluate_face_ensemble.py` searches blend weights and thresholds on validation only. The reproducible split uses 12,992 official training drawings, 1,000 disjoint validation drawings for checkpoint/threshold selection, and all 1,986 official test drawings only after selection. V3 uses 3,000 synthetic characters; v4 uses 3,500 with 7,000 balanced samples per epoch.
 
-On the untouched official test set, IoU is 0.901 body, 0.600 full-frame eye / 0.642 enlarged-face eye, 0.501 / 0.569 mouth, 0.444 / 0.449 ear, 0.603 arm, 0.540 hand, 0.696 leg, and 0.656 foot. The heterogeneous cheek/facial-accessory label is the weak class at 0.079 full-frame / 0.165 face-crop, so v3 uses a validation-calibrated 0.24 threshold plus the earlier synthetic cheek specialist when a bilateral mate is absent. On six separate public Meta Animated Drawings characters, the new browser preprocessing and v3 body model score 0.803–0.952 body IoU, mean 0.883. Exact contour evidence still decides final position, outline, shape, and sampled color; these numbers are regression evidence, not a claim that single-view recognition or an inferred unseen back can be perfect.
+On the untouched official test set, the body/limb model scores 0.901 body, 0.603 arm, 0.540 hand, 0.696 leg, and 0.656 foot IoU. The frozen v3+v4 face ensemble improves every face class over v3 alone: eye 0.642→0.658, cheek/facial accessory 0.165→0.196, mouth 0.569→0.575, and ear 0.449→0.479. Macro face IoU rises from 0.4563 to 0.4771. Validation—not test—selected v4 blend weights of 0.5/0.3/0.6/0.5 for eye/cheek/mouth/ear. On six separate public Meta Animated Drawings characters, the browser preprocessing and body model score 0.803–0.952 body IoU, mean 0.883. Exact contour evidence still decides final position, outline, shape, and sampled color; these numbers are regression evidence, not a claim that single-view recognition or an inferred unseen back can be perfect.
 
 ## Local development
 

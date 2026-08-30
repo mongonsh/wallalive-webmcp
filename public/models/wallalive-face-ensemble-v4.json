@@ -1,0 +1,43 @@
+{
+  "architecture": "WallAlive validation-calibrated v3+v4 face ensemble",
+  "face_parts": [
+    "eye",
+    "cheek",
+    "mouth",
+    "ear"
+  ],
+  "blend_weight_v4": {
+    "eye": 0.5,
+    "cheek": 0.3,
+    "mouth": 0.6,
+    "ear": 0.5
+  },
+  "thresholds": {
+    "eye": 0.5664,
+    "cheek": 0.1836,
+    "mouth": 0.7578,
+    "ear": 0.6875
+  },
+  "validation_face_iou": {
+    "eye": 0.6525,
+    "cheek": 0.2347,
+    "mouth": 0.5774,
+    "ear": 0.4557
+  },
+  "official_test_face_iou": {
+    "eye": 0.6578,
+    "cheek": 0.1962,
+    "mouth": 0.5753,
+    "ear": 0.4791
+  },
+  "official_test_presence_f1": {
+    "eye": 0.9629,
+    "cheek": 0.4371,
+    "mouth": 0.9339,
+    "ear": 0.6909
+  },
+  "validation_drawings": 1000,
+  "official_test_drawings": 1986,
+  "seconds": 947.6,
+  "test_split_used_for_selection": false
+}

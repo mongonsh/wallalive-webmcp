@@ -2,10 +2,12 @@ import { mergeLearnedPartHints, type DrawingExtraction, type LearnedPartHint } f
 import { averageLogitConfidence, sameSemanticInstance, selectDominantInkColor } from "./model-math";
 
 const BODY_MODEL_PATH = "/models/wallalive-parts-v3.onnx";
-const FACE_MODEL_PATH = "/models/wallalive-face-v3.onnx";
+const FACE_V3_MODEL_PATH = "/models/wallalive-face-v3.onnx";
+const FACE_V4_MODEL_PATH = "/models/wallalive-face-v4.onnx";
 const FALLBACK_MODEL_PATHS = ["/models/wallalive-parts-v2.onnx", "/models/wallalive-parts-v1.onnx"] as const;
 const BODY_SIZE = 96;
-const FACE_SIZE = 96;
+const FACE_V3_SIZE = 96;
+const FACE_SIZE = 128;
 const FALLBACK_SIZE = 64;
 const PARTS = ["body", "eye", "cheek", "mouth", "ear", "arm", "hand", "leg", "foot"] as const;
 const FACE_PARTS = ["eye", "cheek", "mouth", "ear"] as const;
@@ -23,10 +25,16 @@ const BODY_THRESHOLDS: Record<(typeof PARTS)[number], number> = {
   foot: 0.72,
 };
 const FACE_THRESHOLDS: Record<(typeof FACE_PARTS)[number], number> = {
-  eye: 0.72,
-  cheek: 0.24,
-  mouth: 0.72,
-  ear: 0.64,
+  eye: 0.5664,
+  cheek: 0.1836,
+  mouth: 0.7578,
+  ear: 0.6875,
+};
+const FACE_V4_BLEND: Record<(typeof FACE_PARTS)[number], number> = {
+  eye: 0.5,
+  cheek: 0.3,
+  mouth: 0.6,
+  ear: 0.5,
 };
 const FALLBACK_THRESHOLDS = {
   body: 0.48,
@@ -51,7 +59,7 @@ type PreparedImage = {
 };
 
 let runtimePromise: Promise<OrtRuntime> | null = null;
-let sessionPromise: Promise<{ ort: OrtRuntime; body: OrtSession; face: OrtSession }> | null = null;
+let sessionPromise: Promise<{ ort: OrtRuntime; body: OrtSession; faceV3: OrtSession; faceV4: OrtSession }> | null = null;
 let fallbackSessionPromise: Promise<OrtSession[]> | null = null;
 
 const sessionOptions = {
@@ -66,11 +74,12 @@ function loadSessions() {
     sessionPromise = runtimePromise.then(async (ort) => {
       ort.env.wasm.numThreads = typeof crossOriginIsolated !== "undefined" && crossOriginIsolated ? 2 : 1;
       ort.env.wasm.proxy = false;
-      const [body, face] = await Promise.all([
+      const [body, faceV3, faceV4] = await Promise.all([
         ort.InferenceSession.create(BODY_MODEL_PATH, sessionOptions),
-        ort.InferenceSession.create(FACE_MODEL_PATH, sessionOptions),
+        ort.InferenceSession.create(FACE_V3_MODEL_PATH, sessionOptions),
+        ort.InferenceSession.create(FACE_V4_MODEL_PATH, sessionOptions),
       ]);
-      return { ort, body, face };
+      return { ort, body, faceV3, faceV4 };
     });
   }
   return sessionPromise;
@@ -367,6 +376,50 @@ function modelRectToImageCrop(rect: { x: number; y: number; width: number; heigh
   };
 }
 
+function resizeLogitsBilinear(values: Float32Array, sourceSize: number, targetSize: number, channels: number) {
+  if (sourceSize === targetSize) return values;
+  const resized = new Float32Array(channels * targetSize * targetSize);
+  const sourceArea = sourceSize * sourceSize;
+  const targetArea = targetSize * targetSize;
+  for (let channel = 0; channel < channels; channel += 1) {
+    const sourceOffset = channel * sourceArea;
+    const targetOffset = channel * targetArea;
+    for (let targetY = 0; targetY < targetSize; targetY += 1) {
+      const sourceY = (targetY + 0.5) * sourceSize / targetSize - 0.5;
+      const rawY0 = Math.floor(sourceY);
+      const y0 = clamp(rawY0, 0, sourceSize - 1);
+      const y1 = clamp(rawY0 + 1, 0, sourceSize - 1);
+      const fractionY = sourceY - rawY0;
+      for (let targetX = 0; targetX < targetSize; targetX += 1) {
+        const sourceX = (targetX + 0.5) * sourceSize / targetSize - 0.5;
+        const rawX0 = Math.floor(sourceX);
+        const x0 = clamp(rawX0, 0, sourceSize - 1);
+        const x1 = clamp(rawX0 + 1, 0, sourceSize - 1);
+        const fractionX = sourceX - rawX0;
+        const top = values[sourceOffset + y0 * sourceSize + x0] * (1 - fractionX) + values[sourceOffset + y0 * sourceSize + x1] * fractionX;
+        const bottom = values[sourceOffset + y1 * sourceSize + x0] * (1 - fractionX) + values[sourceOffset + y1 * sourceSize + x1] * fractionX;
+        resized[targetOffset + targetY * targetSize + targetX] = top * (1 - fractionY) + bottom * fractionY;
+      }
+    }
+  }
+  return resized;
+}
+
+function blendFaceLogits(v3Output: import("onnxruntime-web/wasm").Tensor, v4Output: import("onnxruntime-web/wasm").Tensor) {
+  const v3 = resizeLogitsBilinear(v3Output.data as Float32Array, FACE_V3_SIZE, FACE_SIZE, FACE_PARTS.length);
+  const v4 = v4Output.data as Float32Array;
+  const area = FACE_SIZE * FACE_SIZE;
+  const blended = new Float32Array(FACE_PARTS.length * area);
+  for (let channel = 0; channel < FACE_PARTS.length; channel += 1) {
+    const weight = FACE_V4_BLEND[FACE_PARTS[channel]];
+    const offset = channel * area;
+    for (let index = 0; index < area; index += 1) {
+      blended[offset + index] = v3[offset + index] * (1 - weight) + v4[offset + index] * weight;
+    }
+  }
+  return blended;
+}
+
 function supplementHints(primary: LearnedPartHint[], fallback: LearnedPartHint[], onlyMissingKinds: boolean) {
   const combined = [...primary];
   const missingKinds = new Set(fallback.map((hint) => hint.kind).filter((kind) => !primary.some((candidate) => candidate.kind === kind)));
@@ -402,7 +455,7 @@ function supplementFallbackHints(primary: LearnedPartHint[], fallback: LearnedPa
 
 export async function recognizeDrawingParts(extraction: DrawingExtraction): Promise<DrawingExtraction> {
   const started = performance.now();
-  const [{ ort, body, face }, image] = await Promise.all([loadSessions(), loadImage(extraction.textureUrl)]);
+  const [{ ort, body, faceV3, faceV4 }, image] = await Promise.all([loadSessions(), loadImage(extraction.textureUrl)]);
   const prepared = prepareImage(image, BODY_SIZE);
   const bodyTensor = new ort.Tensor("float32", prepared.values, [1, 3, BODY_SIZE, BODY_SIZE]);
   const bodyResults = await body.run({ pixel_values: bodyTensor });
@@ -411,9 +464,17 @@ export async function recognizeDrawingParts(extraction: DrawingExtraction): Prom
   const fullHints = decodeHints(partOutput, BODY_SIZE, PARTS, BODY_THRESHOLDS, prepared.values, prepared.mapPoint, { skipBody: true });
 
   const faceCrop = modelRectToImageCrop(locateHead(coarseOutput, prepared), prepared.mapPoint);
+  const preparedFaceV3 = prepareImage(image, FACE_V3_SIZE, faceCrop);
   const preparedFace = prepareImage(image, FACE_SIZE, faceCrop);
-  const faceResults = await face.run({ face_values: new ort.Tensor("float32", preparedFace.values, [1, 3, FACE_SIZE, FACE_SIZE]) });
-  const faceHints = decodeHints(faceResults.face_logits ?? Object.values(faceResults)[0], FACE_SIZE, FACE_PARTS, FACE_THRESHOLDS, preparedFace.values, preparedFace.mapPoint, { skipBody: false, faceCrop: true });
+  const [faceV3Results, faceV4Results] = await Promise.all([
+    faceV3.run({ face_values: new ort.Tensor("float32", preparedFaceV3.values, [1, 3, FACE_V3_SIZE, FACE_V3_SIZE]) }),
+    faceV4.run({ face_values: new ort.Tensor("float32", preparedFace.values, [1, 3, FACE_SIZE, FACE_SIZE]) }),
+  ]);
+  const faceLogits = new ort.Tensor("float32", blendFaceLogits(
+    faceV3Results.face_logits ?? Object.values(faceV3Results)[0],
+    faceV4Results.face_logits ?? Object.values(faceV4Results)[0],
+  ), [1, FACE_PARTS.length, FACE_SIZE, FACE_SIZE]);
+  const faceHints = decodeHints(faceLogits, FACE_SIZE, FACE_PARTS, FACE_THRESHOLDS, preparedFace.values, preparedFace.mapPoint, { skipBody: false, faceCrop: true });
   let hints = [...fullHints.filter((hint) => !FACE_KINDS.has(hint.kind)), ...faceHints];
   // The enlarged crop has better detail; the full-character pass can still
   // contribute a separate second eye/ear/cheek that the crop missed.

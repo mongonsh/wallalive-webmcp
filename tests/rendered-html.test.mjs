@@ -113,16 +113,26 @@ test("implements local drawing extraction and real WebXR hit testing", async () 
   assert.match(stage, /TubeGeometry/);
 });
 
-test("ships dual-resolution same-origin ChildlikeSHAPES drawing models", async () => {
+test("ships validation-calibrated same-origin ChildlikeSHAPES drawing models", async () => {
   const modelUrl = new URL("../public/models/wallalive-parts-v3.onnx", import.meta.url);
   const faceModelUrl = new URL("../public/models/wallalive-face-v3.onnx", import.meta.url);
+  const faceV4ModelUrl = new URL("../public/models/wallalive-face-v4.onnx", import.meta.url);
+  const faceV4Report = JSON.parse(await readFile(new URL("../public/models/wallalive-face-v4.json", import.meta.url), "utf8"));
+  const ensembleReport = JSON.parse(await readFile(new URL("../public/models/wallalive-face-ensemble-v4.json", import.meta.url), "utf8"));
   const report = JSON.parse(await readFile(new URL("../public/models/wallalive-parts-v3.json", import.meta.url), "utf8"));
   const model = await stat(modelUrl);
   const faceModel = await stat(faceModelUrl);
+  const faceV4Model = await stat(faceV4ModelUrl);
   const recognizer = await readFile(new URL("../app/lib/learned-parts.ts", import.meta.url), "utf8");
 
   assert.ok(model.size > 1_100_000 && model.size < 1_250_000, `expected a compact substantive body ONNX model, got ${model.size} bytes`);
   assert.ok(faceModel.size > 400_000 && faceModel.size < 500_000, `expected a compact substantive face ONNX model, got ${faceModel.size} bytes`);
+  assert.ok(faceV4Model.size > 1_700_000 && faceV4Model.size < 1_900_000, `expected a substantive high-resolution face ONNX model, got ${faceV4Model.size} bytes`);
+  assert.equal(faceV4Report.architecture, "WallAlive ChildlikeSHAPES FaceUNet v4");
+  assert.deepEqual(faceV4Report.input, [1, 3, 128, 128]);
+  assert.equal(faceV4Report.parameters, 435_624);
+  assert.equal(faceV4Report.best_epoch, 8);
+  assert.equal(faceV4Report.test_split_used_for_selection, false);
   assert.equal(report.architecture, "WallAlive ChildlikeSHAPES PartUNet v3");
   assert.deepEqual(report.coarse_channels, ["foreground", "head", "torso", "upper_appendage", "lower_appendage"]);
   assert.deepEqual(report.face_parts, ["eye", "cheek", "mouth", "ear"]);
@@ -145,11 +155,24 @@ test("ships dual-resolution same-origin ChildlikeSHAPES drawing models", async (
     assert.ok(report.official_test_face_iou[kind] >= floor, `${kind} face-crop official-test IoU should stay above ${floor}, got ${report.official_test_face_iou[kind]}`);
   }
   assert.deepEqual(report.face_thresholds, { eye: 0.72, cheek: 0.24, mouth: 0.72, ear: 0.64 });
+  assert.deepEqual(ensembleReport.blend_weight_v4, { eye: 0.5, cheek: 0.3, mouth: 0.6, ear: 0.5 });
+  assert.deepEqual(ensembleReport.thresholds, { eye: 0.5664, cheek: 0.1836, mouth: 0.7578, ear: 0.6875 });
+  assert.equal(ensembleReport.test_split_used_for_selection, false);
+  const ensembleFloors = { eye: 0.64, cheek: 0.18, mouth: 0.56, ear: 0.46 };
+  for (const [kind, floor] of Object.entries(ensembleFloors)) {
+    assert.ok(ensembleReport.official_test_face_iou[kind] >= floor, `${kind} ensemble official-test IoU should stay above ${floor}, got ${ensembleReport.official_test_face_iou[kind]}`);
+    assert.ok(ensembleReport.official_test_face_iou[kind] > report.official_test_face_iou[kind], `${kind} ensemble should outperform the v3 face crop`);
+  }
   assert.match(recognizer, /const BODY_MODEL_PATH = ["']\/models\/wallalive-parts-v3\.onnx["']/);
-  assert.match(recognizer, /const FACE_MODEL_PATH = ["']\/models\/wallalive-face-v3\.onnx["']/);
+  assert.match(recognizer, /const FACE_V3_MODEL_PATH = ["']\/models\/wallalive-face-v3\.onnx["']/);
+  assert.match(recognizer, /const FACE_V4_MODEL_PATH = ["']\/models\/wallalive-face-v4\.onnx["']/);
   assert.match(recognizer, /FALLBACK_MODEL_PATHS = \[["']\/models\/wallalive-parts-v2\.onnx/);
   assert.match(recognizer, /const BODY_SIZE = 96/);
-  assert.match(recognizer, /const FACE_SIZE = 96/);
+  assert.match(recognizer, /const FACE_V3_SIZE = 96/);
+  assert.match(recognizer, /const FACE_SIZE = 128/);
+  assert.match(recognizer, /blendFaceLogits/);
+  assert.match(recognizer, /const rawX0 = Math\.floor\(sourceX\)/);
+  assert.match(recognizer, /const x1 = clamp\(rawX0 \+ 1, 0, sourceSize - 1\)/);
   assert.match(recognizer, /locateHead/);
   assert.match(recognizer, /supplementFallbackHints/);
   assert.match(recognizer, /loadFallbackSessions/);
