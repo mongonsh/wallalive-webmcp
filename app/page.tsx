@@ -1,12 +1,14 @@
 /* eslint-disable @next/next/no-img-element */
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ARStage, type ARStageHandle, type CharacterAction } from "./components/ARStage";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { ARStageHandle, CharacterAction } from "./components/ARStage";
 import { createAniGenDemoDrawing, createDemoDoodle, extractDrawingFromVideo, type CaptureTarget, type DrawingExtraction } from "./lib/drawing";
 import { recognizeDrawingParts } from "./lib/learned-parts";
 import { createBundledAniGenAsset, disposeNeuralAsset, generateAniGenAsset, type NeuralAsset, type NeuralProgress } from "./lib/anigen";
 import type { RiggedAssetInfo } from "./lib/rigged-model";
+
+const ARStage = lazy(() => import("./components/ARStage").then((module) => ({ default: module.ARStage })));
 
 type Actor = "CHILD" | "BROWSER AGENT" | "WALLALIVE";
 type AppStep = "ready" | "camera" | "captured" | "alive";
@@ -715,7 +717,9 @@ export default function Home() {
             {cameraState !== "active" ? <div className="demo-room"><span className="frame-a" /><span className="frame-b" /><span className="shelf" /><span className="plant" /><span className="baseboard" /></div> : null}
             {capture && cameraState !== "active" ? <img className="captured-room" src={capture.previewUrl} alt="Approved drawing preview" /> : null}
             {step === "camera" ? <><div className="capture-guide"><span /><b>TAP CHARACTER · THEN CAPTURE</b></div><div className="capture-target" style={{ left: `${captureTarget.x * 100}%`, top: `${captureTarget.y * 100}%` }}><i /></div></> : null}
-            <ARStage ref={stageRef} contour={capture?.contour ?? null} skeleton={capture?.skeleton ?? null} textureUrl={capture?.textureUrl ?? null} rig={capture?.rig ?? null} action={character.action} accent={character.accent} inflation={character.inflation} neuralAssetUrl={neuralAsset?.meshUrl ?? null} visible={character.created} onCapability={handleARCapability} onPlaced={handleARPlaced} onNeuralAssetInfo={handleRiggedAssetInfo} />
+            <Suspense fallback={<div className="three-layer" aria-hidden="true" />}>
+              <ARStage ref={stageRef} contour={capture?.contour ?? null} skeleton={capture?.skeleton ?? null} textureUrl={capture?.textureUrl ?? null} rig={capture?.rig ?? null} action={character.action} accent={character.accent} inflation={character.inflation} neuralAssetUrl={neuralAsset?.meshUrl ?? null} visible={character.created} onCapability={handleARCapability} onPlaced={handleARPlaced} onNeuralAssetInfo={handleRiggedAssetInfo} />
+            </Suspense>
             {neuralConsentVisible ? <div className="neural-consent" role="dialog" aria-modal="true" aria-labelledby="neural-consent-title" onPointerDown={(event) => event.stopPropagation()}>
               <span>REAL 3D · HUMAN APPROVAL</span><h2 id="neural-consent-title">Send only this isolated drawing to AniGen?</h2><p>AniGen infers the unseen back, full mesh, skeleton, and skin weights on a public GPU. The live camera and room frame are never sent.</p><div><button onClick={startNeuralReconstruction}>UPLOAD APPROVED DRAWING</button><button onClick={keepPrivatePreview}>KEEP ROUGH PRIVATE PREVIEW</button></div>
             </div> : null}
