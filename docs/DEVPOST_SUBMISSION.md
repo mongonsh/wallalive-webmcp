@@ -66,6 +66,7 @@ Each tool uses strict JSON Schema, `additionalProperties: false`, bounded values
 - Local target-aware drawing isolation with connected components, clutter/border rejection, morphology, and flood fill
 - AniGen `ss_flow_solo` + `slat_flow_auto` through a lazy `@gradio/client` connection
 - Three.js `GLTFLoader`, real `SkinnedMesh` assets, generated-bone actions, lighting, shadow, and 360° interaction
+- Four same-origin ONNX/WASM graphs for nine-part segmentation, high-resolution face parsing, and 17-joint pose estimation
 - WebXR `immersive-ar` with `hit-test`
 - Imperative WebMCP registration through `document.modelContext`
 - Human-only camera and isolated-image approval boundary
@@ -79,10 +80,13 @@ The second challenge was privacy. Real single-image 3D requires a learned GPU mo
 
 The third challenge was reliability. The free ZeroGPU Space can queue or reject work. We added clear progress/error states, preserved results in local Blob URLs, documented a dedicated-GPU production path, and shipped a binary-verified rigged judge fixture.
 
+The fourth challenge was anatomy. A good silhouette still gave straight, misplaced limbs. We built an independent 490-character Meta Amateur Drawings benchmark and trained a 161,133-parameter browser pose model. On 75 untouched test drawings it reaches 0.7969 PCK@5% and 0.8643 PCK@10%. The pose graph bends limbs through elbows and knees, while high-resolution segmentation remains authoritative for the child’s eye, ear, mouth, cheek, outline, and color.
+
 ## Accomplishments
 
 - A real drawing → neural mesh + skeleton + skin weights → camera AR loop
 - A colored 159,930-vertex GLB with 20 bones, parsed and quality-gated in tests
+- A locally trained 17-joint drawing pose model whose ONNX export exactly reproduces the untouched-test result
 - Generated bone-branch animation instead of whole-object-only motion
 - Real WebXR surface hit testing plus universal camera overlay
 - Eight WebMCP tools sharing one mutation layer with the human UI

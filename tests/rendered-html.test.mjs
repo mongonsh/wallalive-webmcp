@@ -113,23 +113,27 @@ test("implements local drawing extraction and real WebXR hit testing", async () 
   assert.match(stage, /TubeGeometry/);
 });
 
-test("ships validation-calibrated same-origin ChildlikeSHAPES drawing models", async () => {
+test("ships validation-calibrated same-origin drawing and pose models", async () => {
   const modelUrl = new URL("../public/models/wallalive-parts-v3.onnx", import.meta.url);
   const faceModelUrl = new URL("../public/models/wallalive-face-v3.onnx", import.meta.url);
   const faceV4ModelUrl = new URL("../public/models/wallalive-face-v4.onnx", import.meta.url);
+  const poseModelUrl = new URL("../public/models/wallalive-amateur-pose-v6.onnx", import.meta.url);
   const faceV4Report = JSON.parse(await readFile(new URL("../public/models/wallalive-face-v4.json", import.meta.url), "utf8"));
   const ensembleReport = JSON.parse(await readFile(new URL("../public/models/wallalive-face-ensemble-v4.json", import.meta.url), "utf8"));
   const componentGateReport = JSON.parse(await readFile(new URL("../public/models/wallalive-component-gate-v5.json", import.meta.url), "utf8"));
+  const poseReport = JSON.parse(await readFile(new URL("../public/models/wallalive-amateur-pose-v6.json", import.meta.url), "utf8"));
   const report = JSON.parse(await readFile(new URL("../public/models/wallalive-parts-v3.json", import.meta.url), "utf8"));
   const model = await stat(modelUrl);
   const faceModel = await stat(faceModelUrl);
   const faceV4Model = await stat(faceV4ModelUrl);
+  const poseModel = await stat(poseModelUrl);
   const recognizer = await readFile(new URL("../app/lib/learned-parts.ts", import.meta.url), "utf8");
   const componentGate = await readFile(new URL("../app/lib/face-component-gate.ts", import.meta.url), "utf8");
 
   assert.ok(model.size > 1_100_000 && model.size < 1_250_000, `expected a compact substantive body ONNX model, got ${model.size} bytes`);
   assert.ok(faceModel.size > 400_000 && faceModel.size < 500_000, `expected a compact substantive face ONNX model, got ${faceModel.size} bytes`);
   assert.ok(faceV4Model.size > 1_700_000 && faceV4Model.size < 1_900_000, `expected a substantive high-resolution face ONNX model, got ${faceV4Model.size} bytes`);
+  assert.ok(poseModel.size > 600_000 && poseModel.size < 700_000, `expected a compact substantive pose ONNX model, got ${poseModel.size} bytes`);
   assert.equal(faceV4Report.architecture, "WallAlive ChildlikeSHAPES FaceUNet v4");
   assert.deepEqual(faceV4Report.input, [1, 3, 128, 128]);
   assert.equal(faceV4Report.parameters, 435_624);
@@ -180,6 +184,21 @@ test("ships validation-calibrated same-origin ChildlikeSHAPES drawing models", a
   }
   assert.deepEqual(componentGateReport.official_test_browser_metrics.eye.selected, componentGateReport.official_test_browser_metrics.eye.baseline);
   assert.deepEqual(componentGateReport.official_test_browser_metrics.mouth.selected, componentGateReport.official_test_browser_metrics.mouth.baseline);
+  assert.equal(poseReport.architecture, "WallAlive AmateurPoseNet v6");
+  assert.deepEqual(poseReport.input, [1, 3, 96, 96]);
+  assert.deepEqual(poseReport.output, [1, 17, 48, 48]);
+  assert.equal(poseReport.parameters, 161_133);
+  assert.deepEqual(
+    [poseReport.training_drawings, poseReport.validation_drawings, poseReport.test_drawings],
+    [352, 63, 75],
+  );
+  assert.equal(poseReport.best_epoch, 24);
+  assert.equal(poseReport.test_split_used_for_selection, false);
+  assert.equal(poseReport.official_test.pck_0_05, 0.7969);
+  assert.equal(poseReport.official_test.pck_0_10, 0.8643);
+  assert.equal(poseReport.official_test.mean_error_input_pixels, 5.578);
+  assert.deepEqual(poseReport.onnx_official_test, poseReport.official_test);
+  assert.equal(poseReport.onnx_export_verified, true);
   assert.match(componentGate, /faceComponentGateScore/);
   assert.match(componentGate, /model_disagreement|disagreement/);
   assert.match(componentGate, /cheek:[\s\S]*threshold: 0\.24/);
@@ -189,10 +208,15 @@ test("ships validation-calibrated same-origin ChildlikeSHAPES drawing models", a
   assert.match(recognizer, /const BODY_MODEL_PATH = ["']\/models\/wallalive-parts-v3\.onnx["']/);
   assert.match(recognizer, /const FACE_V3_MODEL_PATH = ["']\/models\/wallalive-face-v3\.onnx["']/);
   assert.match(recognizer, /const FACE_V4_MODEL_PATH = ["']\/models\/wallalive-face-v4\.onnx["']/);
+  assert.match(recognizer, /const POSE_MODEL_PATH = ["']\/models\/wallalive-amateur-pose-v6\.onnx["']/);
   assert.match(recognizer, /FALLBACK_MODEL_PATHS = \[["']\/models\/wallalive-parts-v2\.onnx/);
   assert.match(recognizer, /const BODY_SIZE = 96/);
   assert.match(recognizer, /const FACE_V3_SIZE = 96/);
   assert.match(recognizer, /const FACE_SIZE = 128/);
+  assert.match(recognizer, /const POSE_HEATMAP_SIZE = 48/);
+  assert.match(recognizer, /Promise\.all\(\[/);
+  assert.match(recognizer, /orderedHumanoid/);
+  assert.match(recognizer, /arms >= 1 && arms <= 2 && legs >= 1 && legs <= 2/);
   assert.match(recognizer, /blendFaceLogits/);
   assert.match(recognizer, /const rawX0 = Math\.floor\(sourceX\)/);
   assert.match(recognizer, /const x1 = clamp\(rawX0 \+ 1, 0, sourceSize - 1\)/);
@@ -232,6 +256,60 @@ test("learned semantics snap to exact drawing pixels for position, outline, and 
   assert.equal(eye.outline, outline);
   assert.equal(eye.source, "learned-model");
   assert.equal(result.learnedRecognition?.latencyMs, 24);
+});
+
+test("learned pose bends real limb paths without inventing face parts", () => {
+  const parts = [
+    { id: "body", kind: "body", side: "center", parentId: null, center: { x: 0, y: 0, z: 0 }, size: { x: 0.8, y: 1, z: 0.42 }, rotation: 0, color: "#f3d48b", confidence: 1, source: "silhouette-branch" },
+    { id: "arm-left", kind: "arm", side: "left", parentId: "body", center: { x: -0.38, y: -0.02, z: 0 }, anchor: { x: -0.22, y: 0.18, z: 0 }, size: { x: 0.07, y: 0.32, z: 0.07 }, rotation: 0.2, color: "#f3d48b", confidence: 0.72, source: "silhouette-branch" },
+    { id: "hand-left", kind: "hand", side: "left", parentId: "arm-left", center: { x: -0.38, y: -0.02, z: 0 }, size: { x: 0.09, y: 0.09, z: 0.07 }, rotation: 0, color: "#f3d48b", confidence: 0.66, source: "silhouette-branch" },
+    { id: "leg-left", kind: "leg", side: "left", parentId: "body", center: { x: -0.19, y: -0.48, z: 0 }, anchor: { x: -0.13, y: -0.28, z: 0 }, size: { x: 0.08, y: 0.32, z: 0.08 }, rotation: 0.1, color: "#f3d48b", confidence: 0.7, source: "silhouette-branch" },
+    { id: "foot-left", kind: "foot", side: "left", parentId: "leg-left", center: { x: -0.19, y: -0.48, z: 0 }, size: { x: 0.11, y: 0.08, z: 0.07 }, rotation: 0, color: "#f3d48b", confidence: 0.64, source: "silhouette-branch" },
+  ];
+  const extraction = {
+    previewUrl: "data:image/png;base64,preview",
+    textureUrl: "data:image/png;base64,texture",
+    contour: [],
+    skeleton: [],
+    analysis: { shapeHint: "tall", dominantColor: "#f3d48b", secondaryColor: "#96344e", coveragePercent: 42, aspectRatio: 0.8, edgeEnergy: "bold", sourceWidth: 512, sourceHeight: 512, skeletonPoints: 18 },
+    rig: {
+      version: "wallalive-semantic-rig-v2",
+      bodyColor: "#f3d48b",
+      lineColor: "#96344e",
+      parts,
+      joints: [],
+      detectedKinds: [...new Set(parts.map((part) => part.kind))],
+    },
+  };
+  const joints = {
+    nose: [0.5, 0.23], left_eye: [0.44, 0.22], right_eye: [0.56, 0.22], left_ear: [0.4, 0.25], right_ear: [0.6, 0.25],
+    left_shoulder: [0.38, 0.34], right_shoulder: [0.62, 0.34], left_elbow: [0.25, 0.42], right_elbow: [0.74, 0.42],
+    left_wrist: [0.18, 0.56], right_wrist: [0.82, 0.56], left_hip: [0.43, 0.56], right_hip: [0.57, 0.56],
+    left_knee: [0.39, 0.72], right_knee: [0.61, 0.72], left_ankle: [0.34, 0.89], right_ankle: [0.66, 0.89],
+  };
+  const pose = {
+    model: "wallalive-amateur-pose-v6",
+    latencyMs: 31,
+    applicable: true,
+    joints: Object.entries(joints).map(([name, [x, y]]) => ({ name, x, y, confidence: 0.9 })),
+  };
+  const hints = [
+    { kind: "arm", center: { x: 0.22, y: 0.47 }, size: { x: 0.06, y: 0.28 }, rotation: 0.2, confidence: 0.84 },
+    { kind: "hand", center: { x: 0.18, y: 0.56 }, size: { x: 0.07, y: 0.07 }, rotation: 0, confidence: 0.78 },
+    { kind: "leg", center: { x: 0.38, y: 0.73 }, size: { x: 0.07, y: 0.3 }, rotation: 0.1, confidence: 0.86 },
+    { kind: "foot", center: { x: 0.34, y: 0.89 }, size: { x: 0.1, y: 0.06 }, rotation: 0, confidence: 0.8 },
+  ];
+
+  const result = mergeLearnedPartHints(extraction, hints, 47, pose);
+  const arm = result.rig.parts.find((part) => part.kind === "arm" && part.side === "left");
+  const hand = result.rig.parts.find((part) => part.kind === "hand" && part.side === "left");
+  assert.equal(arm?.source, "learned-pose");
+  assert.equal(arm?.path?.length, 3);
+  assert.notEqual(arm?.path?.[1].x, (arm.path[0].x + arm.path[2].x) / 2, "elbow bend must survive as a real path point");
+  assert.deepEqual(hand?.center, arm?.path?.[2]);
+  assert.equal(hand?.source, "learned-pose");
+  assert.equal(result.poseRecognition, pose);
+  assert.equal(result.rig.parts.some((part) => ["eye", "ear", "mouth", "cheek"].includes(part.kind)), false);
 });
 
 test("an empty learned face result removes heuristic face inventions", () => {

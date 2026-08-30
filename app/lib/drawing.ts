@@ -6,9 +6,31 @@ export type ContourPoint = { x: number; y: number };
 export type SkeletonPoint = { x: number; y: number; radius: number };
 export type CaptureTarget = { x: number; y: number };
 
+export const POSE_JOINT_NAMES = [
+  "nose", "left_eye", "right_eye", "left_ear", "right_ear",
+  "left_shoulder", "right_shoulder", "left_elbow", "right_elbow", "left_wrist", "right_wrist",
+  "left_hip", "right_hip", "left_knee", "right_knee", "left_ankle", "right_ankle",
+] as const;
+export type PoseJointName = (typeof POSE_JOINT_NAMES)[number];
+export const POSE_SKELETON_EDGES: ReadonlyArray<readonly [PoseJointName, PoseJointName]> = [
+  ["left_ear", "left_eye"], ["left_eye", "nose"], ["nose", "right_eye"], ["right_eye", "right_ear"],
+  ["left_ear", "left_shoulder"], ["right_ear", "right_shoulder"], ["left_shoulder", "right_shoulder"],
+  ["left_shoulder", "left_elbow"], ["left_elbow", "left_wrist"],
+  ["right_shoulder", "right_elbow"], ["right_elbow", "right_wrist"],
+  ["left_shoulder", "left_hip"], ["right_shoulder", "right_hip"], ["left_hip", "right_hip"],
+  ["left_hip", "left_knee"], ["left_knee", "left_ankle"],
+  ["right_hip", "right_knee"], ["right_knee", "right_ankle"],
+];
+export type LearnedPose = {
+  model: "wallalive-amateur-pose-v6";
+  latencyMs: number;
+  applicable: boolean;
+  joints: Array<{ name: PoseJointName; x: number; y: number; confidence: number }>;
+};
+
 export type SemanticPartKind = "body" | "eye" | "pupil" | "cheek" | "mouth" | "ear" | "arm" | "hand" | "leg" | "foot" | "marking";
 export type SemanticSide = "left" | "right" | "center";
-export type SemanticPartSource = "image-region" | "silhouette-branch" | "structural-inference" | "learned-model";
+export type SemanticPartSource = "image-region" | "silhouette-branch" | "structural-inference" | "learned-model" | "learned-pose";
 
 export type LearnedPartHint = {
   kind: Exclude<SemanticPartKind, "body" | "pupil" | "marking">;
@@ -47,6 +69,7 @@ export type SemanticPart = {
   confidence: number;
   source: SemanticPartSource;
   outline?: ContourPoint[];
+  path?: Array<{ x: number; y: number; z: number }>;
 };
 
 export type CharacterRig = {
@@ -89,10 +112,11 @@ export type DrawingExtraction = {
   analysis: DrawingAnalysis;
   semanticRegions?: SemanticRegionCandidate[];
   learnedRecognition?: {
-    model: "wallalive-v3-v4-component-gate-v5-childlikeshapes";
+    model: "wallalive-v3-v4-gate-v5-pose-v6";
     latencyMs: number;
     detectedKinds: SemanticPartKind[];
   };
+  poseRecognition?: LearnedPose;
 };
 
 type RGB = { r: number; g: number; b: number };
@@ -1395,7 +1419,7 @@ export function inferSemanticRig(
   };
 }
 
-export function mergeLearnedPartHints(extraction: DrawingExtraction, hints: LearnedPartHint[], latencyMs: number): DrawingExtraction {
+export function mergeLearnedPartHints(extraction: DrawingExtraction, hints: LearnedPartHint[], latencyMs: number, pose?: LearnedPose): DrawingExtraction {
   const replaceableFaceKinds = new Set<SemanticPartKind>(["eye", "cheek", "mouth", "ear"]);
   const withoutHeuristicFace = () => {
     const parts = extraction.rig.parts.filter((part) => !replaceableFaceKinds.has(part.kind) && part.kind !== "pupil");
@@ -1412,7 +1436,8 @@ export function mergeLearnedPartHints(extraction: DrawingExtraction, hints: Lear
   if (!accepted.length) return {
     ...extraction,
     rig: { ...extraction.rig, ...withoutHeuristicFace() },
-    learnedRecognition: { model: "wallalive-v3-v4-component-gate-v5-childlikeshapes", latencyMs, detectedKinds: [] },
+    learnedRecognition: { model: "wallalive-v3-v4-gate-v5-pose-v6", latencyMs, detectedKinds: [] },
+    poseRecognition: pose,
   };
   const body = extraction.rig.parts.find((part) => part.kind === "body");
   if (!body) return extraction;
@@ -1629,6 +1654,90 @@ export function mergeLearnedPartHints(extraction: DrawingExtraction, hints: Lear
     });
   }
 
+  if (pose?.applicable) {
+    const poseJoints = new Map(pose.joints.map((joint) => [joint.name, joint]));
+    const posePoint = (name: PoseJointName) => {
+      const joint = poseJoints.get(name);
+      return joint ? { point: toRigPoint(joint), confidence: joint.confidence } : null;
+    };
+    const refinePoseChain = (
+      kind: "arm" | "leg",
+      endpointKind: "hand" | "foot",
+      names: readonly [PoseJointName, PoseJointName, PoseJointName],
+      side: SemanticSide,
+    ) => {
+      const decoded = names.map(posePoint);
+      if (decoded.some((item) => !item)) return;
+      const chain = decoded.map((item) => item!.point);
+      const confidence = decoded.reduce((total, item) => total + item!.confidence, 0) / decoded.length;
+      let part = parts.find((candidate) => candidate.kind === kind && candidate.side === side);
+      if (!part && predictedKinds.has(kind)) {
+        const thickness = body.size.x * 0.065;
+        part = {
+          id: nextId(kind, side),
+          kind,
+          side,
+          parentId: "body",
+          center: chain[2],
+          anchor: chain[0],
+          size: { x: thickness, y: 0.1, z: thickness },
+          rotation: 0,
+          color: extraction.rig.bodyColor,
+          confidence: confidence * 0.82,
+          source: "learned-pose",
+        };
+        parts.push(part);
+      }
+      if (!part) return;
+      const length = Math.hypot(chain[1].x - chain[0].x, chain[1].y - chain[0].y)
+        + Math.hypot(chain[2].x - chain[1].x, chain[2].y - chain[1].y);
+      part.anchor = chain[0];
+      part.center = chain[2];
+      part.path = chain;
+      part.size.y = Math.max(part.size.x * 2.1, length);
+      part.rotation = Math.atan2(-(chain[2].x - chain[0].x), chain[2].y - chain[0].y);
+      part.confidence = Math.max(part.confidence, confidence * 0.9);
+      part.source = "learned-pose";
+      let endpoint = parts.find((candidate) => candidate.kind === endpointKind && candidate.parentId === part!.id)
+        ?? parts.find((candidate) => candidate.kind === endpointKind && candidate.side === side);
+      if (!endpoint) {
+        const radius = part.size.x * 1.3;
+        endpoint = {
+          id: nextId(endpointKind, side),
+          kind: endpointKind,
+          side,
+          parentId: part.id,
+          center: chain[2],
+          size: { x: radius, y: radius, z: radius * 0.82 },
+          rotation: 0,
+          color: extraction.rig.bodyColor,
+          confidence: confidence * 0.78,
+          source: "learned-pose",
+        };
+        parts.push(endpoint);
+      } else {
+        endpoint.parentId = part.id;
+        endpoint.center = chain[2];
+        endpoint.confidence = Math.max(endpoint.confidence, confidence * 0.84);
+        endpoint.source = "learned-pose";
+      }
+    };
+    const chains = [
+      { kind: "arm" as const, endpoint: "hand" as const, names: ["left_shoulder", "left_elbow", "left_wrist"] as const },
+      { kind: "arm" as const, endpoint: "hand" as const, names: ["right_shoulder", "right_elbow", "right_wrist"] as const },
+      { kind: "leg" as const, endpoint: "foot" as const, names: ["left_hip", "left_knee", "left_ankle"] as const },
+      { kind: "leg" as const, endpoint: "foot" as const, names: ["right_hip", "right_knee", "right_ankle"] as const },
+    ];
+    for (const kind of ["arm", "leg"] as const) {
+      const sorted = chains.filter((chain) => chain.kind === kind).sort((a, b) => {
+        const aStart = poseJoints.get(a.names[0]);
+        const bStart = poseJoints.get(b.names[0]);
+        return (aStart?.x ?? 0.5) - (bStart?.x ?? 0.5);
+      });
+      sorted.forEach((chain, index) => refinePoseChain(chain.kind, chain.endpoint, chain.names, index === 0 ? "left" : "right"));
+    }
+  }
+
   const joints = parts.filter((part) => part.parentId).map((part) => ({
     id: `joint-${part.id}`,
     parentId: part.parentId!,
@@ -1640,7 +1749,8 @@ export function mergeLearnedPartHints(extraction: DrawingExtraction, hints: Lear
   return {
     ...extraction,
     rig: { ...extraction.rig, parts, joints, detectedKinds },
-    learnedRecognition: { model: "wallalive-v3-v4-component-gate-v5-childlikeshapes", latencyMs, detectedKinds: [...predictedKinds] },
+    learnedRecognition: { model: "wallalive-v3-v4-gate-v5-pose-v6", latencyMs, detectedKinds: [...predictedKinds] },
+    poseRecognition: pose,
   };
 }
 

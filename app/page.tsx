@@ -3,7 +3,7 @@
 
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ARStageHandle, CharacterAction } from "./components/ARStage";
-import { createAniGenDemoDrawing, createDemoDoodle, extractDrawingFromVideo, type CaptureTarget, type DrawingExtraction } from "./lib/drawing";
+import { createAniGenDemoDrawing, createDemoDoodle, extractDrawingFromVideo, POSE_SKELETON_EDGES, type CaptureTarget, type DrawingExtraction } from "./lib/drawing";
 import { recognizeDrawingParts } from "./lib/learned-parts";
 import { createBundledAniGenAsset, disposeNeuralAsset, generateAniGenAsset, type NeuralAsset, type NeuralProgress } from "./lib/anigen";
 import type { RiggedAssetInfo } from "./lib/rigged-model";
@@ -230,7 +230,7 @@ export default function Home() {
       ? learned ? `Local ML recognized ${learned.detectedKinds.join(", ") || "the silhouette"} in ${learned.latencyMs} ms. Generate real 3D to infer its back and skinned mesh.` : "Drawing isolated locally. Generate real 3D to infer its back, mesh, skeleton, and skin weights."
       : "Demo drawing is ready. Generate real 3D—or play the no-wait rigged judge demo.");
     setAgentLine(`The local preview found ${detected || "a body silhouette"}${learned ? " using a trained drawing-part model plus exact pixel geometry" : ""}. AniGen will infer real unseen geometry and a skinned skeleton.`);
-    record("WALLALIVE", learned ? "Recognized and isolated the approved drawing" : "Isolated the approved drawing", `${next.rig.parts.length} local preview regions · ${next.analysis.shapeHint} silhouette${learned ? ` · ChildlikeSHAPES v3+v4 ensemble + learned component gate ${learned.latencyMs} ms` : ""} · no upload yet.`);
+    record("WALLALIVE", learned ? "Recognized and isolated the approved drawing" : "Isolated the approved drawing", `${next.rig.parts.length} local preview regions · ${next.analysis.shapeHint} silhouette${learned ? ` · ChildlikeSHAPES face/part ensemble + AmateurPose v6 ${learned.latencyMs} ms` : ""} · no upload yet.`);
   }, [commitCharacter, commitNeuralAsset, handleRiggedAssetInfo, record]);
 
   const recognizeAndSetDrawing = useCallback(async (next: DrawingExtraction, source: "camera" | "demo") => {
@@ -410,7 +410,8 @@ export default function Home() {
         latencyMs: null,
         detectedKinds: [],
       },
-      localPreviewRegions: captureRef.current.rig.parts.map((part) => ({ id: part.id, kind: part.kind, side: part.side, confidence: part.confidence, source: part.source })),
+      poseRecognition: captureRef.current.poseRecognition ?? null,
+      localPreviewRegions: captureRef.current.rig.parts.map((part) => ({ id: part.id, kind: part.kind, side: part.side, confidence: part.confidence, source: part.source, posePathPoints: part.path?.length ?? 0 })),
       inflation: characterRef.current.inflation,
       neuralModelUsed: Boolean(neuralAssetRef.current),
       generatedAsset: riggedAssetInfoRef.current,
@@ -688,7 +689,14 @@ export default function Home() {
               <div className="drawing-thumb">
                 <img src={capture.textureUrl} alt="Locally isolated drawing" />
                 <svg viewBox="0 0 100 100" aria-hidden="true">
-                  {capture.skeleton.map((point, index) => <circle key={index} cx={(point.x / 1.4 + 0.5) * 100} cy={(0.5 - point.y / 1.4) * 100} r={Math.max(1.1, point.radius / 1.4 * 100)} />)}
+                  {capture.poseRecognition?.applicable ? POSE_SKELETON_EDGES.map(([from, to]) => {
+                    const start = capture.poseRecognition?.joints.find((joint) => joint.name === from);
+                    const end = capture.poseRecognition?.joints.find((joint) => joint.name === to);
+                    return start && end ? <line key={`${from}-${to}`} x1={start.x * 100} y1={start.y * 100} x2={end.x * 100} y2={end.y * 100} /> : null;
+                  }) : null}
+                  {capture.poseRecognition?.applicable
+                    ? capture.poseRecognition.joints.map((joint) => <circle key={joint.name} cx={joint.x * 100} cy={joint.y * 100} r="1.7" />)
+                    : capture.skeleton.map((point, index) => <circle key={index} cx={(point.x / 1.4 + 0.5) * 100} cy={(0.5 - point.y / 1.4) * 100} r={Math.max(1.1, point.radius / 1.4 * 100)} />)}
                 </svg>
               </div>
               <div><p className="kicker">{neuralAsset ? "ANIGEN RIG + DRAWING PARTS" : "LOCAL PREVIEW DNA"}</p><strong>{capture.rig.detectedKinds.filter((kind) => kind !== "body").join(" · ") || capture.analysis.shapeHint}</strong><span><i style={{ background: capture.rig.bodyColor }} /><i style={{ background: capture.rig.lineColor }} /> {riggedAssetInfo ? `${riggedAssetInfo.bones} BONES · ${riggedAssetInfo.semanticParts} PROJECTED PARTS${riggedAssetInfo.colorTransfer ? " · COLOR MATCHED" : ""} · ${riggedAssetInfo.vertices.toLocaleString()} VERTICES` : neuralAsset ? "RIGGED GLB LOADING" : `${capture.rig.parts.length} ROUGH REGIONS`}</span></div>

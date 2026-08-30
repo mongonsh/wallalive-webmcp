@@ -14,7 +14,7 @@ Hold on BrickBob loading in the room. Drag to a side and back view, then press *
 
 Press **No camera? Try a demo doodle**, then **Generate real 3D**. Hold on the approval card.
 
-**Voiceover:** “A child controls the camera and capture. WallAlive isolates one drawing locally. Real 3D requires a GPU, so a second human approval sends only this transparent character—never the live camera or room frame.”
+**Voiceover:** “A child controls the camera and capture. WallAlive isolates one drawing locally, preserves its face shapes and colors, and a locally trained 17-joint model finds elbows and knees. Real 3D requires a GPU, so a second human approval sends only this transparent character—never the live camera or room frame.”
 
 Open **Privacy** and point to the three human-only gestures. If recording a successful live generation, continue; otherwise return to **Play Judge Demo** so quota cannot interrupt the video.
 

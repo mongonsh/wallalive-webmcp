@@ -29,7 +29,7 @@ WebMCP is the creative control plane, not decorative integration. Eight imperati
 
 ### 2. Quality of idea and execution
 
-This is a working responsive camera + neural 3D + WebGL + WebXR application. It includes local target-aware drawing isolation, explicit external-processing consent, live Gradio/AniGen integration, GLB preservation in browser Blob URLs, `GLTFLoader`, a real generated `SkinnedMesh`, procedural bone actions, 360° rotation, normalized and hit-test placement, stories, provenance, mobile fallbacks, security headers, a one-click judge demo, and automated tests that parse the binary asset and verify skeleton/skin data.
+This is a working responsive camera + neural 3D + WebGL + WebXR application. It includes local target-aware drawing isolation, a four-graph ONNX/WASM stack for semantic face/body parts and 17 named joints, explicit external-processing consent, live Gradio/AniGen integration, GLB preservation in browser Blob URLs, `GLTFLoader`, a real generated `SkinnedMesh`, procedural bone actions, 360° rotation, normalized and hit-test placement, stories, provenance, mobile fallbacks, security headers, a one-click judge demo, and automated tests that parse the binary asset and verify skeleton/skin data. The pose model was selected on 63 validation drawings and scores 0.7969 PCK@5% on 75 untouched Meta Amateur Drawings; its browser ONNX export is checked against the same test.
 
 ### 3. Potential impact
 

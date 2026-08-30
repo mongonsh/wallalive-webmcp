@@ -1,14 +1,16 @@
-import { mergeLearnedPartHints, type DrawingExtraction, type LearnedPartHint } from "./drawing";
+import { mergeLearnedPartHints, POSE_JOINT_NAMES, type DrawingExtraction, type LearnedPartHint, type LearnedPose } from "./drawing";
 import { acceptFaceComponent } from "./face-component-gate";
 import { averageLogitConfidence, sameSemanticInstance, selectDominantInkColor } from "./model-math";
 
 const BODY_MODEL_PATH = "/models/wallalive-parts-v3.onnx";
 const FACE_V3_MODEL_PATH = "/models/wallalive-face-v3.onnx";
 const FACE_V4_MODEL_PATH = "/models/wallalive-face-v4.onnx";
+const POSE_MODEL_PATH = "/models/wallalive-amateur-pose-v6.onnx";
 const FALLBACK_MODEL_PATHS = ["/models/wallalive-parts-v2.onnx", "/models/wallalive-parts-v1.onnx"] as const;
 const BODY_SIZE = 96;
 const FACE_V3_SIZE = 96;
 const FACE_SIZE = 128;
+const POSE_HEATMAP_SIZE = 48;
 const FALLBACK_SIZE = 64;
 const PARTS = ["body", "eye", "cheek", "mouth", "ear", "arm", "hand", "leg", "foot"] as const;
 const FACE_PARTS = ["eye", "cheek", "mouth", "ear"] as const;
@@ -60,7 +62,7 @@ type PreparedImage = {
 };
 
 let runtimePromise: Promise<OrtRuntime> | null = null;
-let sessionPromise: Promise<{ ort: OrtRuntime; body: OrtSession; faceV3: OrtSession; faceV4: OrtSession }> | null = null;
+let sessionPromise: Promise<{ ort: OrtRuntime; body: OrtSession; faceV3: OrtSession; faceV4: OrtSession; pose: OrtSession }> | null = null;
 let fallbackSessionPromise: Promise<OrtSession[]> | null = null;
 
 const sessionOptions = {
@@ -75,12 +77,13 @@ function loadSessions() {
     sessionPromise = runtimePromise.then(async (ort) => {
       ort.env.wasm.numThreads = typeof crossOriginIsolated !== "undefined" && crossOriginIsolated ? 2 : 1;
       ort.env.wasm.proxy = false;
-      const [body, faceV3, faceV4] = await Promise.all([
+      const [body, faceV3, faceV4, pose] = await Promise.all([
         ort.InferenceSession.create(BODY_MODEL_PATH, sessionOptions),
         ort.InferenceSession.create(FACE_V3_MODEL_PATH, sessionOptions),
         ort.InferenceSession.create(FACE_V4_MODEL_PATH, sessionOptions),
+        ort.InferenceSession.create(POSE_MODEL_PATH, sessionOptions),
       ]);
-      return { ort, body, faceV3, faceV4 };
+      return { ort, body, faceV3, faceV4, pose };
     });
   }
   return sessionPromise;
@@ -380,6 +383,40 @@ function locateHead(output: import("onnxruntime-web/wasm").Tensor, prepared: Pre
   return { x, y, width: Math.max(1, right - x), height: Math.max(1, bottom - y) };
 }
 
+function decodePose(
+  output: import("onnxruntime-web/wasm").Tensor,
+  prepared: PreparedImage,
+  limbHints: LearnedPartHint[],
+  latencyMs: number,
+): LearnedPose {
+  const values = output.data as Float32Array;
+  const area = POSE_HEATMAP_SIZE * POSE_HEATMAP_SIZE;
+  const joints = POSE_JOINT_NAMES.map((name, channel) => {
+    const offset = channel * area;
+    let bestIndex = 0;
+    let bestLogit = -Infinity;
+    for (let index = 0; index < area; index += 1) {
+      if (values[offset + index] > bestLogit) {
+        bestLogit = values[offset + index];
+        bestIndex = index;
+      }
+    }
+    const x = bestIndex % POSE_HEATMAP_SIZE;
+    const y = Math.floor(bestIndex / POSE_HEATMAP_SIZE);
+    const point = prepared.mapPoint((x + 0.5) * 2, (y + 0.5) * 2);
+    return { name, ...point, confidence: sigmoid(bestLogit) };
+  });
+  const byName = new Map(joints.map((joint) => [joint.name, joint]));
+  const averageY = (...names: Array<(typeof POSE_JOINT_NAMES)[number]>) => names.reduce((total, name) => total + (byName.get(name)?.y ?? 0.5), 0) / names.length;
+  const arms = limbHints.filter((hint) => hint.kind === "arm").length;
+  const legs = limbHints.filter((hint) => hint.kind === "leg").length;
+  const orderedHumanoid = averageY("left_shoulder", "right_shoulder") < averageY("left_hip", "right_hip")
+    && averageY("left_hip", "right_hip") < averageY("left_knee", "right_knee")
+    && averageY("left_knee", "right_knee") < averageY("left_ankle", "right_ankle");
+  const applicable = arms >= 1 && arms <= 2 && legs >= 1 && legs <= 2 && orderedHumanoid;
+  return { model: "wallalive-amateur-pose-v6", latencyMs, applicable, joints };
+}
+
 function modelRectToImageCrop(rect: { x: number; y: number; width: number; height: number }, mapPoint: PointMap) {
   const topLeft = mapPoint(rect.x, rect.y);
   const bottomRight = mapPoint(rect.x + rect.width, rect.y + rect.height);
@@ -468,13 +505,23 @@ function supplementFallbackHints(primary: LearnedPartHint[], fallback: LearnedPa
 
 export async function recognizeDrawingParts(extraction: DrawingExtraction): Promise<DrawingExtraction> {
   const started = performance.now();
-  const [{ ort, body, faceV3, faceV4 }, image] = await Promise.all([loadSessions(), loadImage(extraction.textureUrl)]);
+  const [{ ort, body, faceV3, faceV4, pose }, image] = await Promise.all([loadSessions(), loadImage(extraction.textureUrl)]);
   const prepared = prepareImage(image, BODY_SIZE);
   const bodyTensor = new ort.Tensor("float32", prepared.values, [1, 3, BODY_SIZE, BODY_SIZE]);
-  const bodyResults = await body.run({ pixel_values: bodyTensor });
+  const poseStarted = performance.now();
+  const [bodyResults, poseResults] = await Promise.all([
+    body.run({ pixel_values: bodyTensor }),
+    pose.run({ pose_values: bodyTensor }),
+  ]);
   const partOutput = bodyResults.part_logits ?? Object.values(bodyResults)[0];
   const coarseOutput = bodyResults.coarse_logits ?? Object.values(bodyResults)[1];
   const fullHints = decodeHints(partOutput, BODY_SIZE, PARTS, BODY_THRESHOLDS, prepared.values, prepared.mapPoint, { skipBody: true });
+  const learnedPose = decodePose(
+    poseResults.joint_heatmaps ?? Object.values(poseResults)[0],
+    prepared,
+    fullHints,
+    Math.round(performance.now() - poseStarted),
+  );
 
   const faceCrop = modelRectToImageCrop(locateHead(coarseOutput, prepared), prepared.mapPoint);
   const preparedFaceV3 = prepareImage(image, FACE_V3_SIZE, faceCrop);
@@ -523,5 +570,5 @@ export async function recognizeDrawingParts(extraction: DrawingExtraction): Prom
     // pair count so they cannot overwhelm unusual v3 multi-part predictions.
     hints = supplementFallbackHints(hints, oldHints);
   }
-  return mergeLearnedPartHints(extraction, hints, Math.round(performance.now() - started));
+  return mergeLearnedPartHints(extraction, hints, Math.round(performance.now() - started), learnedPose);
 }

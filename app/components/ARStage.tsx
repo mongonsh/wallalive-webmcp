@@ -207,12 +207,24 @@ export function buildCharacter(contour: ContourPoint[], skeleton: SkeletonPoint[
     const pivot = new THREE.Group();
     pivot.name = `rig-${part.id}`;
     pivot.position.set(anchor.x, anchor.y, 0);
-    pivot.rotation.z = part.rotation;
-    pivot.userData.baseRotationZ = part.rotation;
+    const posePath = part.path?.length && part.path.length >= 3 ? part.path : null;
+    pivot.rotation.z = posePath ? 0 : part.rotation;
+    pivot.userData.baseRotationZ = posePath ? 0 : part.rotation;
     const radius = Math.max(0.018, part.size.x * 0.5);
     const length = Math.max(radius * 2.1, part.size.y);
-    const limb = new THREE.Mesh(new THREE.CapsuleGeometry(radius, Math.max(0.001, length - radius * 2), 8, 18), meshMaterial(part.color));
-    limb.position.y = length * 0.5;
+    const limb = posePath
+      ? new THREE.Mesh(
+        new THREE.TubeGeometry(
+          new THREE.CatmullRomCurve3(posePath.map((point) => new THREE.Vector3(point.x - anchor.x, point.y - anchor.y, point.z)), false, "centripetal", 0.2),
+          28,
+          radius,
+          12,
+          false,
+        ),
+        meshMaterial(part.color),
+      )
+      : new THREE.Mesh(new THREE.CapsuleGeometry(radius, Math.max(0.001, length - radius * 2), 8, 18), meshMaterial(part.color));
+    if (!posePath) limb.position.y = length * 0.5;
     limb.castShadow = true;
     limb.receiveShadow = true;
     pivot.add(limb);
@@ -220,7 +232,12 @@ export function buildCharacter(contour: ContourPoint[], skeleton: SkeletonPoint[
     if (endPart) {
       const end = new THREE.Mesh(new THREE.SphereGeometry(0.5, 24, 16), meshMaterial(endPart.color));
       end.name = `rig-${endPart.id}`;
-      end.position.y = length;
+      if (posePath) {
+        const endpoint = posePath.at(-1)!;
+        end.position.set(endpoint.x - anchor.x, endpoint.y - anchor.y, endpoint.z);
+      } else {
+        end.position.y = length;
+      }
       end.scale.set(endPart.size.x, endPart.size.y, endPart.size.z);
       end.castShadow = true;
       pivot.add(end);
