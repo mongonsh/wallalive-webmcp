@@ -370,6 +370,7 @@ export default function Home() {
       await wait(Math.min(2200, Math.max(650, numberValue(beat.durationMs, 1100))), signal);
     }
     animateCharacter("idle", actor, toolName, `${characterRef.current.name}'s story is ready for another chapter.`);
+    window.setTimeout(() => setStoryCaption(""), 1200);
     return { title: storyTitle, beatsPlayed: Math.min(4, beats.length), finalAction: "idle" };
   }, [animateCharacter, commitCharacter, record]);
 
@@ -539,7 +540,7 @@ export default function Home() {
     if (demoRunning) return;
     setDemoRunning(true);
     try {
-      const demo = createAniGenDemoDrawing();
+      const demo = await createAniGenDemoDrawing();
       setDrawing(demo, "demo");
       const bundledAsset = createBundledAniGenAsset();
       commitNeuralAsset(bundledAsset);
@@ -669,7 +670,7 @@ export default function Home() {
                   {capture.skeleton.map((point, index) => <circle key={index} cx={(point.x / 1.4 + 0.5) * 100} cy={(0.5 - point.y / 1.4) * 100} r={Math.max(1.1, point.radius / 1.4 * 100)} />)}
                 </svg>
               </div>
-              <div><p className="kicker">{neuralAsset ? "ANIGEN RIG DNA" : "LOCAL PREVIEW DNA"}</p><strong>{neuralAsset ? "SKINNED MESH · FULL 3D" : capture.rig.detectedKinds.filter((kind) => kind !== "body").join(" · ") || capture.analysis.shapeHint}</strong><span><i style={{ background: capture.rig.bodyColor }} /><i style={{ background: capture.rig.lineColor }} /> {riggedAssetInfo ? `${riggedAssetInfo.bones} BONES · ${riggedAssetInfo.vertices.toLocaleString()} VERTICES` : neuralAsset ? "RIGGED GLB LOADING" : `${capture.rig.parts.length} ROUGH REGIONS`}</span></div>
+              <div><p className="kicker">{neuralAsset ? "ANIGEN RIG + DRAWING PARTS" : "LOCAL PREVIEW DNA"}</p><strong>{capture.rig.detectedKinds.filter((kind) => kind !== "body").join(" · ") || capture.analysis.shapeHint}</strong><span><i style={{ background: capture.rig.bodyColor }} /><i style={{ background: capture.rig.lineColor }} /> {riggedAssetInfo ? `${riggedAssetInfo.bones} BONES · ${riggedAssetInfo.semanticParts} PROJECTED PARTS${riggedAssetInfo.colorTransfer ? " · COLOR MATCHED" : ""} · ${riggedAssetInfo.vertices.toLocaleString()} VERTICES` : neuralAsset ? "RIGGED GLB LOADING" : `${capture.rig.parts.length} ROUGH REGIONS`}</span></div>
             </div>
           ) : null}
 
@@ -701,7 +702,7 @@ export default function Home() {
             </div> : null}
             {neuralBusy ? <div className="neural-progress" role="status" onPointerDown={(event) => event.stopPropagation()}><span>ANIGEN · RIGGED 3D</span><b>{neuralProgress.message}</b><div><i style={{ width: `${Math.round(neuralProgress.progress * 100)}%` }} /></div><small>{Math.round(neuralProgress.progress * 100)}% · PUBLIC GPU</small></div> : null}
             <div className="camera-hud"><span><i /> {cameraState === "active" ? "LIVE CAMERA · LOCAL" : neuralAsset && character.created ? `ANIGEN RIG · ${riggedAssetInfo?.bones ?? "…"} BONES` : character.created ? "ROUGH PRIVATE PREVIEW" : "SAFE DEMO ROOM"}</span><strong>{immersiveAR ? "WEBXR READY" : "CAMERA AR FALLBACK"}</strong></div>
-            {character.created ? <div className="story-caption"><span>{character.storyTitle || "LIVE MOMENT"}</span><p>{storyCaption}</p></div> : null}
+            {character.created && storyCaption ? <div className="story-caption"><span>{character.storyTitle || "LIVE MOMENT"}</span><p>{storyCaption}</p></div> : null}
             {cameraState === "denied" || cameraState === "unavailable" ? <div className="camera-message"><b>CAMERA OPTIONAL</b><p>The demo doodle still proves the complete WebMCP and 3D workflow.</p></div> : null}
           </div>
 

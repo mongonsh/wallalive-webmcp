@@ -6,7 +6,7 @@ import { DecalGeometry } from "three/addons/geometries/DecalGeometry.js";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { MarchingCubes } from "three/addons/objects/MarchingCubes.js";
 import type { CharacterRig, ContourPoint, SemanticPart, SkeletonPoint } from "../lib/drawing";
-import { disposeObject, prepareNeuralCharacter, type NeuralRigMap, type RiggedAssetInfo } from "../lib/rigged-model";
+import { disposeObject, prepareNeuralCharacter, type NeuralRigMap, type NeuralSemanticMap, type RiggedAssetInfo } from "../lib/rigged-model";
 
 export type CharacterAction = "idle" | "wave" | "dance" | "hop" | "walk" | "hide" | "spin";
 
@@ -358,7 +358,7 @@ export const ARStage = forwardRef<ARStageHandle, ARStageProps>(function ARStage(
             disposeObject(gltf.scene);
             return;
           }
-          const prepared = prepareNeuralCharacter(gltf.scene);
+          const prepared = prepareNeuralCharacter(gltf.scene, rig ?? undefined);
           characterRoot.add(prepared.character);
           onNeuralAssetInfo(prepared.info);
         },
@@ -401,6 +401,7 @@ export const ARStage = forwardRef<ARStageHandle, ARStageProps>(function ARStage(
       const articulated = root.getObjectByName("wallalive-semantic-character");
       const neural = root.getObjectByName("wallalive-neural-character");
       const neuralRig = neural?.userData.wallaliveRig as NeuralRigMap | undefined;
+      const neuralSemantic = neural?.userData.wallaliveSemantic as NeuralSemanticMap | undefined;
       neuralRig?.all.forEach((bone) => {
         const base = bone.userData.wallaliveBaseQuaternion as THREE.Quaternion | undefined;
         if (base) bone.quaternion.copy(base);
@@ -417,8 +418,11 @@ export const ARStage = forwardRef<ARStageHandle, ARStageProps>(function ARStage(
         const node = articulated?.getObjectByName(`rig-${part.id}`);
         if (node) node.scale.y = Math.max(0.12, 1 - blink * 0.88);
       });
+      [neuralSemantic?.eyeLeft, neuralSemantic?.eyeRight, neuralSemantic?.eyeCenter, neuralSemantic?.pupilLeft, neuralSemantic?.pupilRight, neuralSemantic?.pupilCenter]
+        .forEach((node) => { if (node) node.scale.y = Math.max(0.12, 1 - blink * 0.88); });
       const mouth = articulated?.getObjectByName("rig-mouth");
       if (mouth) mouth.scale.y = currentAction === "idle" ? 1 : 1 + Math.abs(Math.sin(elapsed * 5)) * 0.42;
+      if (neuralSemantic?.mouth) neuralSemantic.mouth.scale.y = currentAction === "idle" ? 1 : 1 + Math.abs(Math.sin(elapsed * 5)) * 0.42;
 
       if (currentAction === "wave") {
         const arm = articulated?.getObjectByName("rig-arm-right") ?? articulated?.getObjectByName("rig-arm-left");

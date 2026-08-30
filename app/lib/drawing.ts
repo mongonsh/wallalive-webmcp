@@ -766,9 +766,93 @@ export function inferSemanticRig(
 
   const eyeResult = findPair(faceCandidates);
   const eyePair = eyeResult.pair;
-  if (eyePair) addPairedRegion("eye", eyePair, clamp(0.72 + eyeResult.score * 0.08, 0.68, 0.96));
+  const eyeAssignments: Array<{ region: SemanticRegionCandidate; side: SemanticSide; partId: string }> = [];
+  if (eyePair) {
+    addPairedRegion("eye", eyePair, clamp(0.72 + eyeResult.score * 0.08, 0.68, 0.96));
+    eyeAssignments.push(
+      { region: eyePair[0], side: "left", partId: "eye-left" },
+      { region: eyePair[1], side: "right", partId: "eye-right" },
+    );
+  } else {
+    // Profiles, cyclops characters, and asymmetric creatures can legitimately
+    // contain one visible eye. Require it to be in the upper face band so a
+    // centered mouth or decoration is not silently relabeled as an eye.
+    const singleEye = faceCandidates.filter((region) => relativeY(region) > 0.5)
+      .sort((a, b) => {
+        const score = (region: SemanticRegionCandidate) => relativeY(region) * 1.8
+          - Math.abs(region.x - root.x) / bodyWidth * 0.45
+          + Math.min(region.width, region.height) / Math.max(bodyWidth, bodyHeight);
+        return score(b) - score(a);
+      })[0];
+    if (singleEye) {
+      const side: SemanticSide = singleEye.x < root.x - bodyWidth * 0.08
+        ? "left"
+        : singleEye.x > root.x + bodyWidth * 0.08 ? "right" : "center";
+      const partId = `eye-${side}`;
+      parts.push({
+        id: partId,
+        kind: "eye",
+        side,
+        parentId: "body",
+        center: { x: singleEye.x, y: singleEye.y, z: 0 },
+        size: {
+          x: clamp(singleEye.width, bodyWidth * 0.035, bodyWidth * 0.24),
+          y: clamp(singleEye.height, bodyHeight * 0.025, bodyHeight * 0.2),
+          z: Math.min(singleEye.width, singleEye.height) * 0.18,
+        },
+        rotation: singleEye.rotation ?? 0,
+        color: singleEye.color,
+        confidence: 0.67,
+        source: "image-region",
+        outline: singleEye.outline,
+      });
+      usedRegions.add(singleEye.id);
+      eyeAssignments.push({ region: singleEye, side, partId });
+    }
+  }
 
-  const eyeY = eyePair ? (eyePair[0].y + eyePair[1].y) / 2 : contourBounds.minY + bodyHeight * 0.64;
+  // A pupil is only accepted when a separate ink component sits inside a
+  // detected eye. This keeps the detector faithful to the drawing instead of
+  // inventing pupils for dot eyes or closed eyelids.
+  if (eyeAssignments.length) {
+    eyeAssignments.forEach(({ region: eye, side, partId }) => {
+      const pupil = regions.filter((region) => !usedRegions.has(region.id)
+        && region.width <= eye.width * 0.72
+        && region.height <= eye.height * 0.72
+        && Math.abs(region.x - eye.x) <= Math.max(eye.width * 0.42, bodyWidth * 0.018)
+        && Math.abs(region.y - eye.y) <= Math.max(eye.height * 0.42, bodyHeight * 0.018))
+        .sort((a, b) => {
+          const score = (region: SemanticRegionCandidate) => Math.hypot(
+            (region.x - eye.x) / Math.max(0.001, eye.width),
+            (region.y - eye.y) / Math.max(0.001, eye.height),
+          ) + region.width * region.height / Math.max(0.001, eye.width * eye.height) * 0.2;
+          return score(a) - score(b);
+        })[0];
+      if (!pupil) return;
+      parts.push({
+        id: `pupil-${side}`,
+        kind: "pupil",
+        side,
+        parentId: partId,
+        center: { x: pupil.x, y: pupil.y, z: 0 },
+        size: {
+          x: clamp(pupil.width, bodyWidth * 0.012, eye.width * 0.72),
+          y: clamp(pupil.height, bodyHeight * 0.012, eye.height * 0.72),
+          z: Math.min(pupil.width, pupil.height) * 0.24,
+        },
+        rotation: pupil.rotation ?? 0,
+        color: pupil.color,
+        confidence: 0.9,
+        source: "image-region",
+        outline: pupil.outline,
+      });
+      usedRegions.add(pupil.id);
+    });
+  }
+
+  const eyeY = eyeAssignments.length
+    ? eyeAssignments.reduce((sum, assignment) => sum + assignment.region.y, 0) / eyeAssignments.length
+    : contourBounds.minY + bodyHeight * 0.64;
   const cheekResult = findPair(faceCandidates.filter((region) => !usedRegions.has(region.id)
     && region.y < eyeY - bodyHeight * 0.055
     && region.y > contourBounds.minY + bodyHeight * 0.25), eyeY - bodyHeight * 0.16);
@@ -1237,19 +1321,17 @@ export function createDemoDoodle(): DrawingExtraction {
   return extractDrawingFromCanvas(preview, { x: 208 / preview.width, y: 234 / preview.height });
 }
 
-export function createAniGenDemoDrawing(): DrawingExtraction {
-  const fallback = createDemoDoodle();
-  return {
-    ...fallback,
-    textureUrl: "/anigen-demo-input.png",
-    previewUrl: "/anigen-demo-input.png",
-    analysis: {
-      ...fallback.analysis,
-      dominantColor: "#f15b2a",
-      secondaryColor: "#173653",
-      aspectRatio: 0.72,
-      shapeHint: "tall",
-      edgeEnergy: "bold",
-    },
-  };
+export async function extractDrawingFromImageUrl(imageUrl: string, target: CaptureTarget = { x: 0.5, y: 0.5 }): Promise<DrawingExtraction> {
+  const image = new Image();
+  image.decoding = "async";
+  await new Promise<void>((resolve, reject) => {
+    image.onload = () => resolve();
+    image.onerror = () => reject(new Error("The drawing image could not be loaded."));
+    image.src = imageUrl;
+  });
+  return extractDrawingFromSource(image, image.naturalWidth, image.naturalHeight, target);
+}
+
+export async function createAniGenDemoDrawing(): Promise<DrawingExtraction> {
+  return extractDrawingFromImageUrl("/anigen-demo-input.png", { x: 0.5, y: 0.47 });
 }
