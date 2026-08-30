@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import { extractMedialSkeleton, scoreDrawingCandidate } from "../app/lib/drawing.ts";
 
 async function render() {
   const workerUrl = new URL("../dist/server/index.js", import.meta.url);
@@ -57,6 +58,7 @@ test("registers eight strict WebMCP tools without camera authority", async () =>
   assert.match(page, /cameraFeedExposed: false/);
   assert.match(page, /neuralModelUsed: false/);
   assert.match(page, /volumeResolution: 64/);
+  assert.match(page, /MEDIAL NODES/);
 });
 
 test("implements local drawing extraction and real WebXR hit testing", async () => {
@@ -68,12 +70,16 @@ test("implements local drawing extraction and real WebXR hit testing", async () 
   assert.match(drawing, /connectedComponents/);
   assert.match(drawing, /recoverSilhouette/);
   assert.match(drawing, /ramerDouglasPeucker/);
+  assert.match(drawing, /scoreDrawingCandidate/);
+  assert.match(drawing, /extractMedialSkeleton/);
+  assert.match(drawing, /Tap the drawing/);
   assert.match(drawing, /Float32Array/);
   assert.match(drawing, /Math\.SQRT2/);
   assert.doesNotMatch(drawing, /fetch\(|XMLHttpRequest|WebSocket/);
   assert.match(stage, /MarchingCubes/);
-  assert.match(stage, /signedDistanceToContour/);
-  assert.match(stage, /pointInPolygon/);
+  assert.match(stage, /medial-skeleton-sphere-union/);
+  assert.match(stage, /point\.radius - Math\.hypot/);
+  assert.match(stage, /volume\.field\.fill/);
   assert.match(stage, /computeVertexNormals/);
   assert.match(stage, /positions\.setZ/);
   assert.doesNotMatch(stage, /ExtrudeGeometry|SphereGeometry|CapsuleGeometry|TorusGeometry/);
@@ -81,4 +87,62 @@ test("implements local drawing extraction and real WebXR hit testing", async () 
   assert.match(stage, /requestSession\("immersive-ar"/);
   assert.match(stage, /requiredFeatures: \["hit-test"\]/);
   assert.match(stage, /getHitTestResults/);
+});
+
+test("prefers a targeted line-art character over dense lower-frame clutter", () => {
+  const redCharacter = {
+    pixelCount: 1800,
+    minX: 105,
+    minY: 150,
+    maxX: 285,
+    maxY: 385,
+    averageChroma: 92,
+  };
+  const darkForegroundObject = {
+    pixelCount: 15000,
+    minX: 145,
+    minY: 365,
+    maxX: 335,
+    maxY: 605,
+    averageChroma: 7,
+  };
+  const characterScore = scoreDrawingCandidate(redCharacter, 480, 640, { x: 0.42, y: 0.47 });
+  const clutterScore = scoreDrawingCandidate(darkForegroundObject, 480, 640, { x: 0.42, y: 0.47 });
+  assert.ok(characterScore > clutterScore * 20, `character ${characterScore} should decisively beat clutter ${clutterScore}`);
+});
+
+test("prefers the character over a rectangular paper border", () => {
+  const characterScore = scoreDrawingCandidate({
+    pixelCount: 2250,
+    minX: 118,
+    minY: 146,
+    maxX: 304,
+    maxY: 405,
+    averageChroma: 104,
+    edgeFraction: 0.18,
+  }, 480, 640, { x: 0.43, y: 0.45 });
+  const paperBorderScore = scoreDrawingCandidate({
+    pixelCount: 4300,
+    minX: 43,
+    minY: 74,
+    maxX: 422,
+    maxY: 468,
+    averageChroma: 22,
+    edgeFraction: 0.91,
+  }, 480, 640, { x: 0.43, y: 0.45 });
+  assert.ok(characterScore > paperBorderScore * 20, `character ${characterScore} should decisively beat paper border ${paperBorderScore}`);
+});
+
+test("extracts a radius-bearing medial skeleton from a filled character body", () => {
+  const size = 41;
+  const mask = new Uint8Array(size * size);
+  for (let y = 0; y < size; y += 1) {
+    for (let x = 0; x < size; x += 1) {
+      if (((x - 20) / 15) ** 2 + ((y - 20) / 11) ** 2 <= 1) mask[y * size + x] = 1;
+    }
+  }
+  const skeleton = extractMedialSkeleton(mask, size, size);
+  assert.ok(skeleton.length >= 3);
+  assert.ok(Math.max(...skeleton.map((point) => point.radius)) > 10);
+  assert.ok(skeleton.every((point) => mask[point.y * size + point.x] === 1));
 });

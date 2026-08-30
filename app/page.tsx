@@ -3,7 +3,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ARStage, type ARStageHandle, type CharacterAction } from "./components/ARStage";
-import { createDemoDoodle, extractDrawingFromVideo, type DrawingExtraction } from "./lib/drawing";
+import { createDemoDoodle, extractDrawingFromVideo, type CaptureTarget, type DrawingExtraction } from "./lib/drawing";
 
 type Actor = "CHILD" | "BROWSER AGENT" | "WALLALIVE";
 type AppStep = "ready" | "camera" | "captured" | "alive";
@@ -37,7 +37,7 @@ type WebMCPTool = {
   description: string;
   inputSchema: Record<string, unknown>;
   annotations: { readOnlyHint: boolean; untrustedContentHint: boolean };
-  execute: (input: Record<string, unknown>, options: { signal: AbortSignal }) => Promise<unknown> | unknown;
+  execute: (input: Record<string, unknown>, options?: { signal?: AbortSignal }) => Promise<unknown> | unknown;
 };
 
 declare global {
@@ -127,6 +127,7 @@ export default function Home() {
   const [agentLine, setAgentLine] = useState("Show me a drawing and I’ll help it find a personality.");
   const [storyCaption, setStoryCaption] = useState("The room is waiting for a new friend.");
   const [demoRunning, setDemoRunning] = useState(false);
+  const [captureTarget, setCaptureTarget] = useState<CaptureTarget>({ x: 0.5, y: 0.48 });
 
   const record = useCallback((actor: Actor, action: string, detail: string, toolName?: string) => {
     const item: Activity = { id: makeId(), time: timeLabel(), actor, action, detail, toolName };
@@ -160,6 +161,7 @@ export default function Home() {
       return;
     }
     setCameraState("requesting");
+    setCaptureTarget({ x: 0.5, y: 0.48 });
     setNotice("Choose Allow to point WallAlive at a drawing.");
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -173,7 +175,7 @@ export default function Home() {
       }
       setCameraState("active");
       setStep("camera");
-      setNotice("Camera is live locally. Center one drawing inside the dotted frame.");
+      setNotice("Camera is live locally. Tap the character body to target it, then capture.");
       record("CHILD", "Opened the camera", "Video stays on this device and is never exposed as a WebMCP tool.");
     } catch (error) {
       setCameraState("denied");
@@ -193,11 +195,11 @@ export default function Home() {
   const captureDrawing = useCallback(() => {
     if (!videoRef.current) return;
     try {
-      setDrawing(extractDrawingFromVideo(videoRef.current), "camera");
+      setDrawing(extractDrawingFromVideo(videoRef.current, captureTarget), "camera");
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "The drawing could not be separated from the wall.");
     }
-  }, [setDrawing]);
+  }, [captureTarget, setDrawing]);
 
   const loadDemoDrawing = useCallback(() => {
     try {
@@ -225,7 +227,7 @@ export default function Home() {
     setStep("alive");
     setAgentLine(`${next.name} feels ${next.personality}. I’ll protect the original colors while we play.`);
     setStoryCaption(`${next.name} lifts away from the wall for the first time.`);
-    record(actor, "Inflated a closed 3D volume", `${next.name} · 64³ signed-distance field · ${drawing.contour.length} contour points · inflation ${next.inflation.toFixed(2)}.`, toolName);
+    record(actor, "Built a skeleton-driven 3D body", `${next.name} · ${drawing.skeleton.length} medial nodes · 64³ sphere-union field · inflation ${next.inflation.toFixed(2)}.`, toolName);
     return next;
   }, [commitCharacter, record]);
 
@@ -294,12 +296,14 @@ export default function Home() {
     drawingApproved: Boolean(captureRef.current),
     drawingAnalysis: captureRef.current?.analysis ?? null,
     reconstruction: captureRef.current ? {
-      method: "Teddy-style silhouette inflation",
-      field: "signed-distance implicit surface",
+      segmentation: "target-aware line-art scoring with dense-clutter and border rejection",
+      method: "medial skeleton with local-radius sphere union",
+      field: "skeleton-driven implicit surface",
       polygonizer: "Marching Cubes",
       volumeResolution: 64,
       topology: "closed rounded front, sides, and back",
       contourPoints: captureRef.current.contour.length,
+      skeletonPoints: captureRef.current.skeleton.length,
       inflation: characterRef.current.inflation,
       neuralModelUsed: false,
       neuralUpgradePath: "Stable Fast 3D or Hunyuan3D requires a configured GPU inference service",
@@ -319,6 +323,7 @@ export default function Home() {
     const ok = (payload: Record<string, unknown>) => ({ ok: true, ...payload });
     const fail = (error: unknown) => ({ ok: false, error: error instanceof Error ? error.message : "Tool execution failed." });
     const guard = (signal: AbortSignal) => { if (signal.aborted) throw new DOMException("Tool call cancelled", "AbortError"); };
+    const executionSignal = (options?: { signal?: AbortSignal }) => options?.signal ?? controller.signal;
     const tools: WebMCPTool[] = [
       {
         name: "inspect_wall_scene",
@@ -326,12 +331,12 @@ export default function Home() {
         description: "Read semantic details about the human-approved drawing, character, AR capability, and privacy boundary. Never returns camera frames or image data.",
         inputSchema: { ...base, properties: {} },
         annotations: { readOnlyHint: true, untrustedContentHint: true },
-        execute: async (_input, { signal }) => { guard(signal); return ok({ scene: inspectScene() }); },
+        execute: async (_input, options) => { const signal = executionSignal(options); guard(signal); return ok({ scene: inspectScene() }); },
       },
       {
         name: "reconstruct_volumetric_character",
         title: "Reconstruct approved drawing as a volume",
-        description: "Build a closed Teddy-style signed-distance volume from the current human-approved silhouette, with a rounded front, sides, and back. This local deterministic tool is not a neural inference service and cannot open or capture the camera.",
+        description: "Build a closed 3D body from the human-approved drawing's recovered silhouette and medial skeleton. Local-radius spheres follow the skeleton, then Marching Cubes creates the front, sides, and back. This tool cannot open or capture the camera.",
         inputSchema: {
           ...base,
           properties: {
@@ -343,7 +348,7 @@ export default function Home() {
           required: ["name", "personality", "accent"],
         },
         annotations: { readOnlyHint: false, untrustedContentHint: true },
-        execute: async (input, { signal }) => { try { guard(signal); return ok({ character: createCharacter(input, "BROWSER AGENT", "reconstruct_volumetric_character") }); } catch (error) { return fail(error); } },
+        execute: async (input, options) => { const signal = executionSignal(options); try { guard(signal); return ok({ character: createCharacter(input, "BROWSER AGENT", "reconstruct_volumetric_character") }); } catch (error) { return fail(error); } },
       },
       {
         name: "set_character_personality",
@@ -351,7 +356,7 @@ export default function Home() {
         description: "Change how the character is described and performed without altering the child's captured artwork.",
         inputSchema: { ...base, properties: { personality: { type: "string", minLength: 1, maxLength: 120 } }, required: ["personality"] },
         annotations: { readOnlyHint: false, untrustedContentHint: true },
-        execute: async (input, { signal }) => { try { guard(signal); return ok({ character: setPersonality(stringValue(input.personality), "BROWSER AGENT", "set_character_personality") }); } catch (error) { return fail(error); } },
+        execute: async (input, options) => { const signal = executionSignal(options); try { guard(signal); return ok({ character: setPersonality(stringValue(input.personality), "BROWSER AGENT", "set_character_personality") }); } catch (error) { return fail(error); } },
       },
       {
         name: "place_character",
@@ -368,7 +373,7 @@ export default function Home() {
           required: ["x", "y", "surface", "scale"],
         },
         annotations: { readOnlyHint: false, untrustedContentHint: true },
-        execute: async (input, { signal }) => { try { guard(signal); return ok({ character: placeCharacter(numberValue(input.x, .5), numberValue(input.y, .5), ["wall", "floor"].includes(String(input.surface)) ? input.surface as "wall" | "floor" : "screen", numberValue(input.scale, 1), "BROWSER AGENT", "place_character") }); } catch (error) { return fail(error); } },
+        execute: async (input, options) => { const signal = executionSignal(options); try { guard(signal); return ok({ character: placeCharacter(numberValue(input.x, .5), numberValue(input.y, .5), ["wall", "floor"].includes(String(input.surface)) ? input.surface as "wall" | "floor" : "screen", numberValue(input.scale, 1), "BROWSER AGENT", "place_character") }); } catch (error) { return fail(error); } },
       },
       {
         name: "animate_character",
@@ -376,7 +381,7 @@ export default function Home() {
         description: "Play one safe visible animation on the created character. Does not navigate, capture, upload, or modify the original drawing.",
         inputSchema: { ...base, properties: { action: { type: "string", enum: ["idle", "wave", "dance", "hop", "walk", "hide", "spin"] }, caption: { type: "string", maxLength: 120 } }, required: ["action"] },
         annotations: { readOnlyHint: false, untrustedContentHint: true },
-        execute: async (input, { signal }) => { try { guard(signal); const action = stringValue(input.action, "idle") as CharacterAction; return ok({ character: animateCharacter(action, "BROWSER AGENT", "animate_character", stringValue(input.caption) || undefined) }); } catch (error) { return fail(error); } },
+        execute: async (input, options) => { const signal = executionSignal(options); try { guard(signal); const action = stringValue(input.action, "idle") as CharacterAction; return ok({ character: animateCharacter(action, "BROWSER AGENT", "animate_character", stringValue(input.caption) || undefined) }); } catch (error) { return fail(error); } },
       },
       {
         name: "recolor_character",
@@ -384,7 +389,7 @@ export default function Home() {
         description: "Change only the generated 3D solid edge accent. The child's original drawing pixels remain unchanged.",
         inputSchema: { ...base, properties: { accent: { type: "string", pattern: "^#[0-9a-fA-F]{6}$" } }, required: ["accent"] },
         annotations: { readOnlyHint: false, untrustedContentHint: true },
-        execute: async (input, { signal }) => { try { guard(signal); return ok({ character: recolorCharacter(stringValue(input.accent), "BROWSER AGENT", "recolor_character") }); } catch (error) { return fail(error); } },
+        execute: async (input, options) => { const signal = executionSignal(options); try { guard(signal); return ok({ character: recolorCharacter(stringValue(input.accent), "BROWSER AGENT", "recolor_character") }); } catch (error) { return fail(error); } },
       },
       {
         name: "tell_character_story",
@@ -413,7 +418,7 @@ export default function Home() {
           required: ["title", "beats"],
         },
         annotations: { readOnlyHint: false, untrustedContentHint: true },
-        execute: async (input, { signal }) => { try { guard(signal); const beats = Array.isArray(input.beats) ? input.beats.filter(isRecord) : []; return ok({ story: await runStory(stringValue(input.title), beats, "BROWSER AGENT", "tell_character_story", signal), character: characterRef.current }); } catch (error) { return fail(error); } },
+        execute: async (input, options) => { const signal = executionSignal(options); try { guard(signal); const beats = Array.isArray(input.beats) ? input.beats.filter(isRecord) : []; return ok({ story: await runStory(stringValue(input.title), beats, "BROWSER AGENT", "tell_character_story", signal), character: characterRef.current }); } catch (error) { return fail(error); } },
       },
       {
         name: "list_activity",
@@ -421,7 +426,7 @@ export default function Home() {
         description: "Read recent attributed scene actions. Camera pixels and captured drawing data are intentionally excluded.",
         inputSchema: { ...base, properties: { limit: { type: "number", minimum: 1, maximum: 30 } } },
         annotations: { readOnlyHint: true, untrustedContentHint: true },
-        execute: async (input, { signal }) => { guard(signal); const limit = Math.min(30, Math.max(1, numberValue(input.limit, 12))); return ok({ activity: activityRef.current.slice(0, limit), cameraDataIncluded: false }); },
+        execute: async (input, options) => { const signal = executionSignal(options); guard(signal); const limit = Math.min(30, Math.max(1, numberValue(input.limit, 12))); return ok({ activity: activityRef.current.slice(0, limit), cameraDataIncluded: false }); },
       },
     ];
 
@@ -441,7 +446,7 @@ export default function Home() {
       setAgentLine("1 / 4 · I can see the approved shape and colors—but not a live camera feed.");
       await wait(550);
       createCharacter({ name: "Pip", personality: "brave on the outside, shy on the inside", accent: "#5fc7df", inflation: 1.12 }, "BROWSER AGENT", "reconstruct_volumetric_character");
-      setAgentLine("2 / 4 · A signed-distance field inflates Pip into a closed volume—not a cutout.");
+      setAgentLine("2 / 4 · Medial bones and local radii build Pip’s closed 3D body—not a cutout.");
       await wait(700);
       placeCharacter(.68, .53, "wall", 1, "BROWSER AGENT", "place_character");
       setAgentLine("3 / 4 · The agent places Pip without controlling the camera.");
@@ -467,12 +472,18 @@ export default function Home() {
   }, [record]);
 
   const handleStageClick = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
-    if (!characterRef.current.created) return;
     const bounds = event.currentTarget.getBoundingClientRect();
     const x = (event.clientX - bounds.left) / bounds.width;
     const y = (event.clientY - bounds.top) / bounds.height;
+    if (cameraState === "active") {
+      const target = { x: Math.min(0.92, Math.max(0.08, x)), y: Math.min(0.84, Math.max(0.09, y)) };
+      setCaptureTarget(target);
+      setNotice("Character targeted. Capture will reject paper edges, text, and dense foreground clutter.");
+      return;
+    }
+    if (!characterRef.current.created) return;
     placeCharacter(x, y, "screen", characterRef.current.scale, "CHILD");
-  }, [placeCharacter]);
+  }, [cameraState, placeCharacter]);
 
   const handleARCapability = useCallback((supported: boolean) => {
     setImmersiveAR(supported);
@@ -517,8 +528,13 @@ export default function Home() {
 
           {capture ? (
             <div className="drawing-fingerprint">
-              <div className="drawing-thumb"><img src={capture.textureUrl} alt="Locally isolated drawing" /></div>
-              <div><p className="kicker">DRAWING DNA</p><strong>{capture.analysis.shapeHint} · {capture.analysis.edgeEnergy}</strong><span><i style={{ background: capture.analysis.dominantColor }} /><i style={{ background: capture.analysis.secondaryColor }} /> {capture.analysis.coveragePercent}% INK</span></div>
+              <div className="drawing-thumb">
+                <img src={capture.textureUrl} alt="Locally isolated drawing" />
+                <svg viewBox="0 0 100 100" aria-hidden="true">
+                  {capture.skeleton.map((point, index) => <circle key={index} cx={(point.x / 1.4 + 0.5) * 100} cy={(0.5 - point.y / 1.4) * 100} r={Math.max(1.1, point.radius / 1.4 * 100)} />)}
+                </svg>
+              </div>
+              <div><p className="kicker">DRAWING DNA</p><strong>{capture.analysis.shapeHint} · {capture.analysis.edgeEnergy}</strong><span><i style={{ background: capture.analysis.dominantColor }} /><i style={{ background: capture.analysis.secondaryColor }} /> {capture.analysis.coveragePercent}% INK · {capture.analysis.skeletonPoints} MEDIAL NODES</span></div>
             </div>
           ) : null}
 
@@ -543,8 +559,8 @@ export default function Home() {
             <video ref={videoRef} className={cameraState === "active" ? "camera-video visible" : "camera-video"} autoPlay muted playsInline aria-label="Live local camera preview" />
             {cameraState !== "active" ? <div className="demo-room"><span className="frame-a" /><span className="frame-b" /><span className="shelf" /><span className="plant" /><span className="baseboard" /></div> : null}
             {capture && cameraState !== "active" ? <img className="captured-room" src={capture.previewUrl} alt="Approved drawing preview" /> : null}
-            {step === "camera" ? <div className="capture-guide"><span /><b>KEEP ONE DRAWING INSIDE</b></div> : null}
-            <ARStage ref={stageRef} textureUrl={capture?.textureUrl ?? null} depthUrl={capture?.depthUrl ?? null} contour={capture?.contour ?? null} action={character.action} accent={character.accent} inflation={character.inflation} visible={character.created} onCapability={handleARCapability} onPlaced={handleARPlaced} />
+            {step === "camera" ? <><div className="capture-guide"><span /><b>TAP CHARACTER · THEN CAPTURE</b></div><div className="capture-target" style={{ left: `${captureTarget.x * 100}%`, top: `${captureTarget.y * 100}%` }}><i /></div></> : null}
+            <ARStage ref={stageRef} textureUrl={capture?.textureUrl ?? null} skeleton={capture?.skeleton ?? null} action={character.action} accent={character.accent} inflation={character.inflation} visible={character.created} onCapability={handleARCapability} onPlaced={handleARPlaced} />
             <div className="camera-hud"><span><i /> {cameraState === "active" ? "LIVE CAMERA · LOCAL" : character.created ? "CLOSED 3D VOLUME LIVE" : "SAFE DEMO ROOM"}</span><strong>{immersiveAR ? "WEBXR READY" : "CAMERA AR FALLBACK"}</strong></div>
             {character.created ? <div className="story-caption"><span>{character.storyTitle || "LIVE MOMENT"}</span><p>{storyCaption}</p></div> : null}
             {cameraState === "denied" || cameraState === "unavailable" ? <div className="camera-message"><b>CAMERA OPTIONAL</b><p>The demo doodle still proves the complete WebMCP and 3D workflow.</p></div> : null}

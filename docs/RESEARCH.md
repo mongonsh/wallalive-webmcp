@@ -10,14 +10,19 @@ Igarashi, Matsuoka, and Tanaka’s SIGGRAPH 1999 paper [Teddy: A Sketching Inter
 
 WallAlive implements that family of geometry locally:
 
-1. Segment one human-approved drawing and recover a closed silhouette.
-2. Trace and simplify its contour.
-3. Compute a two-pass interior distance transform.
-4. Use the local interior distance as the front/back radius of a 64³ signed-distance field.
-5. Polygonize the zero level set with Three.js Marching Cubes.
-6. Curve the original drawing over the generated front surface and recompute its vertex normals.
+1. Build an adaptive ink mask from chroma, darkness, and local contrast instead of treating every global background-color change as ink.
+2. Score connected line-art candidates against the child’s tap while penalizing dense lower-frame clutter, extreme aspect ratios, frame edges, and rectangular paper borders.
+3. Morphologically close small stroke gaps and recover the chosen closed silhouette by outside flood fill.
+4. Compute a two-pass chamfer distance transform inside the silhouette.
+5. Extract medial-axis ridges and retain non-redundant maximal disks; each retained node stores its 2D center and local radius.
+6. Lift every disk into a 3D sphere and take the maximum of `radius - distance(x, y, z)` in a 64³ implicit field.
+7. Polygonize the zero level set with Three.js Marching Cubes, then curve the original drawing across the sphere-union front and recompute its normals.
 
-The result is one closed implicit volume. A rotation exposes different front, side, and back geometry. It is not a constant-depth extrusion.
+The result is one closed implicit volume. Narrow silhouette regions receive small spheres and wide regions receive large spheres, so a rotation exposes different front, side, and back geometry. It is not a constant-depth extrusion or a cut-out image plane.
+
+Google Research’s [Monster Mash: A Single-View Approach to Casual 3D Modeling and Animation](https://research.google/pubs/monster-mash-a-single-view-approach-to-casual-3d-modeling-and-animation/) validates the same product direction at a more advanced level: it combines 3D inflation with layered deformation so inexperienced users can model and animate organic shapes from one 2D view. WallAlive does not claim Monster Mash’s ARAP-L deformation; it adopts the defensible shared idea that a child’s single-view drawing can become a smooth inflated mesh without a multi-view modeling workflow.
+
+The mesh extraction stage follows the role of Lorensen and Cline’s [Marching Cubes](https://graphics.stanford.edu/courses/cs348a-21-winter/Papers/Marching_Cubes.pdf): converting a sampled scalar field into a triangle surface. In WallAlive, the scalar field is deterministic geometry from medial spheres, not a neural prediction.
 
 ### Neural single-image reconstruction — researched, not falsely claimed
 
@@ -29,7 +34,7 @@ Neither model is loaded by the deployed WallAlive browser app. Running either se
 
 ## WebMCP research applied
 
-WallAlive follows the current [W3C WebMCP Community Group proposal](https://github.com/webmachinelearning/webmcp) and Chrome’s official guidance for the [imperative API](https://developer.chrome.com/docs/ai/webmcp/imperative-api):
+WallAlive follows the current [WebMCP Community Group draft](https://webmachinelearning.github.io/webmcp/) and its official [imperative API explainer](https://github.com/webmachinelearning/webmcp#imperative-tool-registration-documentmodelcontext):
 
 - Register goal-oriented tools with `document.modelContext.registerTool()`.
 - Give every tool a precise description and strict JSON Schema.
@@ -44,4 +49,4 @@ The implementation also follows the official [WebMCP evaluation guidance](https:
 
 ## Honest capability statement
 
-WallAlive performs deterministic single-silhouette volume inference. It creates a real closed polygonal mesh with rounded depth, but it cannot know unseen semantic detail from one drawing. The back is a mathematically generated continuation of the silhouette, not an artist-authored or neural prediction. This tradeoff keeps the current experience fast, session-only, browser-native, reproducible, and private.
+WallAlive performs deterministic single-silhouette volume inference. It creates a real closed polygonal mesh with rounded depth, but it cannot know unseen semantic detail from one drawing. Its “skeleton” is a geometric medial axis with local radii, not a semantic human/animal rig. The back is a mathematically generated continuation of the silhouette, not an artist-authored or neural prediction. This tradeoff keeps the current experience fast, session-only, browser-native, reproducible, and private.

@@ -23,8 +23,8 @@ WallAlive is a shared imagination surface, not a chat box attached to an AR demo
 
 ## The magic loop
 
-1. **Scan:** the child presses **Start camera** and centers a bold drawing.
-2. **Sculpt:** WallAlive isolates the centered ink component, closes small gaps, flood-fills its silhouette, traces and simplifies its contour, computes an interior distance field, and polygonizes a closed implicit surface with Marching Cubes. Wide regions inflate more than narrow ones, creating a rounded front, sides, and back.
+1. **Scan:** the child presses **Start camera**, taps the character, and captures. Local adaptive ink detection preserves vivid or dark strokes while rejecting smooth lighting changes.
+2. **Sculpt:** WallAlive scores line-art candidates against the tap, rejects dense foreground clutter and rectangular paper borders, closes small gaps, and flood-fills the chosen silhouette. A distance transform extracts medial-axis nodes with a local radius at each node. Those disks become overlapping 3D spheres in a 64³ implicit field; Marching Cubes polygonizes their union as a rounded front, sides, and back.
 3. **Play:** a browser agent places the character and directs movements or a four-beat story.
 4. **Enter AR:** supported Android/WebXR devices use surface hit testing; every other modern browser gets the camera-overlay experience.
 
@@ -35,7 +35,7 @@ Press **Play Judge Demo** for a deterministic, camera-free version of the comple
 | Tool | Mode | Purpose |
 | --- | --- | --- |
 | `inspect_wall_scene` | Read | Returns approved drawing semantics, character state, AR capability, and the privacy boundary. |
-| `reconstruct_volumetric_character` | Write | Inflates the human-approved silhouette into a closed 64³ signed-distance volume with a name, personality, accent, and bounded inflation strength. |
+| `reconstruct_volumetric_character` | Write | Converts the approved silhouette’s medial skeleton and local radii into a closed 64³ sphere-union volume with a name, personality, accent, and bounded inflation strength. |
 | `set_character_personality` | Write | Changes performance intent without altering the child’s original pixels. |
 | `place_character` | Write | Places and scales the character at a normalized position in the visible scene. |
 | `animate_character` | Write | Plays one of seven safe visible actions. |
@@ -58,19 +58,22 @@ All tools have strict JSON schemas, `additionalProperties: false`, cancellation 
 | iPhone/iPad and non-WebXR browsers | Full camera-overlay fallback; immersive hit testing is not claimed |
 | No-camera judging | Built-in demo doodle and one-click judge sequence |
 
-WallAlive constructs a genuine closed polygonal 3D surface from the captured silhouette; it does not claim photogrammetry, neural 360° inference, or anatomy that was not drawn. This is a browser-native implementation of the silhouette-inflation family introduced by Teddy. High-contrast closed line art produces the cleanest extraction. See [RESEARCH.md](./docs/RESEARCH.md) for the algorithm decision and neural upgrade boundary.
+WallAlive constructs a genuine closed polygonal 3D surface from the captured silhouette; it does not claim photogrammetry, neural 360° inference, or anatomy that was not drawn. This is a browser-native implementation of the silhouette-inflation family introduced by Teddy and later used for playful single-view modeling in Monster Mash. High-contrast closed line art produces the cleanest extraction. See [RESEARCH.md](./docs/RESEARCH.md) for the algorithm decision and neural upgrade boundary.
 
 ## Architecture
 
 ```text
-human camera gesture
-        │ local ink scoring + connected components
+human camera gesture + tap target
+        │ adaptive ink mask + target-aware candidate scoring
         ▼
-flood-filled silhouette + simplified contour + interior-distance radius map
+clutter/border rejection + flood-filled silhouette
+        │
+        ▼
+medial-axis ridge nodes + local distance radii
         │                     │
         │                     └── WebMCP reads semantic state only
         ▼
-64³ signed-distance field + Marching Cubes ◄── WebMCP reconstruct / place / animate / story
+64³ implicit sphere union + Marching Cubes ◄── WebMCP reconstruct / place / animate / story
         │
         ├── curved original-art front + generated rounded back
         ├── WebXR hit-test placement when supported
@@ -78,7 +81,7 @@ flood-filled silhouette + simplified contour + interior-distance radius map
 ```
 
 - React 19 + TypeScript, built with vinext for Cloudflare/Sites
-- Three.js Marching Cubes mesh plus CPU-curved original-art surface with recomputed normals
+- Three.js Marching Cubes over a medial-skeleton sphere union, plus a CPU-curved original-art surface with recomputed normals
 - WebXR `immersive-ar` session with real-world hit testing
 - `document.modelContext.registerTool()` imperative WebMCP integration
 - One canonical action layer shared by UI controls and tool executors

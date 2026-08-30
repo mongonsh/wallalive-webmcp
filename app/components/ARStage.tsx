@@ -3,7 +3,7 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
 import * as THREE from "three";
 import { MarchingCubes } from "three/addons/objects/MarchingCubes.js";
-import type { ContourPoint } from "../lib/drawing";
+import type { SkeletonPoint } from "../lib/drawing";
 
 export type CharacterAction = "idle" | "wave" | "dance" | "hop" | "walk" | "hide" | "spin";
 
@@ -14,8 +14,7 @@ export type ARStageHandle = {
 
 type ARStageProps = {
   textureUrl: string | null;
-  depthUrl: string | null;
-  contour: ContourPoint[] | null;
+  skeleton: SkeletonPoint[] | null;
   action: CharacterAction;
   accent: string;
   inflation: number;
@@ -35,35 +34,9 @@ type SceneHandles = {
 
 const VOLUME_RESOLUTION = 64;
 
-function pointInPolygon(x: number, y: number, contour: ContourPoint[]) {
-  let inside = false;
-  for (let index = 0, previous = contour.length - 1; index < contour.length; previous = index, index += 1) {
-    const a = contour[index];
-    const b = contour[previous];
-    if ((a.y > y) !== (b.y > y) && x < ((b.x - a.x) * (y - a.y)) / (b.y - a.y) + a.x) inside = !inside;
-  }
-  return inside;
-}
-
-function pointSegmentDistance(x: number, y: number, a: ContourPoint, b: ContourPoint) {
-  const dx = b.x - a.x;
-  const dy = b.y - a.y;
-  const lengthSquared = dx * dx + dy * dy;
-  const along = lengthSquared ? Math.max(0, Math.min(1, ((x - a.x) * dx + (y - a.y) * dy) / lengthSquared)) : 0;
-  return Math.hypot(x - (a.x + along * dx), y - (a.y + along * dy));
-}
-
-function signedDistanceToContour(x: number, y: number, contour: ContourPoint[]) {
-  let distance = Number.POSITIVE_INFINITY;
-  for (let index = 0; index < contour.length; index += 1) {
-    distance = Math.min(distance, pointSegmentDistance(x, y, contour[index], contour[(index + 1) % contour.length]));
-  }
-  return pointInPolygon(x, y, contour) ? distance : -distance;
-}
-
-function buildCharacter(textureUrl: string, depthUrl: string, contour: ContourPoint[], accent: string, inflation: number) {
+function buildCharacter(textureUrl: string, skeleton: SkeletonPoint[], accent: string, inflation: number) {
   const character = new THREE.Group();
-  character.name = "wallalive-teddy-volume";
+  character.name = "wallalive-skeleton-volume";
 
   const volumeMaterial = new THREE.MeshPhysicalMaterial({
     color: accent,
@@ -74,67 +47,68 @@ function buildCharacter(textureUrl: string, depthUrl: string, contour: ContourPo
     side: THREE.DoubleSide,
   });
   const volume = new MarchingCubes(VOLUME_RESOLUTION, volumeMaterial, false, false, 200_000);
-  volume.name = "signed-distance-closed-volume";
+  volume.name = "medial-skeleton-sphere-union";
   volume.isolation = 0;
+  volume.field.fill(-0.12);
   const half = VOLUME_RESOLUTION / 2;
-  for (let y = 0; y < VOLUME_RESOLUTION; y += 1) {
-    const fieldY = (y - half) / half;
-    for (let x = 0; x < VOLUME_RESOLUTION; x += 1) {
-      const fieldX = (x - half) / half;
-      const signedDistance = signedDistanceToContour(fieldX, fieldY, contour);
-      const halfDepth = signedDistance > 0
-        ? Math.min(0.46, Math.max(0.018, Math.pow(signedDistance, 0.58) * 0.62 * inflation))
-        : 0;
-      for (let z = 0; z < VOLUME_RESOLUTION; z += 1) {
-        const fieldZ = (z - half) / half;
-        // Intersection of the 2D signed silhouette and its varying radius makes
-        // one closed implicit surface with a curved front, sides, and back.
-        volume.setCell(x, y, z, Math.min(signedDistance * 1.45, halfDepth - Math.abs(fieldZ)));
+  const cell = 1 / half;
+  const inflatedSkeleton = skeleton.map((point) => ({ ...point, radius: Math.min(0.5, Math.max(0.032, point.radius * inflation)) }));
+  for (const point of inflatedSkeleton) {
+    const reach = point.radius + cell * 1.5;
+    const minX = Math.max(1, Math.floor((point.x - reach) * half + half));
+    const maxX = Math.min(VOLUME_RESOLUTION - 2, Math.ceil((point.x + reach) * half + half));
+    const minY = Math.max(1, Math.floor((point.y - reach) * half + half));
+    const maxY = Math.min(VOLUME_RESOLUTION - 2, Math.ceil((point.y + reach) * half + half));
+    const minZ = Math.max(1, Math.floor(-reach * half + half));
+    const maxZ = Math.min(VOLUME_RESOLUTION - 2, Math.ceil(reach * half + half));
+    for (let z = minZ; z <= maxZ; z += 1) {
+      const fieldZ = (z - half) / half;
+      for (let y = minY; y <= maxY; y += 1) {
+        const fieldY = (y - half) / half;
+        for (let x = minX; x <= maxX; x += 1) {
+          const fieldX = (x - half) / half;
+          const value = point.radius - Math.hypot(fieldX - point.x, fieldY - point.y, fieldZ);
+          if (value > volume.getCell(x, y, z)) volume.setCell(x, y, z, value);
+        }
       }
     }
   }
-  volume.blur(0.18);
+  volume.blur(0.12);
   volume.update();
   volume.castShadow = true;
   volume.receiveShadow = true;
   volume.userData.reconstruction = {
-    method: "Teddy-style signed-distance inflation",
+    method: "medial-skeleton sphere union",
     polygonizer: "Marching Cubes",
     resolution: VOLUME_RESOLUTION,
     topology: "closed",
+    skeletonPoints: skeleton.length,
   };
   character.add(volume);
 
   const textureLoader = new THREE.TextureLoader();
-  Promise.all([textureLoader.loadAsync(textureUrl), textureLoader.loadAsync(depthUrl)]).then(([texture, radiusMap]) => {
+  textureLoader.loadAsync(textureUrl).then((texture) => {
     if (!character.parent) {
       texture.dispose();
-      radiusMap.dispose();
       return;
     }
     texture.colorSpace = THREE.SRGBColorSpace;
     texture.minFilter = THREE.LinearMipmapLinearFilter;
     texture.magFilter = THREE.LinearFilter;
-    const radiusCanvas = document.createElement("canvas");
-    radiusCanvas.width = 512;
-    radiusCanvas.height = 512;
-    const radiusContext = radiusCanvas.getContext("2d", { willReadFrequently: true });
-    if (!radiusContext) throw new Error("The volume-radius map could not be sampled.");
-    radiusContext.drawImage(radiusMap.image as CanvasImageSource, 0, 0, 512, 512);
-    const radiusPixels = radiusContext.getImageData(0, 0, 512, 512).data;
     const frontGeometry = new THREE.PlaneGeometry(1.4, 1.4, 72, 72);
     const positions = frontGeometry.attributes.position;
-    const uvs = frontGeometry.attributes.uv;
-    const displacementScale = Math.min(0.46, 0.42 * inflation);
     for (let index = 0; index < positions.count; index += 1) {
-      const pixelX = Math.round(uvs.getX(index) * 511);
-      const pixelY = Math.round((1 - uvs.getY(index)) * 511);
-      const radius = radiusPixels[(pixelY * 512 + pixelX) * 4] / 255;
-      positions.setZ(index, 0.008 + radius * displacementScale);
+      const x = positions.getX(index);
+      const y = positions.getY(index);
+      let frontDepth = 0;
+      for (const point of inflatedSkeleton) {
+        const distanceSquared = (x - point.x) ** 2 + (y - point.y) ** 2;
+        if (distanceSquared < point.radius ** 2) frontDepth = Math.max(frontDepth, Math.sqrt(point.radius ** 2 - distanceSquared));
+      }
+      positions.setZ(index, 0.008 + frontDepth);
     }
     positions.needsUpdate = true;
     frontGeometry.computeVertexNormals();
-    radiusMap.dispose();
     const frontMaterial = new THREE.MeshPhysicalMaterial({
       map: texture,
       transparent: true,
@@ -159,7 +133,7 @@ function buildCharacter(textureUrl: string, depthUrl: string, contour: ContourPo
 }
 
 export const ARStage = forwardRef<ARStageHandle, ARStageProps>(function ARStage(
-  { textureUrl, depthUrl, contour, action, accent, inflation, visible, onCapability, onPlaced },
+  { textureUrl, skeleton, action, accent, inflation, visible, onCapability, onPlaced },
   ref,
 ) {
   const mountRef = useRef<HTMLDivElement>(null);
@@ -212,7 +186,7 @@ export const ARStage = forwardRef<ARStageHandle, ARStageProps>(function ARStage(
 
     const characterRoot = new THREE.Group();
     scene.add(characterRoot);
-    if (textureUrl && depthUrl && contour && contour.length >= 6) characterRoot.add(buildCharacter(textureUrl, depthUrl, contour, accent, inflation));
+    if (textureUrl && skeleton?.length) characterRoot.add(buildCharacter(textureUrl, skeleton, accent, inflation));
 
     const shadowMaterial = new THREE.MeshBasicMaterial({ color: 0x102927, transparent: true, opacity: 0.2, depthWrite: false });
     const shadow = new THREE.Mesh(new THREE.CircleGeometry(0.64, 64), shadowMaterial);
@@ -324,7 +298,7 @@ export const ARStage = forwardRef<ARStageHandle, ARStageProps>(function ARStage(
       handlesRef.current = null;
       dispose();
     };
-  }, [accent, contour, depthUrl, inflation, onCapability, textureUrl, visible]);
+  }, [accent, inflation, onCapability, skeleton, textureUrl, visible]);
 
   useImperativeHandle(ref, () => ({
     placeNormalized(x: number, y: number, scale = placementRef.current.scale) {

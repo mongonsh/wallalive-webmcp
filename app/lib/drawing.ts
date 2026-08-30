@@ -1,6 +1,18 @@
 export type ShapeHint = "round" | "tall" | "wide" | "spiky";
 
 export type ContourPoint = { x: number; y: number };
+export type SkeletonPoint = { x: number; y: number; radius: number };
+export type CaptureTarget = { x: number; y: number };
+
+export type DrawingCandidateFeatures = {
+  pixelCount: number;
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
+  averageChroma: number;
+  edgeFraction?: number;
+};
 
 export type DrawingAnalysis = {
   dominantColor: string;
@@ -11,13 +23,14 @@ export type DrawingAnalysis = {
   edgeEnergy: "soft" | "scribbly" | "bold";
   sourceWidth: number;
   sourceHeight: number;
+  skeletonPoints: number;
 };
 
 export type DrawingExtraction = {
   textureUrl: string;
-  depthUrl: string;
   previewUrl: string;
   contour: ContourPoint[];
+  skeleton: SkeletonPoint[];
   analysis: DrawingAnalysis;
 };
 
@@ -146,20 +159,69 @@ function connectedComponents(mask: Uint8Array, width: number, height: number) {
   return components;
 }
 
-function chooseDrawing(components: Component[], width: number, height: number) {
-  const viable = components.filter((component) => component.pixels.length >= Math.max(18, width * height * 0.00018));
+export function scoreDrawingCandidate(candidate: DrawingCandidateFeatures, width: number, height: number, target: CaptureTarget = { x: 0.5, y: 0.48 }) {
+  const boxWidth = candidate.maxX - candidate.minX + 1;
+  const boxHeight = candidate.maxY - candidate.minY + 1;
+  const boxArea = boxWidth * boxHeight;
+  const frameArea = width * height;
+  const areaRatio = boxArea / frameArea;
+  const density = candidate.pixelCount / Math.max(1, boxArea);
+  const aspect = boxWidth / Math.max(1, boxHeight);
+  const centerX = (candidate.minX + candidate.maxX) / 2;
+  const centerY = (candidate.minY + candidate.maxY) / 2;
+  const focusX = target.x * width;
+  const focusY = target.y * height;
+  const outsideX = Math.max(candidate.minX - focusX, 0, focusX - candidate.maxX);
+  const outsideY = Math.max(candidate.minY - focusY, 0, focusY - candidate.maxY);
+  const focusDistance = Math.hypot(outsideX, outsideY) / Math.hypot(width, height);
+  const centerDistance = Math.hypot(centerX - focusX, centerY - focusY) / Math.hypot(width, height);
+  const lineStructure = density <= 0.38 ? clamp(density / 0.035, 0.35, 1) : candidate.averageChroma > 30 ? 0.62 : 0.06;
+  const aspectPenalty = aspect > 3.2 || aspect < 0.24 ? 0.08 : aspect > 2.25 || aspect < 0.38 ? 0.45 : 1;
+  const sizePenalty = areaRatio > 0.46 ? 0.08 : areaRatio > 0.32 ? 0.38 : areaRatio < 0.0025 ? 0.2 : 1;
+  const lowerClutterPenalty = centerY / height > 0.82 ? 0.07 : 1;
+  const frameEdgePenalty = candidate.minX < width * 0.045 || candidate.maxX > width * 0.955 || candidate.minY < height * 0.07 || candidate.maxY > height * 0.88 ? 0.22 : 1;
+  const rectangularBorderPenalty = (candidate.edgeFraction ?? 0) > 0.78 ? 0.04 : (candidate.edgeFraction ?? 0) > 0.62 ? 0.24 : 1;
+  const colorBoost = 0.82 + Math.min(1.25, candidate.averageChroma / 72);
+  const targetAffinity = 1 / (0.18 + focusDistance * 7 + centerDistance * 0.85);
+  return Math.pow(boxArea, 0.62) * lineStructure * aspectPenalty * sizePenalty * lowerClutterPenalty * frameEdgePenalty * rectangularBorderPenalty * colorBoost * targetAffinity;
+}
+
+function candidateFeatures(component: Component, pixels: Uint8ClampedArray, width: number): DrawingCandidateFeatures {
+  let chroma = 0;
+  let edgePixels = 0;
+  const edgeBand = Math.max(2, Math.round(Math.min(component.maxX - component.minX, component.maxY - component.minY) * 0.025));
+  for (const index of component.pixels) {
+    const rgba = index * 4;
+    const red = pixels[rgba];
+    const green = pixels[rgba + 1];
+    const blue = pixels[rgba + 2];
+    chroma += Math.max(red, green, blue) - Math.min(red, green, blue);
+    const x = index % width;
+    const y = Math.floor(index / width);
+    if (x - component.minX <= edgeBand || component.maxX - x <= edgeBand || y - component.minY <= edgeBand || component.maxY - y <= edgeBand) edgePixels += 1;
+  }
+  return {
+    pixelCount: component.pixels.length,
+    minX: component.minX,
+    minY: component.minY,
+    maxX: component.maxX,
+    maxY: component.maxY,
+    averageChroma: chroma / Math.max(1, component.pixels.length),
+    edgeFraction: edgePixels / Math.max(1, component.pixels.length),
+  };
+}
+
+function chooseDrawing(components: Component[], pixels: Uint8ClampedArray, width: number, height: number, target: CaptureTarget) {
+  const viable = components.filter((component) => {
+    const boxWidth = component.maxX - component.minX + 1;
+    const boxHeight = component.maxY - component.minY + 1;
+    return component.pixels.length >= Math.max(18, width * height * 0.00018)
+      && boxWidth >= width * 0.035
+      && boxHeight >= height * 0.035;
+  });
   if (!viable.length) return null;
-  const centerX = width / 2;
-  const centerY = height / 2;
-  const diagonal = Math.hypot(width, height);
-  return viable.sort((a, b) => {
-    const score = (component: Component) => {
-      const centerDistance = Math.hypot(component.centerX - centerX, component.centerY - centerY) / diagonal;
-      const span = Math.hypot(component.maxX - component.minX, component.maxY - component.minY);
-      return component.pixels.length * (1 + span / diagonal) / (0.35 + centerDistance * 3.8);
-    };
-    return score(b) - score(a);
-  })[0];
+  return viable.sort((a, b) => scoreDrawingCandidate(candidateFeatures(b, pixels, width), width, height, target)
+    - scoreDrawingCandidate(candidateFeatures(a, pixels, width), width, height, target))[0];
 }
 
 function recoverSilhouette(mask: Uint8Array, width: number, height: number) {
@@ -287,26 +349,11 @@ function contourFromCanvas(canvas: HTMLCanvasElement) {
   return traceContour(mask, sampleSize, sampleSize);
 }
 
-function depthFromTexture(canvas: HTMLCanvasElement) {
-  const depth = document.createElement("canvas");
-  depth.width = canvas.width;
-  depth.height = canvas.height;
-  const context = depth.getContext("2d", { willReadFrequently: true });
-  if (!context) throw new Error("Canvas processing is unavailable in this browser.");
-  context.drawImage(canvas, 0, 0);
-  const image = context.getImageData(0, 0, depth.width, depth.height);
-  const width = depth.width;
-  const height = depth.height;
+function distanceTransform(mask: Uint8Array, width: number, height: number) {
   const distance = new Float32Array(width * height);
   const diagonal = Math.SQRT2;
   const far = width + height;
-
-  // Two-pass chamfer distance transform. The center of a wide silhouette becomes
-  // deeper than a narrow limb or ear: the same visual rule used by Teddy-style
-  // sketch inflation, rather than luminance pretending to be geometry.
-  for (let index = 0; index < distance.length; index += 1) {
-    distance[index] = image.data[index * 4 + 3] > 38 ? far : 0;
-  }
+  for (let index = 0; index < distance.length; index += 1) distance[index] = mask[index] ? far : 0;
   for (let y = 0; y < height; y += 1) {
     for (let x = 0; x < width; x += 1) {
       const index = y * width + x;
@@ -317,7 +364,7 @@ function depthFromTexture(canvas: HTMLCanvasElement) {
       if (x + 1 < width && y > 0) distance[index] = Math.min(distance[index], distance[index - width + 1] + diagonal);
     }
   }
-  let maxDistance = 1;
+  let maxDistance = 0;
   for (let y = height - 1; y >= 0; y -= 1) {
     for (let x = width - 1; x >= 0; x -= 1) {
       const index = y * width + x;
@@ -329,18 +376,58 @@ function depthFromTexture(canvas: HTMLCanvasElement) {
       maxDistance = Math.max(maxDistance, distance[index]);
     }
   }
+  return { distance, maxDistance: Math.max(1, maxDistance) };
+}
 
-  for (let index = 0; index < distance.length; index += 1) {
-    const rgba = index * 4;
-    const alpha = image.data[rgba + 3];
-    const volumeRadius = alpha ? Math.round(Math.pow(distance[index] / maxDistance, 0.58) * 255) : 0;
-    image.data[rgba] = volumeRadius;
-    image.data[rgba + 1] = volumeRadius;
-    image.data[rgba + 2] = volumeRadius;
-    image.data[rgba + 3] = alpha;
+export function extractMedialSkeleton(mask: Uint8Array, width: number, height: number) {
+  const { distance } = distanceTransform(mask, width, height);
+  const candidates: Array<{ x: number; y: number; radius: number }> = [];
+  for (let y = 1; y < height - 1; y += 1) {
+    for (let x = 1; x < width - 1; x += 1) {
+      const index = y * width + x;
+      const radius = distance[index];
+      if (radius < 1.15) continue;
+      const horizontal = radius >= distance[index - 1] && radius >= distance[index + 1]
+        && (radius > distance[index - 1] || radius > distance[index + 1]);
+      const vertical = radius >= distance[index - width] && radius >= distance[index + width]
+        && (radius > distance[index - width] || radius > distance[index + width]);
+      const diagonalA = radius >= distance[index - width - 1] && radius >= distance[index + width + 1];
+      const diagonalB = radius >= distance[index - width + 1] && radius >= distance[index + width - 1];
+      if (horizontal || vertical || (diagonalA && diagonalB)) candidates.push({ x, y, radius });
+    }
   }
-  context.putImageData(image, 0, 0);
-  return depth.toDataURL("image/png");
+  candidates.sort((a, b) => b.radius - a.radius);
+  const skeleton: typeof candidates = [];
+  for (const candidate of candidates) {
+    const contained = skeleton.some((kept) => Math.hypot(candidate.x - kept.x, candidate.y - kept.y) + candidate.radius <= kept.radius + 0.42);
+    const duplicate = skeleton.some((kept) => Math.hypot(candidate.x - kept.x, candidate.y - kept.y) < 1.35 && Math.abs(candidate.radius - kept.radius) < 1.1);
+    if (!contained && !duplicate) skeleton.push(candidate);
+    if (skeleton.length >= 180) break;
+  }
+  if (!skeleton.length) {
+    let best = 0;
+    for (let index = 1; index < distance.length; index += 1) if (distance[index] > distance[best]) best = index;
+    if (distance[best] > 0) skeleton.push({ x: best % width, y: Math.floor(best / width), radius: distance[best] });
+  }
+  return skeleton;
+}
+
+function skeletonFromTexture(canvas: HTMLCanvasElement): SkeletonPoint[] {
+  const size = 96;
+  const sample = document.createElement("canvas");
+  sample.width = size;
+  sample.height = size;
+  const context = sample.getContext("2d", { willReadFrequently: true });
+  if (!context) throw new Error("Canvas processing is unavailable in this browser.");
+  context.drawImage(canvas, 0, 0, size, size);
+  const pixels = context.getImageData(0, 0, size, size).data;
+  const mask = new Uint8Array(size * size);
+  for (let index = 0; index < mask.length; index += 1) mask[index] = pixels[index * 4 + 3] > 38 ? 1 : 0;
+  return extractMedialSkeleton(mask, size, size).map((point) => ({
+    x: Number((((point.x + 0.5) / size - 0.5) * 1.4).toFixed(4)),
+    y: Number(((0.5 - (point.y + 0.5) / size) * 1.4).toFixed(4)),
+    radius: Number(((point.radius / size) * 1.4).toFixed(4)),
+  }));
 }
 
 function classifyShape(width: number, height: number, coverage: number): ShapeHint {
@@ -351,42 +438,64 @@ function classifyShape(width: number, height: number, coverage: number): ShapeHi
   return "round";
 }
 
-export function extractDrawingFromVideo(video: HTMLVideoElement): DrawingExtraction {
-  if (!video.videoWidth || !video.videoHeight) throw new Error("The camera is still focusing. Try capture again in a moment.");
-
+function extractDrawingFromSource(sourceImage: CanvasImageSource, sourceWidth: number, sourceHeight: number, target: CaptureTarget): DrawingExtraction {
   const width = 480;
-  const height = Math.round(width * (video.videoHeight / video.videoWidth));
+  const height = Math.round(width * (sourceHeight / sourceWidth));
   const source = document.createElement("canvas");
   source.width = width;
   source.height = height;
   const context = source.getContext("2d", { willReadFrequently: true });
   if (!context) throw new Error("Canvas processing is unavailable in this browser.");
-  context.drawImage(video, 0, 0, width, height);
+  context.drawImage(sourceImage, 0, 0, width, height);
   const frame = context.getImageData(0, 0, width, height);
   const background = averageBorder(frame.data, width, height);
+  const backgroundChroma = Math.max(background.r, background.g, background.b) - Math.min(background.r, background.g, background.b);
+  const backgroundLightness = (Math.max(background.r, background.g, background.b) + Math.min(background.r, background.g, background.b)) / 2;
   const rawInk = new Uint8Array(width * height);
-  const scanInsetX = Math.round(width * 0.06);
-  const scanInsetY = Math.round(height * 0.06);
+  const scanInsetX = Math.round(width * 0.08);
+  const scanInsetTop = Math.round(height * 0.09);
+  const scanInsetBottom = Math.round(height * 0.16);
 
-  for (let y = scanInsetY; y < height - scanInsetY; y += 1) {
+  for (let y = scanInsetTop; y < height - scanInsetBottom; y += 1) {
     for (let x = scanInsetX; x < width - scanInsetX; x += 1) {
       const pixelIndex = (y * width + x) * 4;
       const pixel = { r: frame.data[pixelIndex], g: frame.data[pixelIndex + 1], b: frame.data[pixelIndex + 2] };
-      if (inkScore(pixel, background) > 54) rawInk[y * width + x] = 1;
+      const maxChannel = Math.max(pixel.r, pixel.g, pixel.b);
+      const minChannel = Math.min(pixel.r, pixel.g, pixel.b);
+      const chroma = maxChannel - minChannel;
+      const lightness = (maxChannel + minChannel) / 2;
+      const sampleDistance = 3;
+      let localContrast = 0;
+      for (const [offsetX, offsetY] of [[-sampleDistance, 0], [sampleDistance, 0], [0, -sampleDistance], [0, sampleDistance]]) {
+        const neighborIndex = ((y + offsetY) * width + x + offsetX) * 4;
+        localContrast = Math.max(localContrast, colorDistance(pixel, {
+          r: frame.data[neighborIndex],
+          g: frame.data[neighborIndex + 1],
+          b: frame.data[neighborIndex + 2],
+        }));
+      }
+      const vividInk = chroma >= Math.max(58, backgroundChroma + 28);
+      const darkInk = lightness <= Math.min(112, backgroundLightness - 30);
+      const contrastedStroke = localContrast >= 20 && inkScore(pixel, background) > 43;
+      if (inkScore(pixel, background) > 54 && (vividInk || darkInk || contrastedStroke)) rawInk[y * width + x] = 1;
     }
   }
 
   const connectedInk = erode(dilate(rawInk, width, height, 2), width, height, 1);
   const components = connectedComponents(connectedInk, width, height);
-  const anchor = chooseDrawing(components, width, height);
-  if (!anchor) throw new Error("I couldn't find one clear drawing. Move closer, center it, and use stronger light.");
+  const anchor = chooseDrawing(components, frame.data, width, height, target);
+  if (!anchor) throw new Error("I couldn't find one clear character outline. Tap the drawing, move closer, and capture again.");
 
   const span = Math.max(anchor.maxX - anchor.minX, anchor.maxY - anchor.minY);
-  const mergeDistance = Math.max(18, span * 0.3);
+  const anchorArea = Math.max(1, (anchor.maxX - anchor.minX + 1) * (anchor.maxY - anchor.minY + 1));
   const selected = components.filter((component) => {
-    const xGap = Math.max(0, anchor.minX - component.maxX, component.minX - anchor.maxX);
-    const yGap = Math.max(0, anchor.minY - component.maxY, component.minY - anchor.maxY);
-    return Math.hypot(xGap, yGap) <= mergeDistance && component.pixels.length >= 10;
+    if (component === anchor) return true;
+    const componentArea = (component.maxX - component.minX + 1) * (component.maxY - component.minY + 1);
+    const withinCharacterBounds = component.centerX >= anchor.minX - span * 0.06
+      && component.centerX <= anchor.maxX + span * 0.06
+      && component.centerY >= anchor.minY - span * 0.06
+      && component.centerY <= anchor.maxY + span * 0.06;
+    return withinCharacterBounds && componentArea <= anchorArea * 0.24 && component.pixels.length >= 8;
   });
   let minX = Math.min(...selected.map((component) => component.minX));
   let minY = Math.min(...selected.map((component) => component.minY));
@@ -453,13 +562,18 @@ export function extractDrawingFromVideo(video: HTMLVideoElement): DrawingExtract
   const dominant = inkPixels ? { r: colorR / inkPixels, g: colorG / inkPixels, b: colorB / inkPixels } : background;
   const coverage = inkPixels / (width * height);
   const contour = contourFromCanvas(output);
-  if (contour.length < 6) throw new Error("The drawing outline could not be traced. Center one closed drawing and capture again.");
+  if (contour.length < 6) {
+    const diagnostic = candidateFeatures(anchor, frame.data, width);
+    throw new Error(`The selected component was not a closed character (box ${cropWidth}×${cropHeight}, density ${(diagnostic.pixelCount / ((diagnostic.maxX - diagnostic.minX + 1) * (diagnostic.maxY - diagnostic.minY + 1))).toFixed(2)}, chroma ${diagnostic.averageChroma.toFixed(0)}, border ${(diagnostic.edgeFraction ?? 0).toFixed(2)}). Tap inside the character body and capture again.`);
+  }
+  const skeleton = skeletonFromTexture(output);
+  if (!skeleton.length) throw new Error("The drawing body could not be skeletonized. Use one closed, bold character outline.");
 
   return {
     textureUrl: output.toDataURL("image/png"),
-    depthUrl: depthFromTexture(output),
     previewUrl: source.toDataURL("image/jpeg", 0.82),
     contour,
+    skeleton,
     analysis: {
       dominantColor: toHex(dominant),
       secondaryColor: toHex(background),
@@ -467,10 +581,20 @@ export function extractDrawingFromVideo(video: HTMLVideoElement): DrawingExtract
       aspectRatio: Number((cropWidth / cropHeight).toFixed(2)),
       shapeHint: classifyShape(cropWidth, cropHeight, silhouettePixels / (cropWidth * cropHeight)),
       edgeEnergy: coverage < 0.025 ? "scribbly" : coverage > 0.09 ? "bold" : "soft",
-      sourceWidth: video.videoWidth,
-      sourceHeight: video.videoHeight,
+      sourceWidth,
+      sourceHeight,
+      skeletonPoints: skeleton.length,
     },
   };
+}
+
+export function extractDrawingFromVideo(video: HTMLVideoElement, target: CaptureTarget = { x: 0.5, y: 0.48 }): DrawingExtraction {
+  if (!video.videoWidth || !video.videoHeight) throw new Error("The camera is still focusing. Try capture again in a moment.");
+  return extractDrawingFromSource(video, video.videoWidth, video.videoHeight, target);
+}
+
+export function extractDrawingFromCanvas(canvas: HTMLCanvasElement, target: CaptureTarget = { x: 0.5, y: 0.48 }): DrawingExtraction {
+  return extractDrawingFromSource(canvas, canvas.width, canvas.height, target);
 }
 
 export function createDemoDoodle(): DrawingExtraction {
@@ -574,20 +698,7 @@ export function createDemoDoodle(): DrawingExtraction {
   previewContext.fillText("PIP · AGE 7", 0, 127);
   previewContext.restore();
 
-  return {
-    textureUrl: output.toDataURL("image/png"),
-    depthUrl: depthFromTexture(output),
-    previewUrl: preview.toDataURL("image/jpeg", 0.86),
-    contour: contourFromCanvas(output),
-    analysis: {
-      dominantColor: "#ff674d",
-      secondaryColor: "#5fc7df",
-      coveragePercent: 31,
-      aspectRatio: 1.03,
-      shapeHint: "round",
-      edgeEnergy: "bold",
-      sourceWidth: 512,
-      sourceHeight: 512,
-    },
-  };
+  // The no-camera demo deliberately goes through the same segmentation and
+  // skeleton pipeline as a live capture; it is not a pre-cut 3D asset.
+  return extractDrawingFromCanvas(preview, { x: 208 / preview.width, y: 234 / preview.height });
 }
