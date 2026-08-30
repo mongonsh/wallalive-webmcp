@@ -563,8 +563,8 @@ export function recoverTargetSilhouette(mask: Uint8Array, width: number, height:
     for (let index = 0; index < binCount; index += 1) {
       const window = [-4, -3, -2, -1, 0, 1, 2, 3, 4].map((offset) => radii[(index + offset + binCount) % binCount]).sort((a, b) => a - b);
       const localMedian = window[4];
-      const locallyClamped = Math.min(radii[index], localMedian * 1.14);
-      next[index] = clamp(locallyClamped * 0.28 + localMedian * 0.72, medianRadius * 0.64, medianRadius * 1.22);
+      const locallyClamped = Math.min(radii[index], localMedian * 1.22);
+      next[index] = clamp(locallyClamped * 0.28 + localMedian * 0.72, medianRadius * 0.64, medianRadius * 1.38);
     }
     radii.set(next);
   }
@@ -591,7 +591,7 @@ export function recoverTargetSilhouette(mask: Uint8Array, width: number, height:
   return result;
 }
 
-function inkAroundEnclosedRegion(mask: Uint8Array, region: Uint8Array, width: number, height: number) {
+export function inkAroundEnclosedRegion(mask: Uint8Array, region: Uint8Array, width: number, height: number) {
   let minX = width;
   let minY = height;
   let maxX = 0;
@@ -607,11 +607,16 @@ function inkAroundEnclosedRegion(mask: Uint8Array, region: Uint8Array, width: nu
   }
   if (minX > maxX || minY > maxY) return mask;
   const span = Math.max(maxX - minX + 1, maxY - minY + 1);
-  const padding = Math.max(8, Math.round(span * 0.7));
-  const windowMinX = Math.max(0, minX - padding);
-  const windowMinY = Math.max(0, minY - padding);
-  const windowMaxX = Math.min(width - 1, maxX + padding);
-  const windowMaxY = Math.min(height - 1, maxY + padding);
+  // The enclosed negative-space region is a cheap local equivalent of a
+  // detector box. Pad that box just enough to recover its contour, ears, and
+  // short limbs; the former 70% padding also admitted adjacent wall art.
+  const horizontalPadding = Math.max(7, Math.round(span * 0.11));
+  const topPadding = Math.max(7, Math.round(span * 0.2));
+  const bottomPadding = Math.max(7, Math.round(span * 0.1));
+  const windowMinX = Math.max(0, minX - horizontalPadding);
+  const windowMinY = Math.max(0, minY - topPadding);
+  const windowMaxX = Math.min(width - 1, maxX + horizontalPadding);
+  const windowMaxY = Math.min(height - 1, maxY + bottomPadding);
   const localized = new Uint8Array(mask.length);
   for (let y = windowMinY; y <= windowMaxY; y += 1) {
     for (let x = windowMinX; x <= windowMaxX; x += 1) localized[y * width + x] = mask[y * width + x];
@@ -1290,6 +1295,70 @@ export function inferSemanticRig(
     });
   });
 
+  // A stubby arm can merge into a round body and disappear from the medial
+  // skeleton. When the drawing has a real paired face, recover only a contour
+  // side that shows an inward notch followed by an outward hand bulge. This
+  // keeps the fallback evidence-based and avoids inventing arms on faceless
+  // shapes or on a smooth opposite side.
+  if (eyePair) (["left", "right"] as const).forEach((side) => {
+    if (parts.some((part) => part.id === `arm-${side}`)) return;
+    const sign = side === "left" ? -1 : 1;
+    const sideContour = contour.filter((point) => {
+      const dx = (point.x - root.x) * sign;
+      const dy = point.y - root.y;
+      return dx > root.radius * 0.55 && dy > -root.radius * 1.15 && dy < root.radius * 0.18;
+    });
+    let notch: { depth: number; endpoint: ContourPoint } | null = null;
+    for (let index = 2; index < sideContour.length - 2; index += 1) {
+      const current = sideContour[index];
+      const before = sideContour.slice(index - 2, index);
+      const after = sideContour.slice(index + 1, index + 3);
+      const reach = (point: ContourPoint) => Math.abs(point.x - root.x);
+      const beforeEdge = before.sort((a, b) => reach(b) - reach(a))[0];
+      const afterEdge = after.sort((a, b) => reach(b) - reach(a))[0];
+      const depth = Math.min(reach(beforeEdge), reach(afterEdge)) - reach(current);
+      if (depth < root.radius * 0.052) continue;
+      const endpoint = reach(afterEdge) >= reach(beforeEdge) ? afterEdge : beforeEdge;
+      if (!notch || depth > notch.depth) notch = { depth, endpoint };
+    }
+    if (!notch) return;
+    const endpoint = notch.endpoint;
+    const dx = endpoint.x - root.x;
+    const dy = endpoint.y - root.y;
+    const distance = Math.hypot(dx, dy);
+    const anchor = {
+      x: root.x + dx / Math.max(0.001, distance) * root.radius * 0.72,
+      y: root.y + dy / Math.max(0.001, distance) * root.radius * 0.72,
+      z: 0,
+    };
+    const thickness = root.radius * 0.19;
+    parts.push({
+      id: `arm-${side}`,
+      kind: "arm",
+      side,
+      parentId: "body",
+      center: { x: endpoint.x, y: endpoint.y, z: 0 },
+      anchor,
+      size: { x: thickness, y: Math.max(thickness * 1.5, Math.hypot(endpoint.x - anchor.x, endpoint.y - anchor.y)), z: thickness },
+      rotation: Math.atan2(-dx, dy),
+      color: bodyColor,
+      confidence: 0.58,
+      source: "structural-inference",
+    });
+    parts.push({
+      id: `hand-${side}`,
+      kind: "hand",
+      side,
+      parentId: `arm-${side}`,
+      center: { x: endpoint.x, y: endpoint.y, z: 0 },
+      size: { x: thickness * 1.32, y: thickness * 1.32, z: thickness * 1.08 },
+      rotation: 0,
+      color: bodyColor,
+      confidence: 0.54,
+      source: "structural-inference",
+    });
+  });
+
   const joints = parts.filter((part) => part.parentId).map((part) => ({
     id: `joint-${part.id}`,
     parentId: part.parentId!,
@@ -1360,9 +1429,9 @@ function extractDrawingFromSource(sourceImage: CanvasImageSource, sourceWidth: n
       const vividInk = chroma >= Math.max(58, backgroundChroma + 28);
       const darkInk = lightness <= Math.min(112, backgroundLightness - 30);
       const contrastedStroke = localContrast >= 20 && inkScore(pixel, background) > 43;
-      const coloredLine = chroma >= Math.max(16, backgroundChroma + 7)
-        && colorDistance(pixel, background) > 19
-        && lightness < 248;
+      const coloredLine = chroma >= Math.max(9, backgroundChroma + 3)
+        && colorDistance(pixel, background) > 12
+        && lightness < 250;
       if (coloredLine) chromaticInk[y * width + x] = 1;
       if (inkScore(pixel, background) > 54 && (vividInk || darkInk || contrastedStroke)) rawInk[y * width + x] = 1;
     }
@@ -1374,13 +1443,16 @@ function extractDrawingFromSource(sourceImage: CanvasImageSource, sourceWidth: n
   const isolatedChromaticInk = isolateTargetInk(preconnectedChromaticInk, width, height, target);
   const colorConnectedInk = erode(dilate(isolatedChromaticInk, width, height, colorCloseRadius), width, height, Math.max(2, colorCloseRadius - 3));
   const localizedTargetInk = enclosedTargetRegion ? inkAroundEnclosedRegion(chromaticInk, enclosedTargetRegion, width, height) : null;
+  const localizedClosedInk = localizedTargetInk
+    ? erode(dilate(localizedTargetInk, width, height, colorCloseRadius), width, height, Math.max(2, colorCloseRadius - 3))
+    : null;
   const enclosedComponent = enclosedTargetRegion ? connectedComponents(enclosedTargetRegion, width, height)[0] : null;
   const silhouetteTarget = enclosedComponent ? {
     x: target.x * 0.5 + enclosedComponent.centerX / width * 0.5,
     y: target.y * 0.5 + enclosedComponent.centerY / height * 0.5,
   } : target;
-  const recoveredColorSilhouette = localizedTargetInk
-    ? recoverTargetSilhouette(localizedTargetInk, width, height, silhouetteTarget, false)
+  const recoveredColorSilhouette = localizedClosedInk
+    ? recoverTargetSilhouette(localizedClosedInk, width, height, silhouetteTarget, false)
     : recoverTargetSilhouette(colorConnectedInk, width, height, target);
   const colorSolidComponents = connectedComponents(recoveredColorSilhouette, width, height);
   const colorAnchor = chooseDrawing(colorSolidComponents, frame.data, width, height, target);

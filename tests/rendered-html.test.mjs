@@ -3,7 +3,7 @@ import { readFile, stat } from "node:fs/promises";
 import test from "node:test";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { parseAniGenPreview } from "../app/lib/anigen.ts";
-import { extractMedialSkeleton, inferSemanticRig, mapCoverTargetToSource, recoverEnclosedTargetRegion, recoverTargetSilhouette, scoreDrawingCandidate } from "../app/lib/drawing.ts";
+import { extractMedialSkeleton, inferSemanticRig, inkAroundEnclosedRegion, mapCoverTargetToSource, recoverEnclosedTargetRegion, recoverTargetSilhouette, scoreDrawingCandidate } from "../app/lib/drawing.ts";
 import { prepareNeuralCharacter, remapDominantHuePixels } from "../app/lib/rigged-model.ts";
 
 async function render() {
@@ -367,6 +367,36 @@ test("target-seeded flood fill closes compression gaps without crossing exterior
   assert.equal(recovered[23 * width + 25], 0, "an exterior label must remain outside the target region");
 });
 
+test("localizes candidate strokes to the enclosed character instead of a rectangular paper crop", () => {
+  const width = 121;
+  const height = 111;
+  const region = new Uint8Array(width * height);
+  const ink = new Uint8Array(width * height);
+  const center = { x: 51, y: 58 };
+  for (let y = 32; y <= 84; y += 1) {
+    for (let x = 30; x <= 72; x += 1) {
+      if (((x - center.x) / 21) ** 2 + ((y - center.y) / 26) ** 2 <= 1) region[y * width + x] = 1;
+    }
+  }
+  // Target outline and a close ear remain eligible.
+  for (let angle = 0; angle < 360; angle += 1) {
+    const radians = angle / 180 * Math.PI;
+    const x = Math.round(center.x + Math.cos(radians) * 24);
+    const y = Math.round(center.y + Math.sin(radians) * 29);
+    ink[y * width + x] = 1;
+  }
+  ink[27 * width + 41] = 1;
+  // These would be inside the old padded rectangle, but are disconnected
+  // handwriting / a neighbouring sketch rather than target anatomy.
+  ink[16 * width + 17] = 1;
+  ink[51 * width + 104] = 1;
+
+  const localized = inkAroundEnclosedRegion(ink, region, width, height);
+  assert.equal(localized[27 * width + 41], 1, "a nearby ear stroke should be preserved");
+  assert.equal(localized[16 * width + 17], 0, "diagonal handwriting must be excluded");
+  assert.equal(localized[51 * width + 104], 0, "a neighbouring drawing must be excluded");
+});
+
 test("builds a semantic joint rig from facial regions and silhouette branches", () => {
   const skeleton = [
     { x: 0, y: 0, radius: 0.3 },
@@ -399,6 +429,30 @@ test("builds a semantic joint rig from facial regions and silhouette branches", 
   assert.ok(rig.joints.some((joint) => joint.childId === "arm-right"));
   assert.ok(rig.parts.some((part) => part.kind === "eye" && part.source === "image-region"));
   assert.ok(rig.parts.some((part) => part.kind === "leg" && part.source === "silhouette-branch"));
+});
+
+test("recovers one merged side hand from a real contour notch without inventing the smooth-side arm", () => {
+  const skeleton = [
+    { x: 0, y: 0.12, radius: 0.32 },
+    { x: -0.12, y: 0.46, radius: 0.04 }, { x: 0.22, y: 0.47, radius: 0.04 },
+    { x: -0.04, y: -0.43, radius: 0.05 }, { x: 0.16, y: -0.48, radius: 0.04 },
+  ];
+  const contour = [
+    { x: -0.2, y: -0.25 }, { x: -0.28, y: -0.17 }, { x: -0.32, y: -0.02 },
+    { x: -0.32, y: 0.13 }, { x: -0.29, y: 0.29 }, { x: -0.22, y: 0.44 },
+    { x: 0.19, y: 0.5 }, { x: 0.26, y: 0.36 }, { x: 0.32, y: 0.2 },
+    { x: 0.32, y: 0.02 }, { x: 0.31, y: -0.05 }, { x: 0.29, y: -0.09 },
+    { x: 0.32, y: -0.15 }, { x: 0.32, y: -0.19 }, { x: 0.3, y: -0.24 },
+    { x: 0.3, y: -0.36 }, { x: 0.2, y: -0.48 }, { x: -0.04, y: -0.45 },
+  ];
+  const regions = [
+    { id: "eye-l", x: -0.13, y: 0.2, width: 0.09, height: 0.11, color: "#9c3450", pixelCount: 70, density: 0.5 },
+    { id: "eye-r", x: 0.13, y: 0.2, width: 0.09, height: 0.11, color: "#9c3450", pixelCount: 70, density: 0.5 },
+  ];
+  const rig = inferSemanticRig(skeleton, contour, regions, "#f4eee2", "#9c3450");
+  assert.ok(rig.parts.some((part) => part.id === "arm-right" && part.source === "structural-inference"));
+  assert.ok(rig.parts.some((part) => part.id === "hand-right"));
+  assert.equal(rig.parts.some((part) => part.id === "arm-left"), false);
 });
 
 test("handles paired, one-eyed, animal-like, and faceless drawing anatomy without inventing parts", () => {
