@@ -1457,7 +1457,11 @@ export function mergeLearnedPartHints(extraction: DrawingExtraction, hints: Lear
         bestScore = score;
       }
     }
-    if (best) usedRegions.add(best.id);
+    // A nearby stroke is not automatically the predicted feature. Reject a
+    // weak spatial/size match so an eye, ear, or decoration cannot donate its
+    // outline and color to a cheek merely because no better region exists.
+    if (!best || bestScore > 1.65) return null;
+    usedRegions.add(best.id);
     return best;
   };
 
