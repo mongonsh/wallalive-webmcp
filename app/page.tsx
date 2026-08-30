@@ -3,7 +3,9 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ARStage, type ARStageHandle, type CharacterAction } from "./components/ARStage";
-import { createDemoDoodle, extractDrawingFromVideo, type CaptureTarget, type DrawingExtraction } from "./lib/drawing";
+import { createAniGenDemoDrawing, createDemoDoodle, extractDrawingFromVideo, type CaptureTarget, type DrawingExtraction } from "./lib/drawing";
+import { createBundledAniGenAsset, disposeNeuralAsset, generateAniGenAsset, type NeuralAsset, type NeuralProgress } from "./lib/anigen";
+import type { RiggedAssetInfo } from "./lib/rigged-model";
 
 type Actor = "CHILD" | "BROWSER AGENT" | "WALLALIVE";
 type AppStep = "ready" | "camera" | "captured" | "alive";
@@ -62,7 +64,7 @@ const initialCharacter: CharacterState = {
 
 const toolNames = [
   ["inspect_wall_scene", "READ"],
-  ["reconstruct_volumetric_character", "WRITE"],
+  ["reconstruct_rigged_3d_character", "WRITE"],
   ["set_character_personality", "WRITE"],
   ["place_character", "WRITE"],
   ["animate_character", "WRITE"],
@@ -114,6 +116,10 @@ export default function Home() {
   const captureRef = useRef<DrawingExtraction | null>(null);
   const characterRef = useRef<CharacterState>(initialCharacter);
   const activityRef = useRef<Activity[]>([]);
+  const neuralAssetRef = useRef<NeuralAsset | null>(null);
+  const neuralAbortRef = useRef<AbortController | null>(null);
+  const riggedAssetInfoRef = useRef<RiggedAssetInfo | null>(null);
+  const externalUploadApprovedRef = useRef(false);
   const rotateGestureRef = useRef<{ pointerId: number; lastX: number; lastY: number; moved: boolean } | null>(null);
 
   const [step, setStep] = useState<AppStep>("ready");
@@ -129,6 +135,10 @@ export default function Home() {
   const [storyCaption, setStoryCaption] = useState("The room is waiting for a new friend.");
   const [demoRunning, setDemoRunning] = useState(false);
   const [captureTarget, setCaptureTarget] = useState<CaptureTarget>({ x: 0.5, y: 0.48 });
+  const [neuralAsset, setNeuralAsset] = useState<NeuralAsset | null>(null);
+  const [neuralProgress, setNeuralProgress] = useState<NeuralProgress>({ phase: "idle", progress: 0, message: "" });
+  const [neuralConsentVisible, setNeuralConsentVisible] = useState(false);
+  const [riggedAssetInfo, setRiggedAssetInfo] = useState<RiggedAssetInfo | null>(null);
 
   const record = useCallback((actor: Actor, action: string, detail: string, toolName?: string) => {
     const item: Activity = { id: makeId(), time: timeLabel(), actor, action, detail, toolName };
@@ -144,6 +154,17 @@ export default function Home() {
     if (message) setNotice(message);
   }, []);
 
+  const commitNeuralAsset = useCallback((next: NeuralAsset | null) => {
+    if (neuralAssetRef.current !== next) disposeNeuralAsset(neuralAssetRef.current);
+    neuralAssetRef.current = next;
+    setNeuralAsset(next);
+  }, []);
+
+  const handleRiggedAssetInfo = useCallback((info: RiggedAssetInfo | null) => {
+    riggedAssetInfoRef.current = info;
+    setRiggedAssetInfo(info);
+  }, []);
+
   const stopCamera = useCallback(() => {
     streamRef.current?.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
@@ -153,7 +174,11 @@ export default function Home() {
     setNotice("Camera stopped. The approved drawing and character remain only in this tab.");
   }, []);
 
-  useEffect(() => () => streamRef.current?.getTracks().forEach((track) => track.stop()), []);
+  useEffect(() => () => {
+    streamRef.current?.getTracks().forEach((track) => track.stop());
+    neuralAbortRef.current?.abort();
+    disposeNeuralAsset(neuralAssetRef.current);
+  }, []);
 
   const startCamera = useCallback(async () => {
     if (!navigator.mediaDevices?.getUserMedia) {
@@ -185,14 +210,22 @@ export default function Home() {
   }, [record]);
 
   const setDrawing = useCallback((next: DrawingExtraction, source: "camera" | "demo") => {
+    neuralAbortRef.current?.abort();
+    neuralAbortRef.current = null;
+    commitNeuralAsset(null);
+    handleRiggedAssetInfo(null);
+    externalUploadApprovedRef.current = false;
+    setNeuralConsentVisible(false);
+    setNeuralProgress({ phase: "idle", progress: 0, message: "" });
+    commitCharacter(initialCharacter);
     captureRef.current = next;
     setCapture(next);
     setStep("captured");
     const detected = next.rig.detectedKinds.filter((kind) => kind !== "body").join(", ");
-    setNotice(source === "camera" ? "Drawing parsed into semantic regions and an articulated 3D rig. Press Sculpt in 3D." : "Demo drawing parsed into movable 3D parts. Press Sculpt in 3D—or run the full magic demo.");
-    setAgentLine(`I found ${detected || "a body silhouette"}. Each recognized region can become its own 3D part.`);
-    record("WALLALIVE", "Parsed a character rig", `${next.rig.parts.length} volumetric parts · ${next.rig.joints.length} joints · ${next.analysis.shapeHint} silhouette · no upload.`);
-  }, [record]);
+    setNotice(source === "camera" ? "Drawing isolated locally. Generate real 3D to infer its back, mesh, skeleton, and skin weights." : "Demo drawing is ready. Generate real 3D—or play the no-wait rigged judge demo.");
+    setAgentLine(`The local preview found ${detected || "a body silhouette"}. AniGen will infer real unseen geometry and a skinned skeleton.`);
+    record("WALLALIVE", "Isolated the approved drawing", `${next.rig.parts.length} local preview regions · ${next.analysis.shapeHint} silhouette · no upload yet.`);
+  }, [commitCharacter, commitNeuralAsset, handleRiggedAssetInfo, record]);
 
   const captureDrawing = useCallback(() => {
     if (!videoRef.current) return;
@@ -215,6 +248,7 @@ export default function Home() {
   const createCharacter = useCallback((input: Record<string, unknown>, actor: Actor, toolName?: string) => {
     const drawing = captureRef.current;
     if (!drawing) throw new Error("No drawing is approved. The child must capture or choose a drawing first.");
+    const neural = neuralAssetRef.current;
     const next: CharacterState = {
       ...characterRef.current,
       created: true,
@@ -225,13 +259,58 @@ export default function Home() {
       action: "idle",
       storyTitle: "",
     };
-    commitCharacter(next, `${next.name} is now a closed, articulated 3D character.`);
+    commitCharacter(next, neural ? `${next.name} is now a real rigged 3D character.` : `${next.name} is shown as a rough private contour preview.`);
     setStep("alive");
-    setAgentLine(`${next.name} feels ${next.personality}. I’ll protect the original colors while we play.`);
+    setAgentLine(neural ? `${next.name} has generated surfaces, colors, bones, and skin weights. The agent can now direct the rig.` : `${next.name} is only a local contour preview; real 3D still requires AniGen.`);
     setStoryCaption(`${next.name} lifts away from the wall for the first time.`);
-    record(actor, "Built an articulated 3D character", `${next.name} · ${drawing.rig.parts.length} semantic parts · ${drawing.rig.joints.length} joints · closed 64³ body field.`, toolName);
+    record(actor, neural ? "Loaded a rigged neural 3D character" : "Opened the rough private preview", neural
+      ? `${next.name} · ${neural.provider} · glTF SkinnedMesh · generated mesh, skeleton, and skin weights.`
+      : `${next.name} · deterministic contour preview only · no neural 3D asset.`, toolName);
     return next;
   }, [commitCharacter, record]);
+
+  const requestNeuralConsent = useCallback(() => {
+    if (!captureRef.current) return;
+    setNeuralConsentVisible(true);
+    setNeuralProgress({ phase: "consent-required", progress: 0, message: "Human approval is required before the isolated drawing leaves this tab." });
+    setNotice("Review the isolated-image approval. The live camera is never uploaded.");
+  }, []);
+
+  const startNeuralReconstruction = useCallback(async () => {
+    const drawing = captureRef.current;
+    if (!drawing) return;
+    neuralAbortRef.current?.abort();
+    const controller = new AbortController();
+    neuralAbortRef.current = controller;
+    setNeuralConsentVisible(false);
+    externalUploadApprovedRef.current = true;
+    setNotice("AniGen is generating a real mesh, unseen surfaces, skeleton, and skin weights.");
+    record("CHILD", "Approved isolated drawing upload", "Only the isolated drawing—not the camera frame—was approved for AniGen.");
+    try {
+      const asset = await generateAniGenAsset(drawing.textureUrl, (progress) => {
+        setNeuralProgress(progress);
+        setNotice(progress.message);
+      }, controller.signal);
+      if (controller.signal.aborted) return;
+      commitNeuralAsset(asset);
+      createCharacter({ name: "Pip", personality: "curious and kind", accent: drawing.analysis.secondaryColor }, "WALLALIVE");
+      record("WALLALIVE", "Generated real rigged 3D", `${asset.provider} returned a colored GLB with generated full geometry and a skinned skeleton.`);
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") return;
+      const message = error instanceof Error ? error.message : "Real 3D generation failed.";
+      setNeuralProgress({ phase: "error", progress: 0, message });
+      setNotice(message);
+      record("WALLALIVE", "Neural 3D generation unavailable", message);
+    } finally {
+      if (neuralAbortRef.current === controller) neuralAbortRef.current = null;
+    }
+  }, [commitNeuralAsset, createCharacter, record]);
+
+  const keepPrivatePreview = useCallback(() => {
+    setNeuralConsentVisible(false);
+    setNeuralProgress({ phase: "idle", progress: 0, message: "" });
+    createCharacter({}, "CHILD");
+  }, [createCharacter]);
 
   const setPersonality = useCallback((personality: string, actor: Actor, toolName?: string) => {
     const current = characterRef.current;
@@ -298,27 +377,27 @@ export default function Home() {
     drawingApproved: Boolean(captureRef.current),
     drawingAnalysis: captureRef.current?.analysis ?? null,
     reconstruction: captureRef.current ? {
-      segmentation: "target-aware color-isolated ink with grayscale clutter rejection",
-      semanticParser: "paired eye and cheek regions plus silhouette-branch anatomy inference",
-      method: "articulated ink features over a closed silhouette-preserving 3D body",
-      field: "signed 2D contour distance combined with symmetric front/back depth",
-      polygonizer: "Marching Cubes",
-      volumeResolution: 64,
-      topology: "closed front, sides, and generated back",
-      texturePlane: false,
+      localIsolation: "target-aware color-isolated drawing with grayscale clutter rejection",
+      localPreview: "deterministic silhouette preview only; not claimed as true reconstruction",
+      method: neuralAssetRef.current ? "AniGen joint mesh-skeleton-skinning reconstruction" : "awaiting human-approved neural reconstruction",
+      provider: neuralAssetRef.current?.provider ?? null,
+      model: neuralAssetRef.current?.model ?? null,
+      assetType: neuralAssetRef.current ? "glTF SkinnedMesh" : null,
+      topology: neuralAssetRef.current ? "generated full 3D surface including unseen views" : "rough preview only",
       viewableDegrees: 360,
       contourPoints: captureRef.current.contour.length,
       skeletonPoints: captureRef.current.skeleton.length,
       rigVersion: captureRef.current.rig.version,
-      semanticParts: captureRef.current.rig.parts.map((part) => ({ id: part.id, kind: part.kind, side: part.side, confidence: part.confidence, source: part.source })),
-      joints: captureRef.current.rig.joints,
+      localPreviewRegions: captureRef.current.rig.parts.map((part) => ({ id: part.id, kind: part.kind, side: part.side, confidence: part.confidence, source: part.source })),
       inflation: characterRef.current.inflation,
-      neuralModelUsed: false,
-      neuralUpgradePath: "CharSegNet-style learned part parsing plus DrawingSpinUp-style multi-view reconstruction requires a configured GPU inference service",
+      neuralModelUsed: Boolean(neuralAssetRef.current),
+      generatedAsset: riggedAssetInfoRef.current,
+      generationPhase: neuralAssetRef.current ? "ready" : "human-approval-required",
+      externalUploadApproved: externalUploadApprovedRef.current,
     } : null,
     character: { ...characterRef.current, textureUrl: undefined },
     cameraFeedExposed: false,
-    privacyBoundary: "Camera capture is human-only. WebMCP tools receive semantic drawing analysis, never live frames or image data.",
+    privacyBoundary: "Camera capture is human-only. WebMCP can request reconstruction but cannot approve or upload; only a visible human action may send the isolated drawing to AniGen.",
     availableAnimations: actions.map((item) => item.action),
     placementModes: immersiveAR ? ["world-hit-test", "camera-overlay"] : ["camera-overlay"],
   }), [immersiveAR]);
@@ -342,9 +421,9 @@ export default function Home() {
         execute: async (_input, options) => { const signal = executionSignal(options); guard(signal); return ok({ scene: inspectScene() }); },
       },
       {
-        name: "reconstruct_volumetric_character",
-        title: "Reconstruct approved drawing as an articulated 3D character",
-        description: "Build a closed, 360-degree character from the approved drawing. Hierarchical regions identify facial marks while silhouette branches infer ears and limbs; separate volumetric parts attach to a joint hierarchy over a Marching Cubes body. No front texture plane is used. This tool cannot open or capture the camera.",
+        name: "reconstruct_rigged_3d_character",
+        title: "Use the approved rigged 3D reconstruction",
+        description: "Create a playable character from an AniGen-generated GLB SkinnedMesh. If real 3D is not ready, this tool can surface the human approval UI but cannot upload pixels, approve the upload, open the camera, or substitute a fake extrusion.",
         inputSchema: {
           ...base,
           properties: {
@@ -356,7 +435,18 @@ export default function Home() {
           required: ["name", "personality", "accent"],
         },
         annotations: { readOnlyHint: false, untrustedContentHint: true },
-        execute: async (input, options) => { const signal = executionSignal(options); try { guard(signal); return ok({ character: createCharacter(input, "BROWSER AGENT", "reconstruct_volumetric_character") }); } catch (error) { return fail(error); } },
+        execute: async (input, options) => {
+          const signal = executionSignal(options);
+          try {
+            guard(signal);
+            if (!captureRef.current) throw new Error("No drawing is approved. The child must capture or choose a drawing first.");
+            if (!neuralAssetRef.current) {
+              requestNeuralConsent();
+              return ok({ requiresHumanApproval: true, phase: "consent-required", message: "Use the visible approval card to send only the isolated drawing to AniGen." });
+            }
+            return ok({ character: createCharacter(input, "BROWSER AGENT", "reconstruct_rigged_3d_character"), generatedAsset: riggedAssetInfoRef.current });
+          } catch (error) { return fail(error); }
+        },
       },
       {
         name: "set_character_personality",
@@ -443,33 +533,37 @@ export default function Home() {
       setNotice(`${tools.length} WebMCP tools are ready. Camera capture remains human-only.`);
     }).catch(() => setWebMcpReady(false));
     return () => controller.abort();
-  }, [animateCharacter, createCharacter, inspectScene, placeCharacter, recolorCharacter, runStory, setPersonality]);
+  }, [animateCharacter, createCharacter, inspectScene, placeCharacter, recolorCharacter, requestNeuralConsent, runStory, setPersonality]);
 
   const runMagicDemo = useCallback(async () => {
     if (demoRunning) return;
     setDemoRunning(true);
     try {
-      const demo = createDemoDoodle();
+      const demo = createAniGenDemoDrawing();
       setDrawing(demo, "demo");
-      setAgentLine("1 / 4 · I can see the approved shape and colors—but not a live camera feed.");
-      await wait(550);
-      createCharacter({ name: "Pip", personality: "brave on the outside, shy on the inside", accent: "#5fc7df", inflation: 1.12 }, "BROWSER AGENT", "reconstruct_volumetric_character");
-      setAgentLine("2 / 4 · Eyes, mouth, ears, arms, hands, legs, and feet become separate volumetric rig parts—not a front card.");
-      await wait(700);
+      const bundledAsset = createBundledAniGenAsset();
+      commitNeuralAsset(bundledAsset);
+      externalUploadApprovedRef.current = true;
+      setNeuralProgress({ phase: "ready", progress: 1, message: "Verified AniGen rig loaded." });
+      setAgentLine("1 / 4 · This is a verified AniGen result: a colored SkinnedMesh with 20 bones—not a cut-out or extrusion.");
+      await wait(450);
+      createCharacter({ name: "BrickBob", personality: "brave on the outside, shy on the inside", accent: "#5fc7df", inflation: 1 }, "BROWSER AGENT", "reconstruct_rigged_3d_character");
+      setAgentLine("2 / 4 · The original front view became full geometry, unseen surfaces, fingers, legs, a skeleton, and skin weights.");
+      await wait(850);
       placeCharacter(.68, .53, "wall", 1, "BROWSER AGENT", "place_character");
-      setAgentLine("3 / 4 · The agent places Pip without controlling the camera.");
+      setAgentLine("3 / 4 · WebMCP places BrickBob and directs bones without receiving camera control.");
       await wait(650);
-      await runStory("Pip finds their courage", [
-        { action: "hide", caption: "Pip hides at the edge of the wall.", durationMs: 800 },
+      await runStory("BrickBob finds their courage", [
+        { action: "hide", caption: "BrickBob hides at the edge of the wall.", durationMs: 800 },
         { action: "hop", caption: "One brave hop into the room.", durationMs: 800 },
-        { action: "wave", caption: "Pip peeks out and waves hello.", durationMs: 1000 },
-        { action: "spin", caption: "A full turn reveals Pip’s rounded back.", durationMs: 1400 },
+        { action: "wave", caption: "A real arm-bone branch waves hello.", durationMs: 1000 },
+        { action: "spin", caption: "A full turn reveals generated back geometry.", durationMs: 1400 },
       ], "BROWSER AGENT", "tell_character_story");
-      setAgentLine("4 / 4 · The full turn proves a filled back and real 360° geometry; the wave comes from an arm joint.");
+      setAgentLine("4 / 4 · The full turn proves real 360° geometry; animation comes from the generated skeleton.");
     } finally {
       setDemoRunning(false);
     }
-  }, [createCharacter, demoRunning, placeCharacter, runStory, setDrawing]);
+  }, [commitNeuralAsset, createCharacter, demoRunning, placeCharacter, runStory, setDrawing]);
 
   const enterAR = useCallback(async () => {
     const result = await stageRef.current?.enterImmersiveAR();
@@ -539,7 +633,12 @@ export default function Home() {
   }, []);
 
   const latestAgentActivity = useMemo(() => activity.find((item) => item.actor === "BROWSER AGENT"), [activity]);
-  const primaryButton = cameraState === "active" ? { label: "CAPTURE DRAWING", action: captureDrawing } : step === "captured" ? { label: "SCULPT IN 3D", action: () => createCharacter({}, "CHILD") } : { label: "START CAMERA", action: startCamera };
+  const neuralBusy = ["connecting", "preparing", "queued", "generating", "downloading"].includes(neuralProgress.phase);
+  const primaryButton = cameraState === "active"
+    ? { label: "CAPTURE DRAWING", action: captureDrawing }
+    : step === "captured"
+      ? { label: "GENERATE REAL 3D", action: requestNeuralConsent }
+      : { label: "START CAMERA", action: startCamera };
   const stepIndex = step === "ready" ? 0 : step === "camera" ? 1 : step === "captured" ? 2 : 3;
 
   return (
@@ -558,7 +657,7 @@ export default function Home() {
           <p className="kicker">THE MAGIC LOOP</p>
           <ol>
             <li className={stepIndex >= 1 ? "done" : "active"}><span>1</span><div><strong>Scan</strong><small>Human opens camera</small></div></li>
-            <li className={stepIndex >= 3 ? "done" : stepIndex === 2 ? "active" : ""}><span>2</span><div><strong>Sculpt</strong><small>Closed volume forms</small></div></li>
+            <li className={stepIndex >= 3 ? "done" : stepIndex === 2 ? "active" : ""}><span>2</span><div><strong>Generate</strong><small>Mesh + skeleton + skin</small></div></li>
             <li className={stepIndex === 3 ? "active" : ""}><span>3</span><div><strong>Play</strong><small>Agent directs movement</small></div></li>
           </ol>
 
@@ -570,13 +669,13 @@ export default function Home() {
                   {capture.skeleton.map((point, index) => <circle key={index} cx={(point.x / 1.4 + 0.5) * 100} cy={(0.5 - point.y / 1.4) * 100} r={Math.max(1.1, point.radius / 1.4 * 100)} />)}
                 </svg>
               </div>
-              <div><p className="kicker">SEMANTIC 3D DNA</p><strong>{capture.rig.detectedKinds.filter((kind) => kind !== "body").join(" · ") || capture.analysis.shapeHint}</strong><span><i style={{ background: capture.rig.bodyColor }} /><i style={{ background: capture.rig.lineColor }} /> {capture.rig.parts.length} PARTS · {capture.rig.joints.length} JOINTS</span></div>
+              <div><p className="kicker">{neuralAsset ? "ANIGEN RIG DNA" : "LOCAL PREVIEW DNA"}</p><strong>{neuralAsset ? "SKINNED MESH · FULL 3D" : capture.rig.detectedKinds.filter((kind) => kind !== "body").join(" · ") || capture.analysis.shapeHint}</strong><span><i style={{ background: capture.rig.bodyColor }} /><i style={{ background: capture.rig.lineColor }} /> {riggedAssetInfo ? `${riggedAssetInfo.bones} BONES · ${riggedAssetInfo.vertices.toLocaleString()} VERTICES` : neuralAsset ? "RIGGED GLB LOADING" : `${capture.rig.parts.length} ROUGH REGIONS`}</span></div>
             </div>
           ) : null}
 
           <div className="privacy-card">
             <div><b>CAMERA-SAFE BY DESIGN</b><span>◆</span></div>
-            <p>Only the child can start or capture. The agent receives shapes and colors—not the live camera or image pixels.</p>
+            <p>Camera and capture stay human-only. Real 3D sends only the isolated drawing after a second visible approval—never live frames.</p>
           </div>
           <button className="demo-doodle" onClick={loadDemoDrawing}>NO CAMERA? TRY A DEMO DOODLE <span>＋</span></button>
         </aside>
@@ -587,7 +686,7 @@ export default function Home() {
             <div className="stage-ctas">
               {immersiveAR && character.created ? <button className="ar-button" onClick={enterAR}>ENTER REAL AR <span>◎</span></button> : null}
               {cameraState === "active" ? <button className="stop-camera" onClick={stopCamera}>STOP CAMERA</button> : null}
-              <button className="primary-camera" onClick={primaryButton.action} disabled={cameraState === "requesting"}>{cameraState === "requesting" ? "OPENING…" : primaryButton.label}<span>↗</span></button>
+              <button className="primary-camera" onClick={primaryButton.action} disabled={cameraState === "requesting" || neuralBusy}>{cameraState === "requesting" ? "OPENING…" : neuralBusy ? "GENERATING…" : primaryButton.label}<span>↗</span></button>
             </div>
           </div>
 
@@ -596,8 +695,12 @@ export default function Home() {
             {cameraState !== "active" ? <div className="demo-room"><span className="frame-a" /><span className="frame-b" /><span className="shelf" /><span className="plant" /><span className="baseboard" /></div> : null}
             {capture && cameraState !== "active" ? <img className="captured-room" src={capture.previewUrl} alt="Approved drawing preview" /> : null}
             {step === "camera" ? <><div className="capture-guide"><span /><b>TAP CHARACTER · THEN CAPTURE</b></div><div className="capture-target" style={{ left: `${captureTarget.x * 100}%`, top: `${captureTarget.y * 100}%` }}><i /></div></> : null}
-            <ARStage ref={stageRef} contour={capture?.contour ?? null} skeleton={capture?.skeleton ?? null} textureUrl={capture?.textureUrl ?? null} rig={capture?.rig ?? null} action={character.action} accent={character.accent} inflation={character.inflation} visible={character.created} onCapability={handleARCapability} onPlaced={handleARPlaced} />
-            <div className="camera-hud"><span><i /> {cameraState === "active" ? "LIVE CAMERA · LOCAL" : character.created ? "SEMANTIC 3D RIG LIVE" : "SAFE DEMO ROOM"}</span><strong>{immersiveAR ? "WEBXR READY" : "CAMERA AR FALLBACK"}</strong></div>
+            <ARStage ref={stageRef} contour={capture?.contour ?? null} skeleton={capture?.skeleton ?? null} textureUrl={capture?.textureUrl ?? null} rig={capture?.rig ?? null} action={character.action} accent={character.accent} inflation={character.inflation} neuralAssetUrl={neuralAsset?.meshUrl ?? null} visible={character.created} onCapability={handleARCapability} onPlaced={handleARPlaced} onNeuralAssetInfo={handleRiggedAssetInfo} />
+            {neuralConsentVisible ? <div className="neural-consent" role="dialog" aria-modal="true" aria-labelledby="neural-consent-title" onPointerDown={(event) => event.stopPropagation()}>
+              <span>REAL 3D · HUMAN APPROVAL</span><h2 id="neural-consent-title">Send only this isolated drawing to AniGen?</h2><p>AniGen infers the unseen back, full mesh, skeleton, and skin weights on a public GPU. The live camera and room frame are never sent.</p><div><button onClick={startNeuralReconstruction}>UPLOAD APPROVED DRAWING</button><button onClick={keepPrivatePreview}>KEEP ROUGH PRIVATE PREVIEW</button></div>
+            </div> : null}
+            {neuralBusy ? <div className="neural-progress" role="status" onPointerDown={(event) => event.stopPropagation()}><span>ANIGEN · RIGGED 3D</span><b>{neuralProgress.message}</b><div><i style={{ width: `${Math.round(neuralProgress.progress * 100)}%` }} /></div><small>{Math.round(neuralProgress.progress * 100)}% · PUBLIC GPU</small></div> : null}
+            <div className="camera-hud"><span><i /> {cameraState === "active" ? "LIVE CAMERA · LOCAL" : neuralAsset && character.created ? `ANIGEN RIG · ${riggedAssetInfo?.bones ?? "…"} BONES` : character.created ? "ROUGH PRIVATE PREVIEW" : "SAFE DEMO ROOM"}</span><strong>{immersiveAR ? "WEBXR READY" : "CAMERA AR FALLBACK"}</strong></div>
             {character.created ? <div className="story-caption"><span>{character.storyTitle || "LIVE MOMENT"}</span><p>{storyCaption}</p></div> : null}
             {cameraState === "denied" || cameraState === "unavailable" ? <div className="camera-message"><b>CAMERA OPTIONAL</b><p>The demo doodle still proves the complete WebMCP and 3D workflow.</p></div> : null}
           </div>
@@ -606,7 +709,7 @@ export default function Home() {
             <div><span>CHARACTER ACTIONS</span><small>{character.created ? `${character.name.toUpperCase()} · ${character.personality.toUpperCase()}` : "WAKE A DRAWING TO PLAY"}</small></div>
             {actions.map((item) => <button key={item.action} disabled={!character.created} className={character.action === item.action ? "active" : ""} onClick={() => animateCharacter(item.action, "CHILD")}><i>{item.glyph}</i>{item.label}</button>)}
           </div>
-          <p className="placement-tip">{character.created ? "Drag to rotate freely · Spin shows all 360° · Wave moves a detected arm joint" : "Center one closed, bold drawing—local regions become articulated 3D parts"}</p>
+          <p className="placement-tip">{character.created ? neuralAsset ? "Drag for 360° · Generated back · Actions move the SkinnedMesh bones" : "Rough private preview only · Generate real 3D for actual surfaces and bones" : "Photograph any clear single character—AniGen supplies the learned 3D prior"}</p>
         </section>
 
         <aside className="agent-panel">
@@ -635,8 +738,8 @@ export default function Home() {
 
           {panelTab === "privacy" ? (
             <div className="panel-body">
-              <p className="kicker">CHILD-SAFE BOUNDARY</p><h2>The camera is not a tool.</h2><p>WallAlive intentionally refuses to let an agent open, capture, or upload the camera.</p>
-              <ul className="privacy-list"><li><b>Human gesture required</b><span>Start and capture are UI-only.</span></li><li><b>Local extraction</b><span>Pixels are processed in browser memory.</span></li><li><b>Semantic agent view</b><span>Only color, shape, and approved state.</span></li><li><b>Session-only art</b><span>No image is saved after the tab closes.</span></li></ul>
+              <p className="kicker">CHILD-SAFE BOUNDARY</p><h2>The camera is not a tool.</h2><p>WallAlive refuses to let an agent open or capture the camera. Neural generation requires a separate visible human approval.</p>
+              <ul className="privacy-list"><li><b>Human gesture required</b><span>Start, capture, and isolated-image upload are UI-only.</span></li><li><b>Local extraction</b><span>The room frame is separated in browser memory.</span></li><li><b>Minimal neural input</b><span>Only the approved isolated drawing goes to AniGen.</span></li><li><b>Session-only result</b><span>The generated GLB is held in this browser tab.</span></li></ul>
             </div>
           ) : null}
 

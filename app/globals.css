@@ -130,6 +130,19 @@ button:disabled { cursor: not-allowed; opacity: 0.45; }
 .camera-message { position: absolute; z-index: 8; left: 50%; top: 50%; width: min(300px, 75%); padding: 17px; transform: translate(-50%, -50%) rotate(-1deg); background: var(--paper); box-shadow: 8px 8px 0 var(--coral); text-align: center; }
 .camera-message b { font: 900 9px var(--mono); }
 .camera-message p { margin: 7px 0 0; font-size: 11px; line-height: 1.45; }
+.neural-consent, .neural-progress { position: absolute; z-index: 12; left: 50%; top: 50%; width: min(440px, calc(100% - 34px)); transform: translate(-50%, -50%); border: 1px solid rgba(247, 240, 223, 0.25); background: rgba(24, 49, 46, 0.96); color: var(--cream); box-shadow: 12px 14px 0 rgba(255, 103, 77, 0.78); touch-action: auto; }
+.neural-consent { padding: 21px; }
+.neural-consent > span, .neural-progress > span { color: var(--lime); font: 850 8px var(--mono); letter-spacing: 0.12em; }
+.neural-consent h2 { margin: 9px 0 8px; font: 28px/1.04 var(--serif); }
+.neural-consent p { margin: 0; color: rgba(247, 240, 223, 0.7); font-size: 11px; line-height: 1.55; }
+.neural-consent > div { margin-top: 17px; display: grid; grid-template-columns: 1.3fr 1fr; gap: 7px; }
+.neural-consent button { min-height: 43px; padding: 8px 10px; border: 1px solid rgba(247, 240, 223, 0.35); background: transparent; color: var(--cream); cursor: pointer; font: 800 7px var(--mono); letter-spacing: 0.05em; }
+.neural-consent button:first-child { border-color: var(--lime); background: var(--lime); color: var(--ink); }
+.neural-progress { padding: 20px; box-shadow: 10px 12px 0 rgba(95, 199, 223, 0.75); }
+.neural-progress b { margin: 11px 0 16px; display: block; font: 22px/1.1 var(--serif); }
+.neural-progress > div { height: 7px; overflow: hidden; background: rgba(247, 240, 223, 0.13); }
+.neural-progress > div i { display: block; height: 100%; background: linear-gradient(90deg, var(--coral), var(--lime)); transition: width 420ms ease; }
+.neural-progress small { margin-top: 8px; display: block; opacity: 0.55; font: 700 7px var(--mono); letter-spacing: 0.08em; }
 
 .action-tray { margin-top: 14px; display: grid; grid-template-columns: minmax(130px, 1fr) repeat(6, minmax(52px, auto)); gap: 6px; align-items: stretch; }
 .action-tray > div { align-self: center; display: grid; gap: 3px; }
@@ -217,6 +230,8 @@ button:disabled { cursor: not-allowed; opacity: 0.45; }
   .right-tabs { position: static; margin: -28px -18px 24px; }
   .panel-body { min-height: 490px; }
   .story-caption { bottom: 43px; }
+  .neural-consent > div { grid-template-columns: 1fr; }
+  .neural-consent h2 { font-size: 23px; }
   .notice { width: calc(100vw - 22px); justify-content: center; font-size: 7px; }
 }
 

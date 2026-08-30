@@ -3,8 +3,10 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import * as THREE from "three";
 import { DecalGeometry } from "three/addons/geometries/DecalGeometry.js";
+import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { MarchingCubes } from "three/addons/objects/MarchingCubes.js";
 import type { CharacterRig, ContourPoint, SemanticPart, SkeletonPoint } from "../lib/drawing";
+import { disposeObject, prepareNeuralCharacter, type NeuralRigMap, type RiggedAssetInfo } from "../lib/rigged-model";
 
 export type CharacterAction = "idle" | "wave" | "dance" | "hop" | "walk" | "hide" | "spin";
 
@@ -22,9 +24,11 @@ type ARStageProps = {
   action: CharacterAction;
   accent: string;
   inflation: number;
+  neuralAssetUrl: string | null;
   visible: boolean;
   onCapability: (supported: boolean) => void;
   onPlaced: (surface: "screen" | "world", x: number, y: number) => void;
+  onNeuralAssetInfo: (info: RiggedAssetInfo | null) => void;
 };
 
 type SceneHandles = {
@@ -282,7 +286,7 @@ export function buildCharacter(contour: ContourPoint[], skeleton: SkeletonPoint[
 }
 
 export const ARStage = forwardRef<ARStageHandle, ARStageProps>(function ARStage(
-  { contour, skeleton, textureUrl, rig, action, accent, inflation, visible, onCapability, onPlaced },
+  { contour, skeleton, textureUrl, rig, action, accent, inflation, neuralAssetUrl, visible, onCapability, onPlaced, onNeuralAssetInfo },
   ref,
 ) {
   const mountRef = useRef<HTMLDivElement>(null);
@@ -299,6 +303,7 @@ export const ARStage = forwardRef<ARStageHandle, ARStageProps>(function ARStage(
   useEffect(() => {
     const mount = mountRef.current;
     if (!mount) return;
+    let disposed = false;
 
     const width = Math.max(1, mount.clientWidth);
     const height = Math.max(1, mount.clientHeight);
@@ -345,7 +350,25 @@ export const ARStage = forwardRef<ARStageHandle, ARStageProps>(function ARStage(
 
     const characterRoot = new THREE.Group();
     scene.add(characterRoot);
-    if (contour?.length && skeleton?.length && rig) characterRoot.add(buildCharacter(contour, skeleton, rig, textureUrl, accent, inflation));
+    if (neuralAssetUrl) {
+      new GLTFLoader().load(
+        neuralAssetUrl,
+        (gltf) => {
+          if (disposed) {
+            disposeObject(gltf.scene);
+            return;
+          }
+          const prepared = prepareNeuralCharacter(gltf.scene);
+          characterRoot.add(prepared.character);
+          onNeuralAssetInfo(prepared.info);
+        },
+        undefined,
+        () => { if (!disposed) onNeuralAssetInfo(null); },
+      );
+    } else if (contour?.length && skeleton?.length && rig) {
+      characterRoot.add(buildCharacter(contour, skeleton, rig, textureUrl, accent, inflation));
+      onNeuralAssetInfo(null);
+    }
 
     const shadowMaterial = new THREE.MeshBasicMaterial({ color: 0x102927, transparent: true, opacity: 0.2, depthWrite: false });
     const shadow = new THREE.Mesh(new THREE.CircleGeometry(0.64, 64), shadowMaterial);
@@ -376,6 +399,12 @@ export const ARStage = forwardRef<ARStageHandle, ARStageProps>(function ARStage(
       root.rotation.z = Math.sin(elapsed * 0.9) * 0.012;
 
       const articulated = root.getObjectByName("wallalive-semantic-character");
+      const neural = root.getObjectByName("wallalive-neural-character");
+      const neuralRig = neural?.userData.wallaliveRig as NeuralRigMap | undefined;
+      neuralRig?.all.forEach((bone) => {
+        const base = bone.userData.wallaliveBaseQuaternion as THREE.Quaternion | undefined;
+        if (base) bone.quaternion.copy(base);
+      });
       rig?.parts.filter((part) => part.kind === "ear" || part.kind === "arm" || part.kind === "leg").forEach((part) => {
         const node = articulated?.getObjectByName(`rig-${part.id}`);
         if (node) {
@@ -394,6 +423,9 @@ export const ARStage = forwardRef<ARStageHandle, ARStageProps>(function ARStage(
       if (currentAction === "wave") {
         const arm = articulated?.getObjectByName("rig-arm-right") ?? articulated?.getObjectByName("rig-arm-left");
         if (arm) arm.rotation.z = Number(arm.userData.baseRotationZ ?? 0) + 0.92 + Math.sin(elapsed * 7.2) * 0.42;
+        const neuralArm = neuralRig?.armRight ?? neuralRig?.armLeft;
+        neuralArm?.rotateZ(0.72 + Math.sin(elapsed * 7.2) * 0.42);
+        neuralArm?.rotateX(Math.sin(elapsed * 4.1) * 0.22);
         root.rotation.y = rotationRef.current.yaw - 0.18 + Math.sin(elapsed * 4.8) * 0.08;
         root.rotation.z = -0.035 + Math.sin(elapsed * 5.6) * 0.035;
         root.position.y += Math.sin(elapsed * 5.6) * 0.025;
@@ -403,6 +435,10 @@ export const ARStage = forwardRef<ARStageHandle, ARStageProps>(function ARStage(
         const rightArm = articulated?.getObjectByName("rig-arm-right");
         if (leftArm) leftArm.rotation.z = Number(leftArm.userData.baseRotationZ ?? 0) + Math.sin(elapsed * 5.2) * 0.55;
         if (rightArm) rightArm.rotation.z = Number(rightArm.userData.baseRotationZ ?? 0) - Math.sin(elapsed * 5.2) * 0.55;
+        neuralRig?.armLeft?.rotateZ(0.52 + Math.sin(elapsed * 5.2) * 0.45);
+        neuralRig?.armRight?.rotateZ(-0.52 - Math.sin(elapsed * 5.2) * 0.45);
+        neuralRig?.legLeft?.rotateX(Math.sin(elapsed * 5.2) * 0.22);
+        neuralRig?.legRight?.rotateX(-Math.sin(elapsed * 5.2) * 0.22);
         root.rotation.z = Math.sin(elapsed * 5.2) * 0.18;
         root.rotation.y = rotationRef.current.yaw + Math.sin(elapsed * 2.6) * 0.18;
         root.position.x = placement.x + Math.sin(elapsed * 3.4) * 0.15;
@@ -416,6 +452,10 @@ export const ARStage = forwardRef<ARStageHandle, ARStageProps>(function ARStage(
         const rightLeg = articulated?.getObjectByName("rig-leg-right");
         if (leftLeg) leftLeg.rotation.x = Math.sin(elapsed * 7) * 0.5;
         if (rightLeg) rightLeg.rotation.x = -Math.sin(elapsed * 7) * 0.5;
+        neuralRig?.legLeft?.rotateX(Math.sin(elapsed * 7) * 0.48);
+        neuralRig?.legRight?.rotateX(-Math.sin(elapsed * 7) * 0.48);
+        neuralRig?.armLeft?.rotateX(-Math.sin(elapsed * 7) * 0.24);
+        neuralRig?.armRight?.rotateX(Math.sin(elapsed * 7) * 0.24);
         root.position.x = placement.x + Math.sin(elapsed * 1.5) * 0.85;
         root.rotation.z = Math.sin(elapsed * 6) * 0.055;
         root.rotation.y = rotationRef.current.yaw + Math.sin(elapsed * 3) * 0.12;
@@ -458,19 +498,10 @@ export const ARStage = forwardRef<ARStageHandle, ARStageProps>(function ARStage(
     observer.observe(mount);
 
     const dispose = () => {
+      disposed = true;
       observer.disconnect();
       renderer.setAnimationLoop(null);
-      scene.traverse((object) => {
-        if (!(object instanceof THREE.Mesh)) return;
-        object.geometry.dispose();
-        const materials = Array.isArray(object.material) ? object.material : [object.material];
-        materials.forEach((material) => {
-          if ("map" in material && material.map instanceof THREE.Texture) material.map.dispose();
-          if ("alphaMap" in material && material.alphaMap instanceof THREE.Texture && material.alphaMap !== material.map) material.alphaMap.dispose();
-          if ("displacementMap" in material && material.displacementMap instanceof THREE.Texture) material.displacementMap.dispose();
-          material.dispose();
-        });
-      });
+      disposeObject(scene);
       renderer.dispose();
       if (renderer.domElement.parentNode === mount) mount.removeChild(renderer.domElement);
     };
@@ -483,7 +514,7 @@ export const ARStage = forwardRef<ARStageHandle, ARStageProps>(function ARStage(
       handlesRef.current = null;
       dispose();
     };
-  }, [accent, contour, inflation, onCapability, rig, skeleton, textureUrl, visible]);
+  }, [accent, contour, inflation, neuralAssetUrl, onCapability, onNeuralAssetInfo, rig, skeleton, textureUrl, visible]);
 
   useImperativeHandle(ref, () => ({
     placeNormalized(x: number, y: number, scale = placementRef.current.scale) {

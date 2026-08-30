@@ -6,87 +6,90 @@
 
 **Public source:** https://github.com/mongonsh/wallalive-webmcp
 
-WallAlive turns a child’s drawing into a closed, rounded 3D character that can live and perform in the real room. A child explicitly opens the camera and approves a drawing; then a compatible browser agent can reconstruct its volume, name it, shape its personality, place it, animate it, recolor its generated surface, and direct a mini story through WebMCP.
+WallAlive turns one human-approved drawing into a colored, 360° **rigged 3D character** in the camera view. It uses [AniGen](https://github.com/VAST-AI-Research/AniGen) to generate a coherent mesh, unseen surfaces, skeleton, and skinning weights from a single image, then loads the result as a Three.js `SkinnedMesh`. WebMCP lets a browser agent name, place, animate, recolor, and direct that same visible character.
 
-The camera is intentionally **not** a WebMCP tool. Drawing extraction happens in browser memory, no image is uploaded, and the agent receives semantic shape/color analysis only after human approval.
+The old contour inflation is retained only as a clearly labeled **rough private preview**. It is never presented as neural reconstruction.
 
 ## Why this needs WebMCP
 
-WallAlive is a shared imagination surface, not a chat box attached to an AR demo:
+- Human and agent actions update the same visible character and AR scene.
+- The agent composes personality, placement, movement, and story through eight narrow tools.
+- The camera is deliberately absent from the tool surface.
+- A WebMCP tool may request reconstruction, but only a visible human action can approve the isolated-image upload.
+- Every action is attributed to `CHILD`, `BROWSER AGENT`, or `WALLALIVE`.
+- `inspect_wall_scene` exposes the real provider, model, GLB type, mesh/bone counts, generation phase, and privacy boundary.
 
-- Human and agent actions update the same visible character and scene.
-- The browser agent composes personality, placement, motion, and story through narrow tools.
-- A human-only camera boundary is enforced by capability design, not prompt instructions.
-- Every action is visibly attributed to `CHILD`, `BROWSER AGENT`, or `WALLALIVE`.
-- Tool calls return verification-rich state so the agent can observe what actually happened.
-- The app has no embedded model, API key, account, or server-side image pipeline.
+## The real 3D loop
 
-## The magic loop
+1. **Scan locally:** the child opens the camera, taps the character, and captures. WallAlive separates one drawing from paper edges, text, and foreground clutter in browser memory.
+2. **Approve minimally:** a second visible approval explains that only the isolated drawing—not the live camera or room frame—will be sent to AniGen.
+3. **Generate jointly:** AniGen’s `ss_flow_solo` + `slat_flow_auto` path predicts full geometry, a skeleton of arbitrary complexity, and smooth skinning weights together.
+4. **Load and play:** the browser downloads the returned GLB into a tab-local Blob URL. Three.js loads its `SkinnedMesh`, classifies arm/leg bone branches, and drives wave, dance, walk, hop, hide, and spin actions.
+5. **Enter AR:** Android/WebXR devices can place the same model with surface hit testing; iPhone and other browsers use the camera-overlay experience.
 
-1. **Scan:** the child presses **Start camera**, taps the character, and captures. Local adaptive ink detection preserves vivid or dark strokes while rejecting smooth lighting changes.
-2. **Sculpt:** WallAlive scores line-art candidates against the tap, rejects dense foreground clutter and rectangular paper borders, closes small gaps, and flood-fills the chosen silhouette. A distance transform extracts medial-axis nodes with a local radius at each node. Those disks become overlapping 3D spheres in a 64³ implicit field; Marching Cubes polygonizes their union as a rounded front, sides, and back.
-3. **Play:** a browser agent places the character and directs movements or a four-beat story.
-4. **Enter AR:** supported Android/WebXR devices use surface hit testing; every other modern browser gets the camera-overlay experience.
-
-Press **Play Judge Demo** for a deterministic, camera-free version of the complete loop.
+**Play Judge Demo** loads a previously generated AniGen reference result immediately, without spending public GPU quota. The fixture is a colored 159,930-vertex `SkinnedMesh` with 20 bones; tests parse the binary GLB and enforce those invariants.
 
 ## WebMCP tool surface
 
 | Tool | Mode | Purpose |
 | --- | --- | --- |
-| `inspect_wall_scene` | Read | Returns approved drawing semantics, character state, AR capability, and the privacy boundary. |
-| `reconstruct_volumetric_character` | Write | Converts the approved silhouette’s medial skeleton and local radii into a closed 64³ sphere-union volume with a name, personality, accent, and bounded inflation strength. |
-| `set_character_personality` | Write | Changes performance intent without altering the child’s original pixels. |
-| `place_character` | Write | Places and scales the character at a normalized position in the visible scene. |
-| `animate_character` | Write | Plays one of seven safe visible actions. |
-| `recolor_character` | Write | Recolors only the generated solid edge; original drawing colors stay untouched. |
-| `tell_character_story` | Write | Performs a cancellable one-to-four-beat story with animation and captions. |
+| `inspect_wall_scene` | Read | Returns approved drawing state, actual reconstruction provider/type/counts, AR capability, and privacy boundary. |
+| `reconstruct_rigged_3d_character` | Write | Uses an already approved AniGen rig. If absent, surfaces the human approval UI but cannot upload or approve it. |
+| `set_character_personality` | Write | Changes performance intent without modifying the original drawing. |
+| `place_character` | Write | Places and scales the character in the visible scene. |
+| `animate_character` | Write | Drives one safe action on the generated skeleton. |
+| `recolor_character` | Write | Changes a generated presentation accent, not the original pixels. |
+| `tell_character_story` | Write | Performs a cancellable one-to-four-beat story. |
 | `list_activity` | Read | Returns recent attributed actions without camera or image data. |
 
-All tools have strict JSON schemas, `additionalProperties: false`, cancellation signals, read/write annotations, bounded inputs, shared validation, and explicit error results. There is deliberately no `open_camera`, `capture_image`, or `upload_drawing` tool.
+All tools use strict schemas, `additionalProperties: false`, cancellation signals, bounded inputs, read/write annotations, and explicit error results. There is no camera, capture, or upload tool.
 
-## Demo prompt
+## Privacy boundary
 
-> Inspect the approved drawing. Turn it into a shy but brave character, place it on the wall, then tell a three-beat story where it hides, hops, and waves.
+- Camera start and capture are human-only UI gestures.
+- Segmentation and the first preview happen locally.
+- The agent never receives live frames or raw image pixels.
+- Neural generation requires a separate visible human approval.
+- Only the isolated drawing is sent to the selected AniGen Space.
+- Returned GLBs are copied to tab-local Blob URLs and released when replaced or when the tab closes.
 
-## Browser support
+## Browser and inference support
 
 | Capability | Support |
 | --- | --- |
-| Camera capture + 3D overlay | Modern mobile and desktop browsers over HTTPS |
-| Immersive room placement | WebXR `immersive-ar` + `hit-test`, typically Chrome on compatible Android devices |
-| iPhone/iPad and non-WebXR browsers | Full camera-overlay fallback; immersive hit testing is not claimed |
-| No-camera judging | Built-in demo doodle and one-click judge sequence |
+| Camera capture + 3D overlay | Modern mobile/desktop browsers over HTTPS with WebGL |
+| Rigged single-image 3D | AniGen public Space for the demo; dedicated AniGen GPU recommended for production |
+| Immersive room placement | WebXR `immersive-ar` + `hit-test`, usually compatible Android Chrome devices |
+| iPhone/iPad and non-WebXR browsers | Camera overlay; immersive hit testing is not claimed |
+| No-camera judging | Bundled verified AniGen GLB and one-click story |
 
-WallAlive constructs a genuine closed polygonal 3D surface from the captured silhouette; it does not claim photogrammetry, neural 360° inference, or anatomy that was not drawn. This is a browser-native implementation of the silhouette-inflation family introduced by Teddy and later used for playful single-view modeling in Monster Mash. High-contrast closed line art produces the cleanest extraction. See [RESEARCH.md](./docs/RESEARCH.md) for the algorithm decision and neural upgrade boundary.
+The public Hugging Face ZeroGPU service is capacity-limited and can reject or queue live generations. A reliable public product must self-host AniGen on an NVIDIA GPU with at least 18 GB VRAM or configure a dedicated endpoint. No single-view model can guarantee a perfect artist-authored back; quality varies with occlusion, ambiguity, and input clarity.
 
 ## Architecture
 
 ```text
-human camera gesture + tap target
-        │ adaptive ink mask + target-aware candidate scoring
-        ▼
-clutter/border rejection + flood-filled silhouette
+human camera gesture + tap
         │
         ▼
-medial-axis ridge nodes + local distance radii
-        │                     │
-        │                     └── WebMCP reads semantic state only
-        ▼
-64³ implicit sphere union + Marching Cubes ◄── WebMCP reconstruct / place / animate / story
+local target-aware drawing isolation ──────► rough private preview
         │
-        ├── curved original-art front + generated rounded back
-        ├── WebXR hit-test placement when supported
-        └── transparent camera overlay everywhere else
+        ├── visible isolated-image approval (human only)
+        ▼
+AniGen: image condition → shape + skeleton + skin weights
+        │
+        ▼
+rigged GLB → local Blob URL → Three.js GLTFLoader / SkinnedMesh
+        │                              ▲
+        ├── 360° camera overlay / AR   └── WebMCP place / animate / story
+        └── WebXR hit-test placement
 ```
 
 - React 19 + TypeScript, built with vinext for Cloudflare/Sites
-- Three.js Marching Cubes over a medial-skeleton sphere union, plus a CPU-curved original-art surface with recomputed normals
-- WebXR `immersive-ar` session with real-world hit testing
+- Three.js `GLTFLoader`, `SkinnedMesh`, procedural bone actions, and WebXR hit testing
+- Lazy-loaded `@gradio/client` connection to AniGen
 - `document.modelContext.registerTool()` imperative WebMCP integration
-- One canonical action layer shared by UI controls and tool executors
-- Session-only Canvas data URLs; no network path in drawing extraction
-- Permissions Policy for WebMCP tools, camera, and WebXR; plus referrer, MIME sniffing, and frame protection headers
+- One canonical action layer shared by UI and tool executors
+- Deterministic contour preview remains available when the user declines upload
 
 ## Local development
 
@@ -105,6 +108,6 @@ npm test
 npm audit --omit=dev
 ```
 
-## License
+## Attribution and license
 
-MIT — see [LICENSE](./LICENSE).
+WallAlive is MIT licensed. The neural reconstruction path uses [AniGen](https://github.com/VAST-AI-Research/AniGen), whose project and model card are MIT licensed; AniGen’s repository separately notes research/non-commercial restrictions on a bundled CUBVH-derived component, which must be reviewed before commercial self-hosting. The bundled judge fixture was generated by the official AniGen Space from its `brickbob.png` reference input and is included for reproducible, quota-free evaluation. See [docs/RESEARCH.md](./docs/RESEARCH.md) for the evaluated alternatives and exact capability boundary.

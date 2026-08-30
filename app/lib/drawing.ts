@@ -1236,3 +1236,20 @@ export function createDemoDoodle(): DrawingExtraction {
   // skeleton pipeline as a live capture; it is not a pre-cut 3D asset.
   return extractDrawingFromCanvas(preview, { x: 208 / preview.width, y: 234 / preview.height });
 }
+
+export function createAniGenDemoDrawing(): DrawingExtraction {
+  const fallback = createDemoDoodle();
+  return {
+    ...fallback,
+    textureUrl: "/anigen-demo-input.png",
+    previewUrl: "/anigen-demo-input.png",
+    analysis: {
+      ...fallback.analysis,
+      dominantColor: "#f15b2a",
+      secondaryColor: "#173653",
+      aspectRatio: 0.72,
+      shapeHint: "tall",
+      edgeEnergy: "bold",
+    },
+  };
+}

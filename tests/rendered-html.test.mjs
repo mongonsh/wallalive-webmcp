@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import test from "node:test";
+import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+import { parseAniGenPreview } from "../app/lib/anigen.ts";
 import { extractMedialSkeleton, inferSemanticRig, recoverTargetSilhouette, scoreDrawingCandidate } from "../app/lib/drawing.ts";
+import { prepareNeuralCharacter } from "../app/lib/rigged-model.ts";
 
 async function render() {
   const workerUrl = new URL("../dist/server/index.js", import.meta.url);
@@ -36,7 +39,7 @@ test("registers eight strict WebMCP tools without camera authority", async () =>
   const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
   const expectedTools = [
     "inspect_wall_scene",
-    "reconstruct_volumetric_character",
+    "reconstruct_rigged_3d_character",
     "set_character_personality",
     "place_character",
     "animate_character",
@@ -56,16 +59,19 @@ test("registers eight strict WebMCP tools without camera authority", async () =>
   assert.match(page, /readOnlyHint/);
   assert.match(page, /Camera capture is human-only/);
   assert.match(page, /cameraFeedExposed: false/);
-  assert.match(page, /neuralModelUsed: false/);
-  assert.match(page, /volumeResolution: 64/);
-  assert.match(page, /SEMANTIC 3D DNA/);
-  assert.match(page, /texturePlane: false/);
+  assert.match(page, /neuralModelUsed: Boolean\(neuralAssetRef\.current\)/);
+  assert.match(page, /AniGen joint mesh-skeleton-skinning reconstruction/);
+  assert.match(page, /requiresHumanApproval: true/);
+  assert.match(page, /UPLOAD APPROVED DRAWING/);
+  assert.match(page, /externalUploadApproved/);
+  assert.match(page, /ANIGEN RIG DNA/);
   assert.match(page, /viewableDegrees: 360/);
 });
 
 test("implements local drawing extraction and real WebXR hit testing", async () => {
   const drawing = await readFile(new URL("../app/lib/drawing.ts", import.meta.url), "utf8");
   const stage = await readFile(new URL("../app/components/ARStage.tsx", import.meta.url), "utf8");
+  const riggedModel = await readFile(new URL("../app/lib/rigged-model.ts", import.meta.url), "utf8");
 
   assert.match(drawing, /getImageData/);
   assert.match(drawing, /toDataURL/);
@@ -91,11 +97,60 @@ test("implements local drawing extraction and real WebXR hit testing", async () 
   assert.match(stage, /TubeGeometry/);
   assert.match(stage, /texturePlane: false/);
   assert.match(stage, /viewableDegrees: 360/);
+  assert.match(stage, /GLTFLoader/);
+  assert.match(riggedModel, /SkinnedMesh/);
+  assert.match(stage, /wallalive-neural-character/);
+  assert.match(riggedModel, /wallaliveBaseQuaternion/);
+  assert.match(riggedModel, /generated full 3D surface/);
   assert.doesNotMatch(stage, /PlaneGeometry|drawing-curved-over-inflated-front/);
   assert.match(stage, /isSessionSupported\("immersive-ar"\)/);
   assert.match(stage, /requestSession\("immersive-ar"/);
   assert.match(stage, /requiredFeatures: \["hit-test"\]/);
   assert.match(stage, /getHitTestResults/);
+});
+
+test("ships a verified colored AniGen SkinnedMesh instead of a 2D extrusion", async () => {
+  const assetUrl = new URL("../public/anigen-demo.glb", import.meta.url);
+  const metadata = await stat(assetUrl);
+  assert.ok(metadata.size > 5_000_000, `expected a substantive generated GLB, got ${metadata.size} bytes`);
+  const buffer = await readFile(assetUrl);
+  const gltf = await new Promise((resolve, reject) => {
+    new GLTFLoader().parse(buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength), "", resolve, reject);
+  });
+  let meshes = 0;
+  let skinnedMeshes = 0;
+  let bones = 0;
+  let vertices = 0;
+  gltf.scene.traverse((object) => {
+    if (object.isMesh) {
+      meshes += 1;
+      vertices += object.geometry.getAttribute("position")?.count ?? 0;
+    }
+    if (object.isSkinnedMesh) skinnedMeshes += 1;
+    if (object.isBone) bones += 1;
+  });
+  assert.equal(meshes, 1);
+  assert.equal(skinnedMeshes, 1);
+  assert.equal(bones, 20);
+  assert.ok(vertices > 100_000, `expected detailed generated geometry, got ${vertices} vertices`);
+  const prepared = prepareNeuralCharacter(gltf.scene);
+  assert.deepEqual(prepared.info, { meshes: 1, skinnedMeshes: 1, bones: 20, vertices });
+  assert.ok(prepared.rigMap.armLeft, "expected a generated left-arm bone branch");
+  assert.ok(prepared.rigMap.armRight, "expected a generated right-arm bone branch");
+  assert.ok(prepared.rigMap.legLeft, "expected a generated left-leg bone branch");
+  assert.ok(prepared.rigMap.legRight, "expected a generated right-leg bone branch");
+  const skinned = gltf.scene.getObjectByProperty("isSkinnedMesh", true);
+  assert.ok(skinned?.geometry.getAttribute("skinIndex"), "expected per-vertex bone indices");
+  assert.ok(skinned?.geometry.getAttribute("skinWeight"), "expected per-vertex skinning weights");
+});
+
+test("parses AniGen preview mesh and skeleton files from nested Gradio output", () => {
+  const parsed = parseAniGenPreview([
+    { url: "https://example.test/preview_mesh.glb", mime_type: "model/gltf-binary" },
+    [{ path: "/tmp/preview_skeleton.glb" }],
+  ]);
+  assert.equal(parsed.meshUrl, "https://example.test/preview_mesh.glb");
+  assert.match(parsed.skeletonUrl ?? "", /preview_skeleton\.glb$/);
 });
 
 test("prefers a targeted line-art character over dense lower-frame clutter", () => {

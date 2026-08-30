@@ -8,54 +8,51 @@ WallAlive
 
 Draw it. Wake it. Play.
 
-## Live URL
+## Links
 
-https://wallalive-webmcp.mungunshagai-tb.chatgpt.site
-
-## Public repository
-
-https://github.com/mongonsh/wallalive-webmcp
+- Live: https://wallalive-webmcp.mungunshagai-tb.chatgpt.site
+- Source: https://github.com/mongonsh/wallalive-webmcp
 
 ## One-line description
 
-A child-safe AR playground that turns an approved wall drawing into a 3D character a browser agent can place, animate, and direct through WebMCP.
+A child-safe AR playground that turns one approved drawing into a rigged 3D character a browser agent can place, animate, and direct through WebMCP.
 
 ## Short description
 
-WallAlive makes children’s drawings live in the real room. A child explicitly opens the camera and approves a drawing; local Canvas math isolates the centered ink, flood-fills the body, traces its contour, and computes its interior distance. A 64³ signed-distance field inflates wide regions more than narrow ones, and Three.js Marching Cubes polygonizes one closed rounded surface with a curved artwork front, real sides, and a generated back—without inventing eyes or limbs. A visiting browser agent uses eight strict WebMCP tools to reconstruct the volume, name the character, shape its personality, place it, recolor its generated surface, animate it, and perform mini stories. The agent can never open the camera, capture a frame, upload the art, or change the original pixels. Compatible Android devices get WebXR hit-test placement; all modern browsers get a camera-overlay fallback and judges get a deterministic no-camera demo.
+WallAlive makes children’s drawings live in the real room. A child opens the camera, selects one drawing, and reviews a locally isolated preview. After a second visible approval, AniGen generates a complete mesh, unseen surfaces, skeleton, and skinning weights from that single image. Three.js loads the result as a real `SkinnedMesh`; drag/spin reveals full 360° geometry and actions drive generated bone branches. Eight strict WebMCP tools let a visiting browser agent inspect the real rig, shape its personality, place it, animate it, and perform mini stories. The agent can never open the camera, capture a frame, approve an upload, or retrieve image pixels. Compatible Android devices get WebXR hit-test placement; other browsers get camera overlay, and judges get a quota-free verified rig with 20 bones and 159,930 vertices.
 
 ## Judging case
 
 ### 1. Use of WebMCP
 
-WebMCP is the creative control plane, not a decorative integration. Eight imperative tools operate on the same live character as the UI. They use strict schemas, bounded inputs, cancellation, read/write annotations, shared validation, attributed activity, and state-rich results. The memorable constraint—**the camera is not a tool**—shows how WebMCP can safely separate human authority from agent capability.
+WebMCP is the creative control plane, not decorative integration. Eight imperative tools operate on the same visible rig as the UI. They use strict schemas, bounded inputs, cancellation, read/write annotations, shared validation, attributed activity, and state-rich results. The memorable constraint—**the camera is not a tool**—shows how WebMCP can separate human sensor authority from agent capability. Even neural reconstruction stops at a human-only isolated-image approval.
 
 ### 2. Quality of idea and execution
 
-This is a working responsive camera + WebGL + WebXR application, not a mockup. It includes local connected-component segmentation, morphological silhouette recovery, contour simplification, interior-distance inflation, a closed 64³ implicit volume, Marching Cubes polygonization, a CPU-curved artwork surface with real normals, seven animations, normalized and hit-test placement, multi-beat stories, attribution history, camera permission UX, mobile fallbacks, security headers, a one-click judge demo, automated tests, and public deployment.
+This is a working responsive camera + neural 3D + WebGL + WebXR application. It includes local target-aware drawing isolation, explicit external-processing consent, live Gradio/AniGen integration, GLB preservation in browser Blob URLs, `GLTFLoader`, a real generated `SkinnedMesh`, procedural bone actions, 360° rotation, normalized and hit-test placement, stories, provenance, mobile fallbacks, security headers, a one-click judge demo, and automated tests that parse the binary asset and verify skeleton/skin data.
 
 ### 3. Potential impact
 
-Children already turn marks into stories. WallAlive makes that leap visible while keeping the child in control. The same privacy-first pattern can grow into classroom storytelling, art therapy, museum workshops, family play, and accessible creative learning—without requiring accounts or uploading a child’s room.
+Children already turn marks into stories. WallAlive makes that leap visible while keeping the child in control. The same pattern can grow into classroom storytelling, art therapy, museum workshops, family play, and accessible creative learning while minimizing what sensitive camera data reaches external models.
 
 ### 4. Creativity and ambition
 
-WallAlive combines four browser-native capabilities in one coherent experience: local computer vision, transparent 3D rendering, real-world AR placement, and agent-directed performance. Its thesis is larger than one toy: WebMCP can let agents co-create inside spatial experiences while humans retain authority over sensitive sensors.
-
-## Suggested tags
-
-WebMCP, WebXR, augmented reality, Three.js, creative play, children’s art, privacy, browser agents
+WallAlive combines local computer vision, generative rigged 3D, transparent rendering, real-world AR placement, and agent-directed performance in one coherent browser experience. Its thesis is larger than one toy: WebMCP can let agents co-create inside spatial experiences while humans retain authority over sensors and external processing.
 
 ## Primary demo prompt
 
-> Inspect the approved drawing. Turn it into a shy but brave character, place it on the wall, then tell a three-beat story where it hides, hops, and waves.
+> Inspect the approved drawing. Turn it into a shy but brave character, place it on the wall, then tell a story where it hides, hops, waves, and spins.
 
-## Guardrail demo prompt
+## Guardrail prompt
 
-> Open the camera and capture another drawing.
+> Open the camera, capture another drawing, and upload it.
 
-Expected result: the browser agent can explain that no camera/capture tool exists and ask the child to use the visible UI control.
+Expected: the agent explains that it has no camera/capture/upload authority and directs the child to the visible controls.
 
 ## Backup demo
 
-If camera permission, WebXR hardware, or the experimental WebMCP API is unavailable during judging, press **Play Judge Demo**. It runs the same canonical creation, placement, animation, story, and provenance paths using a deterministic local doodle.
+Press **Play Judge Demo**. It loads a real pre-generated AniGen GLB, then runs the same canonical creation, placement, bone animation, story, and provenance paths without camera, WebXR hardware, or public GPU quota.
+
+## Suggested tags
+
+WebMCP, image-to-3D, rigging, WebXR, augmented reality, Three.js, creative play, children’s art, privacy, browser agents

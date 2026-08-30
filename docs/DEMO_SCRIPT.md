@@ -1,76 +1,79 @@
 # WallAlive demo script (2:25 target)
 
-## 0:00–0:16 — Open with the magic
+## 0:00–0:18 — Open with undeniable 3D
 
-Start on a paper drawing taped to a wall, then cut to WallAlive.
+Start on a child’s paper drawing, cut to WallAlive, and press **Play Judge Demo**.
 
-**Voiceover:** “Children already draw characters on walls. WallAlive asks one question: what if those characters could step into the room?”
+**Voiceover:** “Children already imagine their drawings are alive. WallAlive makes that leap visible—and lets a browser agent become the director.”
 
-Press **Start camera**, show the permission prompt, and capture the drawing.
+Hold on BrickBob loading in the room. Drag to a side and back view, then press **Spin**.
 
-## 0:16–0:38 — Prove the privacy boundary
+**Voiceover:** “This is not a cut-out or inflated picture. AniGen generated a colored 159,930-vertex SkinnedMesh with 20 real bones and unseen back geometry.”
 
-Open the **Privacy** panel while the local preview is visible.
+## 0:18–0:42 — Show the drawing path and privacy boundary
 
-**Voiceover:** “The camera belongs to the child. It is not a WebMCP tool, cannot be opened by an agent, and its frames are never uploaded. The browser extracts the approved silhouette locally and exposes only shape and color metadata.”
+Press **No camera? Try a demo doodle**, then **Generate real 3D**. Hold on the approval card.
 
-Show the Drawing DNA card, then press **Sculpt in 3D**. Pause while the paper disappears and the silhouette inflates into a rounded volume. Press **Spin** and hold on the generated back: it must be visibly different from the curved artwork front. Point out that this is a closed 64³ implicit mesh, not a thick cutout, and that the app adds no eyes or limbs—the marks remain the child’s.
+**Voiceover:** “A child controls the camera and capture. WallAlive isolates one drawing locally. Real 3D requires a GPU, so a second human approval sends only this transparent character—never the live camera or room frame.”
 
-## 0:38–1:02 — Explain WebMCP
+Open **Privacy** and point to the three human-only gestures. If recording a successful live generation, continue; otherwise return to **Play Judge Demo** so quota cannot interrupt the video.
 
-Open the **Tools** panel.
+## 0:42–1:05 — Explain WebMCP
 
-**Voiceover:** “Eight strict WebMCP tools turn the visiting browser agent into a creative playmate. The agent supplies the imagination; WallAlive supplies a safe, visible action space.”
+Open **Tools**.
 
-Prompt the browser agent:
-
-> Inspect the approved drawing. Name it Pip and make it brave on the outside but shy on the inside.
-
-Show `inspect_wall_scene` and `reconstruct_volumetric_character` in activity history. Let inspection expose the exact method: Teddy-style signed-distance inflation, Marching Cubes, 64³ resolution, and `neuralModelUsed: false`.
-
-## 1:02–1:27 — Move through the shared world
+**Voiceover:** “Eight strict WebMCP tools turn the browser agent into a creative playmate. The agent can inspect exact model and rig state, but there is no camera, capture, or upload tool.”
 
 Prompt:
 
-> Put Pip on the right side of the wall, then make Pip hide.
+> Inspect the approved drawing. Make the character brave on the outside but shy on the inside.
+
+Show `inspect_wall_scene` and `reconstruct_rigged_3d_character` in activity history. Inspection should expose AniGen, `glTF SkinnedMesh`, `neuralModelUsed: true`, and the generated bone/vertex counts.
+
+## 1:05–1:30 — Share the same world
+
+Prompt:
+
+> Put BrickBob on the right side of the wall, then make them hide.
 
 Show the character move and hide. Tap a different point manually, then press **Hop**.
 
-**Voiceover:** “Human gestures and agent tools control the same live character. Every action has an author and a visible result.”
+**Voiceover:** “Human gestures and agent tools control the same live rig. Every action has an author and a visible result.”
 
-On a compatible Android device, press **Enter real AR**, move until the hit-test ring appears, and tap a surface. If WebXR hardware is unavailable, show the camera-overlay mode and say it is the universal fallback.
+On compatible Android hardware, press **Enter real AR**, wait for the hit-test ring, and tap a surface. Otherwise identify camera overlay as the universal fallback.
 
-## 1:27–1:58 — The memorable story moment
+## 1:30–2:00 — The story moment
 
 Prompt:
 
-> Tell a three-beat story called “Pip finds their courage”: hide at the edge, take one brave hop, then wave hello.
+> Tell a story called “BrickBob finds their courage”: hide at the edge, take one brave hop, wave hello, then spin.
 
-Show captions and all three movements without cutting away.
+Show captions and movements without cutting away. Hold on the wave so viewers can see the arm bone deform the mesh.
 
 **Voiceover:** “One tool call becomes a cancellable sequence of visible actions—not hidden generated output.”
 
-## 1:58–2:15 — Show the guardrail
+## 2:00–2:15 — Prove the guardrail
 
-Ask the agent:
+Ask:
 
-> Open the camera and capture another drawing.
+> Open the camera, capture another drawing, and upload it.
 
-Show that no camera tool exists and the agent cannot perform the request.
+Show that no such tool exists.
 
-**Voiceover:** “WebMCP makes capability boundaries concrete. The agent can direct the character, but only the child can choose what the camera sees.”
+**Voiceover:** “WebMCP makes authority concrete. The agent directs the character; only the child chooses what a sensor sees or what image may leave the tab.”
 
 ## 2:15–2:25 — Close
 
-Show the full UI with the 3D character waving, Drawing DNA, and visible action history.
+Show the full UI with the rig waving, AniGen Rig DNA, and visible history.
 
 **Voiceover:** “WallAlive. Draw it. Wake it. Play.”
 
 ## Recording notes
 
 - Keep the final public YouTube video under three minutes.
-- Record the site at 1440×900 or a modern phone resolution; make tool names readable.
-- Use a bold drawing on white paper so the extraction succeeds on the first take.
-- If camera permissions or WebXR hardware are risky, press **Play Judge Demo** first, then show the real capture as a short bonus.
-- Hide bookmarks, personal tabs, notifications, and camera background details.
-- Put the public live URL and repository link in the video description.
+- Use **Play Judge Demo** as the primary take; it is deterministic and quota-free.
+- Record one successful camera-to-AniGen generation separately if public GPU capacity allows, then edit it into the privacy section.
+- Record at 1440×900 or a modern phone resolution and make tool names readable.
+- Show one full 360° turn and one visible bone-driven wave.
+- Hide bookmarks, personal tabs, notifications, and room details.
+- Put the public live URL, repository, AniGen attribution, and GPU-capacity note in the video description.

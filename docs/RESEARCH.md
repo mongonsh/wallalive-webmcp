@@ -1,52 +1,63 @@
-# Reconstruction and WebMCP research
+# Drawing-to-rigged-3D and WebMCP research
 
-This note records the technical boundary WallAlive actually implements. It is intentionally specific so the demo never confuses a thick 2D cutout with volumetric reconstruction, or a browser-native geometric method with a neural model.
+This note records what WallAlive actually does, why the previous silhouette method was insufficient, and the boundary between local privacy work and neural reconstruction.
 
-## Reconstruction approaches reviewed
+## Root cause of the previous result
 
-### Teddy-style sketch inflation — implemented
+The earlier app projected drawing pixels onto a Marching Cubes body derived from the 2D contour. That can create a closed rounded surface, but it has no learned 3D prior and no real skinned-mesh asset type. Every input therefore became a version of its front silhouette. More contour tuning could not infer unseen anatomy, separate semantic parts reliably, or produce skeleton and skin weights.
 
-Igarashi, Matsuoka, and Tanaka’s SIGGRAPH 1999 paper [Teddy: A Sketching Interface for 3D Freeform Design](https://doi.org/10.1145/311535.311602) constructs plausible polygonal surfaces from 2D silhouettes. Its central intuition is that wide parts of a silhouette should become fat while narrow parts become thin. The authors’ [official Teddy project page](https://www-ui.is.s.u-tokyo.ac.jp/~takeo/teddy/teddy.htm) provides the original project context.
+That path now appears only as **rough private preview** when a user declines neural processing.
 
-WallAlive implements that family of geometry locally:
+## Systems evaluated
 
-1. Build an adaptive ink mask from chroma, darkness, and local contrast instead of treating every global background-color change as ink.
-2. Score connected line-art candidates against the child’s tap while penalizing dense lower-frame clutter, extreme aspect ratios, frame edges, and rectangular paper borders.
-3. Morphologically close small stroke gaps and recover the chosen closed silhouette by outside flood fill.
-4. Compute a two-pass chamfer distance transform inside the silhouette.
-5. Extract medial-axis ridges and retain non-redundant maximal disks; each retained node stores its 2D center and local radius.
-6. Lift every disk into a 3D sphere and take the maximum of `radius - distance(x, y, z)` in a 64³ implicit field.
-7. Polygonize the zero level set with Three.js Marching Cubes, then curve the original drawing across the sphere-union front and recompute its normals.
+| System | What it provides | Why it is or is not the main path |
+| --- | --- | --- |
+| [Meta Animated Drawings](https://github.com/facebookresearch/AnimatedDrawings) | Detector, segmentation, pose estimation, and 2D character animation | Excellent precedent for children’s drawings, but its output is a 2D articulated deformation rather than 360° geometry. |
+| [SAM 2](https://ai.meta.com/research/sam2/) | Promptable image/video object masks | Useful segmentation, but it cannot invent an unseen back, mesh, skeleton, or skin weights. |
+| [Stable Fast 3D](https://github.com/Stability-AI/stable-fast-3d) | Fast textured single-image GLB generation | Produces a real mesh but not an animation skeleton or skinning weights. |
+| [TRELLIS](https://github.com/microsoft/TRELLIS) | Image-conditioned 3D representations and meshes | Strong geometry prior, but no coherent animation rig in its primary output. |
+| [Hunyuan3D 2.1](https://github.com/Tencent-Hunyuan/Hunyuan3D-2.1) | Geometry and PBR texture generation through a GPU service | Real 3D, but rigging remains a separate problem. |
+| [UniRig](https://github.com/VAST-AI-Research/UniRig) / [RigAnything](https://github.com/Isabella98Liu/RigAnything) | Post-hoc automatic rigging | Viable after a mesh generator, but a sequential pipeline compounds geometry/rig errors and deployment cost. |
+| [AniGen](https://github.com/VAST-AI-Research/AniGen) | Single-image mesh, skeleton, and skinning weights generated jointly | Selected. It directly matches WallAlive’s requirement for animate-ready 360° assets across humanoids, animals, and machinery. |
 
-The result is one closed implicit volume. Narrow silhouette regions receive small spheres and wide regions receive large spheres, so a rotation exposes different front, side, and back geometry. It is not a constant-depth extrusion or a cut-out image plane.
+AniGen represents shape, skeleton, and skinning as mutually consistent fields and generates them together. Its official repository reports generalization across animals, humanoids, and machinery; the official Space includes example conditions for a child drawing, dog, owl, plant, whale, T-rex, lamp, and machine arm. This is a far more defensible “varied drawing” prior than hand-coded eye/limb heuristics.
 
-Google Research’s [Monster Mash: A Single-View Approach to Casual 3D Modeling and Animation](https://research.google/pubs/monster-mash-a-single-view-approach-to-casual-3d-modeling-and-animation/) validates the same product direction at a more advanced level: it combines 3D inflation with layered deformation so inexperienced users can model and animate organic shapes from one 2D view. WallAlive does not claim Monster Mash’s ARAP-L deformation; it adopts the defensible shared idea that a child’s single-view drawing can become a smooth inflated mesh without a multi-view modeling workflow.
+## Implemented neural path
 
-The mesh extraction stage follows the role of Lorensen and Cline’s [Marching Cubes](https://graphics.stanford.edu/courses/cs348a-21-winter/Papers/Marching_Cubes.pdf): converting a sampled scalar field into a triangle surface. In WallAlive, the scalar field is deterministic geometry from medial spheres, not a neural prediction.
+1. The browser locally isolates one human-selected drawing into a transparent PNG.
+2. A visible approval card explains the external processing boundary.
+3. `@gradio/client` connects directly to the official `VAST-AI/AniGen` Space.
+4. `/prepare_input_for_generation` stores the processed RGBA condition and returns its session path.
+5. `/generate_preview` runs `ss_flow_solo` + `slat_flow_auto` with automatic joint count and returns a colored rigged mesh GLB plus a skeleton GLB.
+6. WallAlive immediately downloads the temporary mesh into a browser Blob URL.
+7. Three.js loads it with `GLTFLoader`, normalizes it, verifies mesh/bone/vertex counts, and drives generated bone branches.
 
-### Neural single-image reconstruction — researched, not falsely claimed
+The preview GLB is already a real `SkinnedMesh`. The optional final extraction endpoint adds simplification and texture baking, but it is not necessary to prove geometry, skeleton, skinning, 360° rotation, or bone deformation.
 
-[Stable Fast 3D](https://github.com/Stability-AI/stable-fast-3d) is Stability AI’s official single-image mesh pipeline, including UV unwrapping and material prediction. Its documented runtime is Python/PyTorch with CUDA or MPS and roughly 6 GB of VRAM for one image.
+## Verified evidence
 
-[Hunyuan3D 2.1](https://github.com/Tencent-Hunyuan/Hunyuan3D-2.1) is Tencent’s official image-to-3D geometry and PBR texture pipeline. Its [API documentation](https://github.com/Tencent-Hunyuan/Hunyuan3D-2.1/blob/main/API_DOCUMENTATION.md) describes a GPU-backed Python service.
+- The official Space accepted the WallAlive demo PNG and completed its CPU preprocessing path.
+- A complete AniGen generation was downloaded and parsed locally.
+- The fixture contains exactly one mesh, one `SkinnedMesh`, 20 bones, and 159,930 vertices.
+- Blender rendered its front/back geometry and preserved vertex color.
+- The deployed test suite parses the binary GLB and fails if it regresses into a non-skinned or low-detail asset.
+- Desktop/mobile browser QA verified the approval UI, lazy Gradio client, successful CORS requests, session creation, file upload, preprocessing call, and friendly public-quota failure handling.
 
-Neither model is loaded by the deployed WallAlive browser app. Running either secretly or pretending a WebGL extrusion is its output would be misleading. A future opt-in GPU service can sit behind the same reconstruction action, but it would require explicit image-upload consent, deployment, latency handling, and a revised privacy boundary.
+The current free ZeroGPU quota prevented repeated end-to-end generations across every example category in one session. The model and live pipeline are real; a dedicated endpoint is still required for reliable high-volume category testing and production use.
 
-## WebMCP research applied
+## WebMCP design
 
-WallAlive follows the current [WebMCP Community Group draft](https://webmachinelearning.github.io/webmcp/) and its official [imperative API explainer](https://github.com/webmachinelearning/webmcp#imperative-tool-registration-documentmodelcontext):
+WallAlive follows the [WebMCP Community Group draft](https://webmachinelearning.github.io/webmcp/) and the official [imperative API explainer](https://github.com/webmachinelearning/webmcp#imperative-tool-registration-documentmodelcontext):
 
 - Register goal-oriented tools with `document.modelContext.registerTool()`.
-- Give every tool a precise description and strict JSON Schema.
-- Bind registration and long-running stories to `AbortSignal` cancellation.
-- Mark read-only versus mutating actions with annotations.
-- Keep tool executors and visible UI controls on the same canonical action layer.
-- Expose exact semantic state after actions so an agent can verify the result.
+- Use precise descriptions and strict JSON Schema.
+- Bind registration and stories to `AbortSignal` cancellation.
+- Mark read-only and mutating actions.
+- Share the same validated action functions between UI controls and tools.
+- Return exact provider, model, asset, phase, and geometry metadata for verification.
 
-Chrome’s [tool-design workflow](https://developer.chrome.com/docs/ai/webmcp/build-tools) recommends defining the user goal, state, capability boundaries, and actionable failure recovery before tool implementation. WallAlive’s strongest boundary comes directly from that exercise: camera start and capture are human-only UI gestures. There is no agent-callable camera, capture, or upload tool.
-
-The implementation also follows the official [WebMCP evaluation guidance](https://developer.chrome.com/docs/ai/webmcp/evals) by testing registered tool names, schemas, authority boundaries, cancellation lifecycle, semantic reconstruction metadata, and absence of camera authority. The `tools=(self)` Permissions Policy and same-origin deployment follow the platform’s [security guidance](https://developer.chrome.com/docs/agents/security).
+The important safety capability is structural: no registered tool can open the camera, capture a frame, or approve an external upload. `reconstruct_rigged_3d_character` can surface the approval card, then stops. This makes human agency enforceable in code instead of relying on a prompt.
 
 ## Honest capability statement
 
-WallAlive performs deterministic single-silhouette volume inference. It creates a real closed polygonal mesh with rounded depth, but it cannot know unseen semantic detail from one drawing. Its “skeleton” is a geometric medial axis with local radii, not a semantic human/animal rig. The back is a mathematically generated continuation of the silhouette, not an artist-authored or neural prediction. This tradeoff keeps the current experience fast, session-only, browser-native, reproducible, and private.
+WallAlive now uses a real learned single-image 3D prior and a real skinned skeleton. It does not claim perfect recovery of artist-authored unseen surfaces. Single-view reconstruction is inherently ambiguous, public GPU capacity is not reliable, and child privacy requires explicit external-processing consent. For hackathon judging, the bundled verified rig proves the full 3D/WebMCP/animation path without depending on quota; for production, self-host AniGen and run a curated multi-category evaluation set before promising quality levels.

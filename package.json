@@ -13,6 +13,7 @@
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next"
   },
   "dependencies": {
+    "@gradio/client": "^2.5.1",
     "@types/three": "^0.185.4",
     "@types/webxr": "^0.5.24",
     "react": "19.2.6",
