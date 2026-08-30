@@ -1,3 +1,5 @@
+import { selectDominantInkColor } from "./model-math.ts";
+
 export type ShapeHint = "round" | "tall" | "wide" | "spiky";
 
 export type ContourPoint = { x: number; y: number };
@@ -13,8 +15,10 @@ export type LearnedPartHint = {
   center: { x: number; y: number };
   size: { x: number; y: number };
   endpoints?: [{ x: number; y: number }, { x: number; y: number }];
+  outline?: ContourPoint[];
   rotation: number;
   confidence: number;
+  color?: string;
 };
 
 export type SemanticRegionCandidate = {
@@ -1405,6 +1409,7 @@ export function mergeLearnedPartHints(extraction: DrawingExtraction, hints: Lear
     center: toRigPoint(hint.center),
     size: { x: hint.size.x * 1.4, y: hint.size.y * 1.4 },
     endpoints: hint.endpoints?.map(toRigPoint) as [{ x: number; y: number; z: number }, { x: number; y: number; z: number }] | undefined,
+    outline: hint.outline?.map(toRigPoint),
   });
   const learned = accepted.map(toRigHint);
   const predictedKinds = new Set(learned.map((hint) => hint.kind));
@@ -1412,7 +1417,7 @@ export function mergeLearnedPartHints(extraction: DrawingExtraction, hints: Lear
   const parts = extraction.rig.parts.filter((part) => !(
     replaceableFaceKinds.has(part.kind)
       && predictedKinds.has(part.kind as LearnedPartHint["kind"])
-  ));
+  ) && !(part.kind === "pupil" && predictedKinds.has("eye")));
   const regions = extraction.semanticRegions ?? [];
   const usedRegions = new Set<string>();
   const usedIds = new Set(parts.map((part) => part.id));
@@ -1473,7 +1478,10 @@ export function mergeLearnedPartHints(extraction: DrawingExtraction, hints: Lear
     candidate.kind === "eye" || candidate.kind === "mouth"
       || (candidate.kind === "cheek" && (learnedEyeY === null || candidate.center.y <= learnedEyeY + body.size.y * 0.08))
   ))) {
-    const region = nearestRegion(hint);
+    // v3 emits a contour in source-image coordinates. Prefer that learned
+    // mask over a nearby classical stroke blob: graph-paper lines and adjacent
+    // face marks can otherwise stretch an eye/cheek into the wrong shape.
+    const region = hint.outline?.length ? null : nearestRegion(hint);
     const center = region ? { x: region.x, y: region.y, z: 0 } : hint.center;
     const side = hint.kind === "mouth" ? "center" : sideFor(center.x);
     const width = region?.width ?? hint.size.x;
@@ -1491,10 +1499,10 @@ export function mergeLearnedPartHints(extraction: DrawingExtraction, hints: Lear
         z: Math.max(0.012, Math.min(width, height) * depthScale),
       },
       rotation: region?.rotation ?? hint.rotation,
-      color: region?.color ?? extraction.rig.lineColor,
+      color: hint.color ?? region?.color ?? extraction.rig.lineColor,
       confidence: clamp(hint.confidence * 0.72 + (region ? 0.24 : 0.08), 0, 0.98),
       source: "learned-model",
-      outline: region?.outline,
+      outline: hint.outline ?? region?.outline,
     });
   }
 
@@ -1736,6 +1744,7 @@ function extractDrawingFromSource(sourceImage: CanvasImageSource, sourceWidth: n
   let colorG = 0;
   let colorB = 0;
   let colorWeight = 0;
+  const inkColorSamples: RGB[] = [];
   for (let index = 0; index < silhouette.length; index += 1) {
     if (!silhouette[index]) continue;
     const rgba = index * 4;
@@ -1748,6 +1757,7 @@ function extractDrawingFromSource(sourceImage: CanvasImageSource, sourceWidth: n
     const sourceIndex = (localY + minY) * width + localX + minX;
     if (useColorInk ? chromaticInk[sourceIndex] : rawInk[sourceIndex]) {
       inkPixels += 1;
+      inkColorSamples.push({ r: cropped.data[rgba], g: cropped.data[rgba + 1], b: cropped.data[rgba + 2] });
       const chroma = Math.max(cropped.data[rgba], cropped.data[rgba + 1], cropped.data[rgba + 2])
         - Math.min(cropped.data[rgba], cropped.data[rgba + 1], cropped.data[rgba + 2]);
       const weight = useColorInk ? Math.max(1, (chroma - backgroundChroma) ** 1.55) : 1;
@@ -1771,7 +1781,8 @@ function extractDrawingFromSource(sourceImage: CanvasImageSource, sourceWidth: n
   outputContext.imageSmoothingQuality = "high";
   outputContext.drawImage(cutout, (512 - drawWidth) / 2, (512 - drawHeight) / 2, drawWidth, drawHeight);
 
-  const dominant = colorWeight ? boostInkColor({ r: colorR / colorWeight, g: colorG / colorWeight, b: colorB / colorWeight }) : background;
+  const dominant = selectDominantInkColor(inkColorSamples)
+    ?? (colorWeight ? boostInkColor({ r: colorR / colorWeight, g: colorG / colorWeight, b: colorB / colorWeight }) : background);
   const coverage = inkPixels / (width * height);
   const contour = contourFromCanvas(output);
   if (contour.length < 6) {

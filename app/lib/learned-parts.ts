@@ -1,5 +1,5 @@
 import { mergeLearnedPartHints, type DrawingExtraction, type LearnedPartHint } from "./drawing";
-import { averageLogitConfidence, sameSemanticInstance } from "./model-math";
+import { averageLogitConfidence, sameSemanticInstance, selectDominantInkColor } from "./model-math";
 
 const BODY_MODEL_PATH = "/models/wallalive-parts-v3.onnx";
 const FACE_MODEL_PATH = "/models/wallalive-face-v3.onnx";
@@ -196,7 +196,65 @@ function components(mask: Uint8Array, size: number) {
   return found;
 }
 
-function describeComponent(kind: LearnedPartHint["kind"], component: PixelComponent, logits: Float32Array, channelOffset: number, size: number, mapPoint: PointMap): LearnedPartHint {
+function componentOutline(component: PixelComponent, size: number, mapPoint: PointMap) {
+  const mask = new Uint8Array(size * size);
+  for (const index of component.pixels) mask[index] = 1;
+  const directions = [[1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1], [0, -1], [1, -1]] as const;
+  let startX = -1;
+  let startY = -1;
+  for (let y = component.minY; y <= component.maxY && startX < 0; y += 1) {
+    for (let x = component.minX; x <= component.maxX; x += 1) {
+      if (mask[y * size + x] && (x === 0 || !mask[y * size + x - 1])) {
+        startX = x;
+        startY = y;
+        break;
+      }
+    }
+  }
+  if (startX < 0) return [];
+  const points: Point[] = [];
+  let x = startX;
+  let y = startY;
+  let backX = x - 1;
+  let backY = y;
+  for (let step = 0; step < component.pixels.length * 10; step += 1) {
+    points.push({ x, y });
+    let backIndex = directions.findIndex(([offsetX, offsetY]) => x + offsetX === backX && y + offsetY === backY);
+    if (backIndex < 0) backIndex = 4;
+    let found = false;
+    for (let offset = 1; offset <= directions.length; offset += 1) {
+      const directionIndex = (backIndex + offset) % directions.length;
+      const [offsetX, offsetY] = directions[directionIndex];
+      const nextX = x + offsetX;
+      const nextY = y + offsetY;
+      if (nextX < 0 || nextY < 0 || nextX >= size || nextY >= size || !mask[nextY * size + nextX]) continue;
+      const before = directions[(directionIndex + directions.length - 1) % directions.length];
+      backX = x + before[0];
+      backY = y + before[1];
+      x = nextX;
+      y = nextY;
+      found = true;
+      break;
+    }
+    if (!found || (x === startX && y === startY && points.length > 2)) break;
+  }
+  const sampleEvery = Math.max(1, Math.ceil(points.length / 48));
+  return points.filter((_, index) => index % sampleEvery === 0).map((point) => mapPoint(point.x + 0.5, point.y + 0.5));
+}
+
+function componentColor(component: PixelComponent, imageValues: Float32Array, size: number) {
+  const area = size * size;
+  const samples = component.pixels.map((index) => ({
+    r: imageValues[index] * 255,
+    g: imageValues[area + index] * 255,
+    b: imageValues[area * 2 + index] * 255,
+  })).filter((sample) => (sample.r + sample.g + sample.b) / 3 < 248 || Math.max(sample.r, sample.g, sample.b) - Math.min(sample.r, sample.g, sample.b) > 4);
+  const color = selectDominantInkColor(samples);
+  if (!color) return undefined;
+  return `#${[color.r, color.g, color.b].map((channel) => Math.round(channel).toString(16).padStart(2, "0")).join("")}`;
+}
+
+function describeComponent(kind: LearnedPartHint["kind"], component: PixelComponent, logits: Float32Array, imageValues: Float32Array, channelOffset: number, size: number, mapPoint: PointMap): LearnedPartHint {
   let xx = 0;
   let yy = 0;
   let xy = 0;
@@ -229,8 +287,10 @@ function describeComponent(kind: LearnedPartHint["kind"], component: PixelCompon
       mapPoint(component.centerX + axis.x * minimum, component.centerY + axis.y * minimum),
       mapPoint(component.centerX + axis.x * maximum, component.centerY + axis.y * maximum),
     ],
+    outline: componentOutline(component, size, mapPoint),
     rotation: angle,
     confidence: averageLogitConfidence(logits, component.pixels, channelOffset),
+    color: componentColor(component, imageValues, size),
   };
 }
 
@@ -245,6 +305,7 @@ function decodeHints<K extends readonly LearnedPartHint["kind"][]>(
   size: number,
   kinds: K,
   thresholds: Record<K[number], number>,
+  imageValues: Float32Array,
   mapPoint: PointMap,
   options: { skipBody: boolean; faceCrop?: boolean },
 ) {
@@ -263,7 +324,7 @@ function decodeHints<K extends readonly LearnedPartHint["kind"][]>(
       .sort((a, b) => b.pixels.length - a.pixels.length)
       .slice(0, maximumInstances(kind));
     for (const component of candidates) {
-      const hint = describeComponent(kind, component, probabilities, offset, size, mapPoint);
+      const hint = describeComponent(kind, component, probabilities, imageValues, offset, size, mapPoint);
       if (!hints.some((candidate) => sameSemanticInstance(candidate, hint))) hints.push(hint);
     }
   }
@@ -347,12 +408,12 @@ export async function recognizeDrawingParts(extraction: DrawingExtraction): Prom
   const bodyResults = await body.run({ pixel_values: bodyTensor });
   const partOutput = bodyResults.part_logits ?? Object.values(bodyResults)[0];
   const coarseOutput = bodyResults.coarse_logits ?? Object.values(bodyResults)[1];
-  const fullHints = decodeHints(partOutput, BODY_SIZE, PARTS, BODY_THRESHOLDS, prepared.mapPoint, { skipBody: true });
+  const fullHints = decodeHints(partOutput, BODY_SIZE, PARTS, BODY_THRESHOLDS, prepared.values, prepared.mapPoint, { skipBody: true });
 
   const faceCrop = modelRectToImageCrop(locateHead(coarseOutput, prepared), prepared.mapPoint);
   const preparedFace = prepareImage(image, FACE_SIZE, faceCrop);
   const faceResults = await face.run({ face_values: new ort.Tensor("float32", preparedFace.values, [1, 3, FACE_SIZE, FACE_SIZE]) });
-  const faceHints = decodeHints(faceResults.face_logits ?? Object.values(faceResults)[0], FACE_SIZE, FACE_PARTS, FACE_THRESHOLDS, preparedFace.mapPoint, { skipBody: false, faceCrop: true });
+  const faceHints = decodeHints(faceResults.face_logits ?? Object.values(faceResults)[0], FACE_SIZE, FACE_PARTS, FACE_THRESHOLDS, preparedFace.values, preparedFace.mapPoint, { skipBody: false, faceCrop: true });
   let hints = [...fullHints.filter((hint) => !FACE_KINDS.has(hint.kind)), ...faceHints];
   // The enlarged crop has better detail; the full-character pass can still
   // contribute a separate second eye/ear/cheek that the crop missed.
@@ -373,6 +434,7 @@ export async function recognizeDrawingParts(extraction: DrawingExtraction): Prom
         FALLBACK_SIZE,
         PARTS,
         FALLBACK_THRESHOLDS,
+        fallbackPrepared.values,
         fallbackPrepared.mapPoint,
         { skipBody: true },
       ), false);
