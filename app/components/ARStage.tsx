@@ -51,7 +51,7 @@ function buildCharacter(textureUrl: string, accent: string, bodyShape: BodyShape
     texture.colorSpace = THREE.SRGBColorSpace;
     texture.minFilter = THREE.LinearFilter;
     const frontMaterial = new THREE.MeshStandardMaterial({ map: texture, transparent: true, roughness: 0.72, metalness: 0.02, side: THREE.DoubleSide });
-    const edgeMaterial = new THREE.MeshStandardMaterial({ color: accent, transparent: true, opacity: 0.95, roughness: 0.86, side: THREE.DoubleSide });
+    const edgeMaterial = new THREE.MeshStandardMaterial({ map: texture, color: accent, transparent: true, opacity: 0.95, roughness: 0.86, side: THREE.DoubleSide });
     const planeGeometry = new THREE.PlaneGeometry(1.4, 1.4, 1, 1);
     for (let index = 0; index < 7; index += 1) {
       const layer = new THREE.Mesh(planeGeometry, index === 6 ? frontMaterial : edgeMaterial);
