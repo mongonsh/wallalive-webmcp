@@ -4,6 +4,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ARStage, type ARStageHandle, type CharacterAction } from "./components/ARStage";
 import { createAniGenDemoDrawing, createDemoDoodle, extractDrawingFromVideo, type CaptureTarget, type DrawingExtraction } from "./lib/drawing";
+import { recognizeDrawingParts } from "./lib/learned-parts";
 import { createBundledAniGenAsset, disposeNeuralAsset, generateAniGenAsset, type NeuralAsset, type NeuralProgress } from "./lib/anigen";
 import type { RiggedAssetInfo } from "./lib/rigged-model";
 
@@ -222,28 +223,41 @@ export default function Home() {
     setCapture(next);
     setStep("captured");
     const detected = next.rig.detectedKinds.filter((kind) => kind !== "body").join(", ");
-    setNotice(source === "camera" ? "Drawing isolated locally. Generate real 3D to infer its back, mesh, skeleton, and skin weights." : "Demo drawing is ready. Generate real 3D—or play the no-wait rigged judge demo.");
-    setAgentLine(`The local preview found ${detected || "a body silhouette"}. AniGen will infer real unseen geometry and a skinned skeleton.`);
-    record("WALLALIVE", "Isolated the approved drawing", `${next.rig.parts.length} local preview regions · ${next.analysis.shapeHint} silhouette · no upload yet.`);
+    const learned = next.learnedRecognition;
+    setNotice(source === "camera"
+      ? learned ? `Local ML recognized ${learned.detectedKinds.join(", ") || "the silhouette"} in ${learned.latencyMs} ms. Generate real 3D to infer its back and skinned mesh.` : "Drawing isolated locally. Generate real 3D to infer its back, mesh, skeleton, and skin weights."
+      : "Demo drawing is ready. Generate real 3D—or play the no-wait rigged judge demo.");
+    setAgentLine(`The local preview found ${detected || "a body silhouette"}${learned ? " using a trained drawing-part model plus exact pixel geometry" : ""}. AniGen will infer real unseen geometry and a skinned skeleton.`);
+    record("WALLALIVE", learned ? "Recognized and isolated the approved drawing" : "Isolated the approved drawing", `${next.rig.parts.length} local preview regions · ${next.analysis.shapeHint} silhouette${learned ? ` · WallAlive PartUNet ${learned.latencyMs} ms` : ""} · no upload yet.`);
   }, [commitCharacter, commitNeuralAsset, handleRiggedAssetInfo, record]);
 
-  const captureDrawing = useCallback(() => {
+  const recognizeAndSetDrawing = useCallback(async (next: DrawingExtraction, source: "camera" | "demo") => {
+    setNotice("Running the local drawing-part model: eyes, cheeks, mouth, ears, hands, and feet stay on this device.");
+    try {
+      setDrawing(await recognizeDrawingParts(next), source);
+    } catch (error) {
+      setDrawing(next, source);
+      setNotice(`Drawing isolated with exact pixel geometry. Local ML was unavailable: ${error instanceof Error ? error.message : "unknown model error"}`);
+    }
+  }, [setDrawing]);
+
+  const captureDrawing = useCallback(async () => {
     if (!videoRef.current) return;
     try {
-      setDrawing(extractDrawingFromVideo(videoRef.current, captureTarget), "camera");
+      await recognizeAndSetDrawing(extractDrawingFromVideo(videoRef.current, captureTarget), "camera");
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "The drawing could not be separated from the wall.");
     }
-  }, [captureTarget, setDrawing]);
+  }, [captureTarget, recognizeAndSetDrawing]);
 
-  const loadDemoDrawing = useCallback(() => {
+  const loadDemoDrawing = useCallback(async () => {
     try {
       const demo = createDemoDoodle();
-      setDrawing(demo, "demo");
+      await recognizeAndSetDrawing(demo, "demo");
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "The demo drawing could not be created.");
     }
-  }, [setDrawing]);
+  }, [recognizeAndSetDrawing]);
 
   const createCharacter = useCallback((input: Record<string, unknown>, actor: Actor, toolName?: string) => {
     const drawing = captureRef.current;

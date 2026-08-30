@@ -232,6 +232,31 @@ export function buildCharacter(contour: ContourPoint[], skeleton: SkeletonPoint[
     const group = new THREE.Group();
     group.name = `rig-${part.id}`;
     group.position.set(part.center.x, part.center.y, 0);
+    if (part.kind === "eye") {
+      const lensColor = new THREE.Color(rig.bodyColor).lerp(new THREE.Color(0xfffdf4), 0.62);
+      const lens = new THREE.Mesh(
+        new THREE.SphereGeometry(0.5, 28, 18),
+        new THREE.MeshPhysicalMaterial({
+          color: lensColor,
+          roughness: 0.34,
+          metalness: 0,
+          clearcoat: 0.46,
+          clearcoatRoughness: 0.36,
+        }),
+      );
+      lens.name = `${part.id}-raised-lens`;
+      lens.position.z = frontDepthAt(part.center.x, part.center.y) + Math.max(0.012, part.size.z * 0.34);
+      lens.scale.set(part.size.x * 0.94, part.size.y * 0.9, Math.max(0.024, part.size.z * 1.7));
+      lens.castShadow = true;
+      group.add(lens);
+    } else if (part.kind === "pupil") {
+      const pupil = new THREE.Mesh(new THREE.SphereGeometry(0.5, 20, 14), inkMaterial(part.color));
+      pupil.name = `${part.id}-raised-pupil`;
+      pupil.position.z = frontDepthAt(part.center.x, part.center.y) + Math.max(0.02, part.size.z * 0.8);
+      pupil.scale.set(part.size.x, part.size.y, Math.max(0.018, part.size.z));
+      pupil.castShadow = true;
+      group.add(pupil);
+    }
     const outline = part.outline?.length && part.outline.length >= 4
       ? part.outline
       : Array.from({ length: 32 }, (_, index) => {
@@ -268,9 +293,12 @@ export function buildCharacter(contour: ContourPoint[], skeleton: SkeletonPoint[
       source: "image-region",
       outline: contour,
     });
-    rig.parts.filter((part) => part.kind === "eye" || part.kind === "cheek" || part.kind === "mouth" || part.kind === "marking")
-      .forEach(addInkFeature);
   }
+  // The texture preserves the child's exact artwork, while these shallow
+  // semantic meshes give eyes, pupils, cheeks and mouths real parallax and
+  // animation. They follow the detected outlines; they are not generic decals.
+  rig.parts.filter((part) => part.kind === "eye" || part.kind === "pupil" || part.kind === "cheek" || part.kind === "mouth" || part.kind === "marking")
+    .forEach(addInkFeature);
 
   character.userData.reconstruction = {
     method: "color-isolated semantic ink over a silhouette-preserving distance-field body",

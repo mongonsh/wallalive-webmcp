@@ -6,7 +6,16 @@ export type CaptureTarget = { x: number; y: number };
 
 export type SemanticPartKind = "body" | "eye" | "pupil" | "cheek" | "mouth" | "ear" | "arm" | "hand" | "leg" | "foot" | "marking";
 export type SemanticSide = "left" | "right" | "center";
-export type SemanticPartSource = "image-region" | "silhouette-branch" | "structural-inference";
+export type SemanticPartSource = "image-region" | "silhouette-branch" | "structural-inference" | "learned-model";
+
+export type LearnedPartHint = {
+  kind: Exclude<SemanticPartKind, "body" | "pupil" | "marking">;
+  center: { x: number; y: number };
+  size: { x: number; y: number };
+  endpoints?: [{ x: number; y: number }, { x: number; y: number }];
+  rotation: number;
+  confidence: number;
+};
 
 export type SemanticRegionCandidate = {
   id: string;
@@ -74,6 +83,12 @@ export type DrawingExtraction = {
   skeleton: SkeletonPoint[];
   rig: CharacterRig;
   analysis: DrawingAnalysis;
+  semanticRegions?: SemanticRegionCandidate[];
+  learnedRecognition?: {
+    model: "wallalive-parts-v1";
+    latencyMs: number;
+    detectedKinds: SemanticPartKind[];
+  };
 };
 
 type RGB = { r: number; g: number; b: number };
@@ -1376,6 +1391,189 @@ export function inferSemanticRig(
   };
 }
 
+export function mergeLearnedPartHints(extraction: DrawingExtraction, hints: LearnedPartHint[], latencyMs: number): DrawingExtraction {
+  const accepted = hints.filter((hint) => hint.confidence >= (hint.kind === "cheek" || hint.kind === "mouth" ? 0.42 : 0.48));
+  if (!accepted.length) return {
+    ...extraction,
+    learnedRecognition: { model: "wallalive-parts-v1", latencyMs, detectedKinds: [] },
+  };
+  const body = extraction.rig.parts.find((part) => part.kind === "body");
+  if (!body) return extraction;
+  const toRigPoint = (point: { x: number; y: number }) => ({ x: (point.x - 0.5) * 1.4, y: (0.5 - point.y) * 1.4, z: 0 });
+  const toRigHint = (hint: LearnedPartHint) => ({
+    ...hint,
+    center: toRigPoint(hint.center),
+    size: { x: hint.size.x * 1.4, y: hint.size.y * 1.4 },
+    endpoints: hint.endpoints?.map(toRigPoint) as [{ x: number; y: number; z: number }, { x: number; y: number; z: number }] | undefined,
+  });
+  const learned = accepted.map(toRigHint);
+  const predictedKinds = new Set(learned.map((hint) => hint.kind));
+  const replaceableFaceKinds = new Set<SemanticPartKind>(["eye", "cheek", "mouth"]);
+  const parts = extraction.rig.parts.filter((part) => !(
+    replaceableFaceKinds.has(part.kind)
+      && predictedKinds.has(part.kind as LearnedPartHint["kind"])
+  ));
+  const regions = extraction.semanticRegions ?? [];
+  const usedRegions = new Set<string>();
+  const usedIds = new Set(parts.map((part) => part.id));
+  const nextId = (kind: SemanticPartKind, side: SemanticSide) => {
+    const base = `${kind}-${side}`;
+    if (!usedIds.has(base)) {
+      usedIds.add(base);
+      return base;
+    }
+    let index = 2;
+    while (usedIds.has(`${base}-${index}`)) index += 1;
+    const id = `${base}-${index}`;
+    usedIds.add(id);
+    return id;
+  };
+  const sideFor = (x: number): SemanticSide => x < body.center.x - body.size.x * 0.065
+    ? "left"
+    : x > body.center.x + body.size.x * 0.065 ? "right" : "center";
+  const nearestRegion = (hint: (typeof learned)[number]) => {
+    const candidates = regions.filter((region) => !usedRegions.has(region.id));
+    let best: SemanticRegionCandidate | null = null;
+    let bestScore = Infinity;
+    for (const region of candidates) {
+      const distance = Math.hypot(region.x - hint.center.x, region.y - hint.center.y);
+      const reach = Math.max(0.055, Math.max(hint.size.x, hint.size.y) * 0.76 + Math.max(region.width, region.height) * 0.34);
+      if (distance > reach) continue;
+      const sizeError = Math.abs(Math.log(Math.max(0.012, region.width) / Math.max(0.012, hint.size.x)))
+        + Math.abs(Math.log(Math.max(0.012, region.height) / Math.max(0.012, hint.size.y)));
+      const mouthShapePenalty = hint.kind === "mouth" && region.width < region.height * 0.85 ? 0.9 : 0;
+      const score = distance / reach * 1.8 + sizeError * 0.22 + mouthShapePenalty;
+      if (score < bestScore) {
+        best = region;
+        bestScore = score;
+      }
+    }
+    if (best) usedRegions.add(best.id);
+    return best;
+  };
+
+  for (const hint of learned.filter((candidate) => candidate.kind === "eye" || candidate.kind === "cheek" || candidate.kind === "mouth")) {
+    const region = nearestRegion(hint);
+    const center = region ? { x: region.x, y: region.y, z: 0 } : hint.center;
+    const side = hint.kind === "mouth" ? "center" : sideFor(center.x);
+    const width = region?.width ?? hint.size.x;
+    const height = region?.height ?? hint.size.y;
+    const depthScale = hint.kind === "eye" ? 0.24 : hint.kind === "cheek" ? 0.12 : 0.09;
+    parts.push({
+      id: nextId(hint.kind, side),
+      kind: hint.kind,
+      side,
+      parentId: "body",
+      center,
+      size: {
+        x: clamp(width, body.size.x * 0.022, body.size.x * (hint.kind === "mouth" ? 0.34 : 0.24)),
+        y: clamp(height, body.size.y * 0.016, body.size.y * 0.2),
+        z: Math.max(0.012, Math.min(width, height) * depthScale),
+      },
+      rotation: region?.rotation ?? hint.rotation,
+      color: region?.color ?? extraction.rig.lineColor,
+      confidence: clamp(hint.confidence * 0.72 + (region ? 0.24 : 0.08), 0, 0.98),
+      source: "learned-model",
+      outline: region?.outline,
+    });
+  }
+
+  for (const hint of learned.filter((candidate) => candidate.kind === "ear" || candidate.kind === "arm" || candidate.kind === "leg")) {
+    const side = sideFor(hint.center.x);
+    const existing = parts.filter((part) => part.kind === hint.kind && part.side === side)
+      .sort((a, b) => Math.hypot(a.center.x - hint.center.x, a.center.y - hint.center.y)
+        - Math.hypot(b.center.x - hint.center.x, b.center.y - hint.center.y))[0];
+    if (existing) {
+      existing.confidence = Math.max(existing.confidence, hint.confidence);
+      existing.source = "learned-model";
+      continue;
+    }
+    if (hint.kind === "ear") {
+      const dx = hint.center.x - body.center.x;
+      const dy = hint.center.y - body.center.y;
+      parts.push({
+        id: nextId("ear", side),
+        kind: "ear",
+        side,
+        parentId: "body",
+        center: hint.center,
+        anchor: { x: body.center.x + dx * 0.62, y: body.center.y + dy * 0.62, z: 0 },
+        size: { x: hint.size.x, y: hint.size.y, z: Math.min(hint.size.x, hint.size.y) * 0.68 },
+        rotation: hint.rotation,
+        color: extraction.rig.bodyColor,
+        confidence: hint.confidence,
+        source: "learned-model",
+      });
+      continue;
+    }
+    const endpoints = hint.endpoints ?? [body.center, hint.center];
+    const ordered = [...endpoints].sort((a, b) => Math.hypot(a.x - body.center.x, a.y - body.center.y)
+      - Math.hypot(b.x - body.center.x, b.y - body.center.y));
+    const anchor = ordered[0];
+    const endpoint = ordered[1];
+    const dx = endpoint.x - anchor.x;
+    const dy = endpoint.y - anchor.y;
+    const length = Math.max(Math.min(hint.size.x, hint.size.y) * 1.5, Math.hypot(dx, dy));
+    const thickness = clamp(Math.min(hint.size.x, hint.size.y), body.size.x * 0.035, body.size.x * 0.17);
+    parts.push({
+      id: nextId(hint.kind, side),
+      kind: hint.kind,
+      side,
+      parentId: "body",
+      center: endpoint,
+      anchor,
+      size: { x: thickness, y: length, z: thickness },
+      rotation: Math.atan2(-dx, dy),
+      color: extraction.rig.bodyColor,
+      confidence: hint.confidence,
+      source: "learned-model",
+    });
+  }
+
+  for (const hint of learned.filter((candidate) => candidate.kind === "hand" || candidate.kind === "foot")) {
+    const side = sideFor(hint.center.x);
+    const existing = parts.filter((part) => part.kind === hint.kind && part.side === side)
+      .sort((a, b) => Math.hypot(a.center.x - hint.center.x, a.center.y - hint.center.y)
+        - Math.hypot(b.center.x - hint.center.x, b.center.y - hint.center.y))[0];
+    if (existing) {
+      existing.confidence = Math.max(existing.confidence, hint.confidence);
+      existing.source = "learned-model";
+      continue;
+    }
+    const parentKind: SemanticPartKind = hint.kind === "hand" ? "arm" : "leg";
+    const parent = parts.filter((part) => part.kind === parentKind)
+      .sort((a, b) => Math.hypot(a.center.x - hint.center.x, a.center.y - hint.center.y)
+        - Math.hypot(b.center.x - hint.center.x, b.center.y - hint.center.y))[0];
+    if (!parent) continue;
+    parts.push({
+      id: nextId(hint.kind, side),
+      kind: hint.kind,
+      side,
+      parentId: parent.id,
+      center: hint.center,
+      size: { x: hint.size.x, y: hint.size.y, z: Math.min(hint.size.x, hint.size.y) * 0.78 },
+      rotation: hint.rotation,
+      color: extraction.rig.bodyColor,
+      confidence: hint.confidence,
+      source: "learned-model",
+    });
+  }
+
+  const joints = parts.filter((part) => part.parentId).map((part) => ({
+    id: `joint-${part.id}`,
+    parentId: part.parentId!,
+    childId: part.id,
+    x: part.anchor?.x ?? part.center.x,
+    y: part.anchor?.y ?? part.center.y,
+  }));
+  const detectedKinds = [...new Set(parts.map((part) => part.kind))];
+  return {
+    ...extraction,
+    rig: { ...extraction.rig, parts, joints, detectedKinds },
+    learnedRecognition: { model: "wallalive-parts-v1", latencyMs, detectedKinds: [...predictedKinds] },
+  };
+}
+
 function classifyShape(width: number, height: number, coverage: number): ShapeHint {
   const ratio = width / Math.max(1, height);
   if (coverage < 0.12) return "spiky";
@@ -1566,6 +1764,7 @@ function extractDrawingFromSource(sourceImage: CanvasImageSource, sourceWidth: n
     contour,
     skeleton,
     rig,
+    semanticRegions: semantic.regions,
     analysis: {
       dominantColor: toHex(dominant),
       secondaryColor: toHex(background),

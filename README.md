@@ -6,7 +6,7 @@
 
 **Public source:** https://github.com/mongonsh/wallalive-webmcp
 
-WallAlive turns one human-approved drawing into a colored, 360° **rigged 3D character** in the camera view. It uses [AniGen](https://github.com/VAST-AI-Research/AniGen) to generate a coherent mesh, unseen surfaces, skeleton, and skinning weights from a single image, then loads the result as a Three.js `SkinnedMesh`. WebMCP lets a browser agent name, place, animate, recolor, and direct that same visible character.
+WallAlive turns one human-approved drawing into a colored, 360° **rigged 3D character** in the camera view. A compact locally trained model first recognizes the body, eyes, cheeks, mouth, ears, arms, hands, legs, and feet. It uses [AniGen](https://github.com/VAST-AI-Research/AniGen) to generate a coherent mesh, unseen surfaces, skeleton, and skinning weights from the isolated image, then loads the result as a Three.js `SkinnedMesh`. WebMCP lets a browser agent name, place, animate, recolor, and direct that same visible character.
 
 The old contour inflation is retained only as a clearly labeled **rough private preview**. It is never presented as neural reconstruction.
 
@@ -21,7 +21,7 @@ The old contour inflation is retained only as a clearly labeled **rough private 
 
 ## The real 3D loop
 
-1. **Scan locally:** the child opens the camera, taps the character, and captures. WallAlive separates one drawing from paper edges, text, and foreground clutter in browser memory.
+1. **Scan and recognize locally:** the child opens the camera, taps the character, and captures. WallAlive separates one drawing from paper edges, text, and foreground clutter in browser memory. WallAlive PartUNet then proposes nine semantic part classes; each proposal snaps back to the original pixel region so the detected position, outline, and sampled color come from the child’s drawing rather than a generic template.
 2. **Approve minimally:** a second visible approval explains that only the isolated drawing—not the live camera or room frame—will be sent to AniGen.
 3. **Generate jointly:** AniGen’s `ss_flow_solo` + `slat_flow_auto` path predicts full geometry, a skeleton of arbitrary complexity, and smooth skinning weights together.
 4. **Load and play:** the browser downloads the returned GLB into a tab-local Blob URL. Three.js loads its `SkinnedMesh`, classifies arm/leg bone branches, and drives wave, dance, walk, hop, hide, and spin actions.
@@ -47,7 +47,8 @@ All tools use strict schemas, `additionalProperties: false`, cancellation signal
 ## Privacy boundary
 
 - Camera start and capture are human-only UI gestures.
-- Segmentation and the first preview happen locally.
+- Segmentation, semantic-part recognition, and the first preview happen locally.
+- The 933 KB ONNX model is served from WallAlive’s own origin and runs with WebAssembly; it does not send the image to an inference API.
 - The agent never receives live frames or raw image pixels.
 - Neural generation requires a separate visible human approval.
 - Only the isolated drawing is sent to the selected AniGen Space.
@@ -71,7 +72,13 @@ The public Hugging Face ZeroGPU service is capacity-limited and can reject or qu
 human camera gesture + tap
         │
         ▼
-local target-aware drawing isolation ──────► rough private preview
+local target-aware drawing isolation
+        │
+        ▼
+WallAlive PartUNet (local ONNX/WASM, 9 classes)
+        │
+        ├── exact pixel snap: position + outline + color
+        └─────────────────────────────────────────────► rough private preview
         │
         ├── visible isolated-image approval (human only)
         ▼
@@ -86,10 +93,18 @@ rigged GLB → local Blob URL → Three.js GLTFLoader / SkinnedMesh
 
 - React 19 + TypeScript, built with vinext for Cloudflare/Sites
 - Three.js `GLTFLoader`, `SkinnedMesh`, procedural bone actions, and WebXR hit testing
+- WallAlive PartUNet v1: 235,949 parameters, 64×64 input, nine semantic channels, lazy-loaded through `onnxruntime-web`
+- Raised face meshes and detected contour tubes add real eye/cheek/mouth parallax to the private preview instead of leaving the features flat
 - Lazy-loaded `@gradio/client` connection to AniGen
 - `document.modelContext.registerTool()` imperative WebMCP integration
 - One canonical action layer shared by UI and tool executors
 - Deterministic contour preview remains available when the user declines upload
+
+## Local model training
+
+`ml/train_part_detector.py` reproducibly generates varied labeled characters and trains the compact U-Net. The checked-in model was trained on 5,000 generated examples and evaluated on a separate 500-example set with independent body shapes, colors, paper grids, rotations, compression artifacts, shadows, missing/asymmetric parts, and distractor strokes. Its held-out IoUs are recorded in `public/models/wallalive-parts-v1.json`; they range from 0.572 for the hardest thin leg channel to 0.893 for the body channel.
+
+This synthetic validation set is a regression baseline, not a claim of universal recognition. Tests on six public Meta Animated Drawings examples produced a mean body-mask IoU of 0.637. The learned output is deliberately used as semantic guidance while the higher-resolution local extractor remains responsible for precise pixel geometry and color.
 
 ## Local development
 

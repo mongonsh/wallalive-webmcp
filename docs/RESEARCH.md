@@ -13,6 +13,7 @@ That path now appears only as **rough private preview** when a user declines neu
 | System | What it provides | Why it is or is not the main path |
 | --- | --- | --- |
 | [Meta Animated Drawings](https://github.com/facebookresearch/AnimatedDrawings) | Detector, segmentation, pose estimation, and 2D character animation | Excellent precedent for children’s drawings, but its output is a 2D articulated deformation rather than 360° geometry. |
+| [EdgeTAM](https://github.com/facebookresearch/EdgeTAM) | Promptable mobile image/video masks | A strong local proposal model, but it needs a point or box and does not name eyes, cheeks, or limbs. Raw masks also selected paper/clutter in drawing tests, so it is not allowed to replace target-aware drawing extraction blindly. |
 | [SAM 2](https://ai.meta.com/research/sam2/) | Promptable image/video object masks | Useful segmentation, but it cannot invent an unseen back, mesh, skeleton, or skin weights. |
 | [Stable Fast 3D](https://github.com/Stability-AI/stable-fast-3d) | Fast textured single-image GLB generation | Produces a real mesh but not an animation skeleton or skinning weights. |
 | [TRELLIS](https://github.com/microsoft/TRELLIS) | Image-conditioned 3D representations and meshes | Strong geometry prior, but no coherent animation rig in its primary output. |
@@ -21,6 +22,20 @@ That path now appears only as **rough private preview** when a user declines neu
 | [AniGen](https://github.com/VAST-AI-Research/AniGen) | Single-image mesh, skeleton, and skinning weights generated jointly | Selected. It directly matches WallAlive’s requirement for animate-ready 360° assets across humanoids, animals, and machinery. |
 
 AniGen represents shape, skeleton, and skinning as mutually consistent fields and generates them together. Its official repository reports generalization across animals, humanoids, and machinery; the official Space includes example conditions for a child drawing, dog, owl, plant, whale, T-rex, lamp, and machine arm. This is a far more defensible “varied drawing” prior than hand-coded eye/limb heuristics.
+
+The two Kivicube examples supplied for comparison demonstrate authored AR artwork and an authored AR game: the artist prepares the target, content, and interactions ahead of time. WallAlive has the harder requirement of accepting a previously unseen drawing from a live camera. It therefore needs both drawing-specific recognition and generative 3D reconstruction; an AR target tracker alone does not solve that problem.
+
+## Learned local part recognition
+
+WallAlive now includes a task-specific semantic segmenter rather than asking a general object mask to guess anatomy. `WallAlive PartUNet v1` is a 235,949-parameter U-Net with nine output channels: body, eye, cheek, mouth, ear, arm, hand, leg, and foot. It is exported to a 933 KB ONNX file and runs in-browser through a lazy-loaded WebAssembly runtime.
+
+Training is reproducible in `ml/train_part_detector.py`. The generator creates filled and outlined blobs, ellipses, rounded and spiky bodies; one to three eyes; asymmetric/missing limbs; varied ears, cheeks, mouths, hands and feet; colored or gray ink; paper grids; folds/shadows; rotations, shear, blur, JPEG damage, noise, and unrelated strokes. The checked-in run used 5,000 training and 500 held-out examples. Held-out IoU was 0.893 body, 0.782 eye, 0.724 cheek, 0.629 mouth, 0.627 ear, 0.641 arm, 0.838 hand, 0.572 leg, and 0.663 foot.
+
+The model is intentionally not the geometry source of truth. Its low-resolution masks identify what a region means; WallAlive then snaps each prediction to the nearest high-resolution isolated pixel component. This preserves the drawing’s measured center, dimensions, rotation, outline, and sampled color. Existing medial-skeleton limbs are retained and only confirmed or supplemented by high-confidence learned hints.
+
+The private supplied drawing was evaluated locally without uploading it: the network found the body, both eyes, both cheeks, the central mouth, and both ears. Thin limbs remained below the learned threshold, so their positions continued to come from the exact contour/medial skeleton. On six public character textures from Meta Animated Drawings, the model’s mean body-mask IoU was 0.637. That small external set is evidence of transfer, not a universal-quality claim.
+
+EdgeTAM was also tested locally as an optional high-recall proposal generator. Its 14 MB quantized ONNX pair ran in roughly 0.7 seconds on the local CPU, but automatically selecting among its masks averaged only 0.234 IoU on six public drawings (0.459 with an oracle candidate choice). A promptable “segment anything” mask is not a semantic part recognizer, so the smaller drawing-specific model was selected for the default path.
 
 ## Implemented neural path
 
@@ -42,6 +57,8 @@ The preview GLB is already a real `SkinnedMesh`. The optional final extraction e
 - Blender rendered its front/back geometry and preserved vertex color.
 - The deployed test suite parses the binary GLB and fails if it regresses into a non-skinned or low-detail asset.
 - Desktop/mobile browser QA verified the approval UI, lazy Gradio client, successful CORS requests, session creation, file upload, preprocessing call, and friendly public-quota failure handling.
+- Browser QA verified lazy same-origin delivery of the PartUNet ONNX file and WebAssembly runtime, with nine semantic kinds present in the demo and no third-party request for image recognition.
+- The private preview now creates shallow 3D eye lenses, pupils, and contour-following feature tubes, so detected face parts have lighting, parallax, and animation instead of remaining a flat crop.
 
 The current free ZeroGPU quota prevented repeated end-to-end generations across every example category in one session. The model and live pipeline are real; a dedicated endpoint is still required for reliable high-volume category testing and production use.
 
@@ -60,4 +77,4 @@ The important safety capability is structural: no registered tool can open the c
 
 ## Honest capability statement
 
-WallAlive now uses a real learned single-image 3D prior and a real skinned skeleton. It does not claim perfect recovery of artist-authored unseen surfaces. Single-view reconstruction is inherently ambiguous, public GPU capacity is not reliable, and child privacy requires explicit external-processing consent. For hackathon judging, the bundled verified rig proves the full 3D/WebMCP/animation path without depending on quota; for production, self-host AniGen and run a curated multi-category evaluation set before promising quality levels.
+WallAlive now uses a learned local semantic model, a real learned single-image 3D prior, and a real skinned skeleton. It does not claim perfect recognition of every drawing or perfect recovery of artist-authored unseen surfaces. Single-view reconstruction is inherently ambiguous, the local part model has only a small public-transfer benchmark so far, public GPU capacity is not reliable, and child privacy requires explicit external-processing consent. For hackathon judging, the bundled verified rig proves the full 3D/WebMCP/animation path without depending on quota; for production, self-host AniGen and expand the curated multi-category evaluation set before promising quality levels.

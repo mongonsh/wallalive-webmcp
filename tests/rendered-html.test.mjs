@@ -3,7 +3,7 @@ import { readFile, stat } from "node:fs/promises";
 import test from "node:test";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { parseAniGenPreview } from "../app/lib/anigen.ts";
-import { extractMedialSkeleton, inferSemanticRig, inkAroundEnclosedRegion, mapCoverTargetToSource, recoverEnclosedTargetRegion, recoverTargetSilhouette, scoreDrawingCandidate } from "../app/lib/drawing.ts";
+import { extractMedialSkeleton, inferSemanticRig, inkAroundEnclosedRegion, mapCoverTargetToSource, mergeLearnedPartHints, recoverEnclosedTargetRegion, recoverTargetSilhouette, scoreDrawingCandidate } from "../app/lib/drawing.ts";
 import { prepareNeuralCharacter, remapDominantHuePixels } from "../app/lib/rigged-model.ts";
 
 async function render() {
@@ -108,6 +108,60 @@ test("implements local drawing extraction and real WebXR hit testing", async () 
   assert.match(stage, /requestSession\("immersive-ar"/);
   assert.match(stage, /requiredFeatures: \["hit-test"\]/);
   assert.match(stage, /getHitTestResults/);
+  assert.match(stage, /raised-lens/);
+  assert.match(stage, /raised-pupil/);
+  assert.match(stage, /TubeGeometry/);
+});
+
+test("ships a compact same-origin learned drawing-part model", async () => {
+  const modelUrl = new URL("../public/models/wallalive-parts-v1.onnx", import.meta.url);
+  const report = JSON.parse(await readFile(new URL("../public/models/wallalive-parts-v1.json", import.meta.url), "utf8"));
+  const model = await stat(modelUrl);
+  const recognizer = await readFile(new URL("../app/lib/learned-parts.ts", import.meta.url), "utf8");
+
+  assert.ok(model.size > 900_000 && model.size < 1_100_000, `expected a compact substantive ONNX model, got ${model.size} bytes`);
+  assert.equal(report.architecture, "WallAlive PartUNet v1");
+  assert.equal(report.parameters, 235_949);
+  assert.equal(report.training_samples, 5_000);
+  assert.equal(report.validation_samples, 500);
+  assert.deepEqual(report.parts, ["body", "eye", "cheek", "mouth", "ear", "arm", "hand", "leg", "foot"]);
+  for (const [kind, iou] of Object.entries(report.validation_iou)) {
+    assert.ok(iou >= 0.55, `${kind} held-out IoU should stay above the regression floor, got ${iou}`);
+  }
+  assert.match(recognizer, /const MODEL_PATH = ["']\/models\/wallalive-parts-v1\.onnx["']/);
+  assert.match(recognizer, /import\(["']onnxruntime-web\/wasm["']\)/);
+  assert.doesNotMatch(recognizer, /https?:\/\//);
+});
+
+test("learned semantics snap to exact drawing pixels for position, outline, and color", () => {
+  const outline = [
+    { x: -0.19, y: 0.23 }, { x: -0.11, y: 0.23 },
+    { x: -0.11, y: 0.13 }, { x: -0.19, y: 0.13 },
+  ];
+  const extraction = {
+    previewUrl: "data:image/png;base64,preview",
+    textureUrl: "data:image/png;base64,texture",
+    contour: [{ x: -0.5, y: -0.6 }, { x: 0.5, y: -0.6 }, { x: 0.5, y: 0.6 }, { x: -0.5, y: 0.6 }],
+    skeleton: [{ x: 0, y: 0, radius: 0.3 }],
+    analysis: { shapeHint: "round", dominantColor: "#f4eee2", lineColor: "#9c3450", confidence: 0.9 },
+    semanticRegions: [{ id: "exact-eye", x: -0.15, y: 0.18, width: 0.08, height: 0.1, color: "#1764a7", pixelCount: 62, density: 0.48, outline }],
+    rig: {
+      version: "wallalive-semantic-rig-v2",
+      bodyColor: "#f4eee2",
+      lineColor: "#9c3450",
+      joints: [],
+      detectedKinds: ["body"],
+      parts: [{ id: "body", kind: "body", side: "center", parentId: null, center: { x: 0, y: 0, z: 0 }, size: { x: 1, y: 1.2, z: 0.5 }, rotation: 0, color: "#f4eee2", confidence: 1, source: "silhouette-branch" }],
+    },
+  };
+  const result = mergeLearnedPartHints(extraction, [{ kind: "eye", center: { x: 0.4, y: 0.38 }, size: { x: 0.07, y: 0.09 }, rotation: 0.1, confidence: 0.91 }], 24);
+  const eye = result.rig.parts.find((part) => part.kind === "eye");
+  assert.ok(eye);
+  assert.deepEqual(eye.center, { x: -0.15, y: 0.18, z: 0 });
+  assert.equal(eye.color, "#1764a7");
+  assert.equal(eye.outline, outline);
+  assert.equal(eye.source, "learned-model");
+  assert.equal(result.learnedRecognition?.latencyMs, 24);
 });
 
 test("ships a verified colored AniGen SkinnedMesh instead of a 2D extrusion", async () => {
