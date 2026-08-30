@@ -1,16 +1,27 @@
-import { mergeLearnedPartHints, POSE_JOINT_NAMES, type DrawingExtraction, type LearnedPartHint, type LearnedPose } from "./drawing";
-import { acceptFaceComponent } from "./face-component-gate";
-import { averageLogitConfidence, sameSemanticInstance, selectDominantInkColor } from "./model-math";
+import {
+  mergeLearnedPartHints,
+  POSE_JOINT_NAMES,
+  TOPOLOGY_CLASSES,
+  type DrawingExtraction,
+  type LearnedPartHint,
+  type LearnedPose,
+  type LearnedTopology,
+  type TopologyNode,
+} from "./drawing.ts";
+import { acceptFaceComponent } from "./face-component-gate.ts";
+import { averageLogitConfidence, sameSemanticInstance, selectDominantInkColor } from "./model-math.ts";
 
 const BODY_MODEL_PATH = "/models/wallalive-parts-v3.onnx";
 const FACE_V3_MODEL_PATH = "/models/wallalive-face-v3.onnx";
 const FACE_V4_MODEL_PATH = "/models/wallalive-face-v4.onnx";
 const POSE_MODEL_PATH = "/models/wallalive-amateur-pose-v6.onnx";
+const TOPOLOGY_MODEL_PATH = "/models/wallalive-topology-v7.onnx";
 const FALLBACK_MODEL_PATHS = ["/models/wallalive-parts-v2.onnx", "/models/wallalive-parts-v1.onnx"] as const;
 const BODY_SIZE = 96;
 const FACE_V3_SIZE = 96;
 const FACE_SIZE = 128;
 const POSE_HEATMAP_SIZE = 48;
+const TOPOLOGY_FIELD_SIZE = 48;
 const FALLBACK_SIZE = 64;
 const PARTS = ["body", "eye", "cheek", "mouth", "ear", "arm", "hand", "leg", "foot"] as const;
 const FACE_PARTS = ["eye", "cheek", "mouth", "ear"] as const;
@@ -62,7 +73,7 @@ type PreparedImage = {
 };
 
 let runtimePromise: Promise<OrtRuntime> | null = null;
-let sessionPromise: Promise<{ ort: OrtRuntime; body: OrtSession; faceV3: OrtSession; faceV4: OrtSession; pose: OrtSession }> | null = null;
+let sessionPromise: Promise<{ ort: OrtRuntime; body: OrtSession; faceV3: OrtSession; faceV4: OrtSession; pose: OrtSession; topology: OrtSession }> | null = null;
 let fallbackSessionPromise: Promise<OrtSession[]> | null = null;
 
 const sessionOptions = {
@@ -77,13 +88,14 @@ function loadSessions() {
     sessionPromise = runtimePromise.then(async (ort) => {
       ort.env.wasm.numThreads = typeof crossOriginIsolated !== "undefined" && crossOriginIsolated ? 2 : 1;
       ort.env.wasm.proxy = false;
-      const [body, faceV3, faceV4, pose] = await Promise.all([
+      const [body, faceV3, faceV4, pose, topology] = await Promise.all([
         ort.InferenceSession.create(BODY_MODEL_PATH, sessionOptions),
         ort.InferenceSession.create(FACE_V3_MODEL_PATH, sessionOptions),
         ort.InferenceSession.create(FACE_V4_MODEL_PATH, sessionOptions),
         ort.InferenceSession.create(POSE_MODEL_PATH, sessionOptions),
+        ort.InferenceSession.create(TOPOLOGY_MODEL_PATH, sessionOptions),
       ]);
-      return { ort, body, faceV3, faceV4, pose };
+      return { ort, body, faceV3, faceV4, pose, topology };
     });
   }
   return sessionPromise;
@@ -383,11 +395,179 @@ function locateHead(output: import("onnxruntime-web/wasm").Tensor, prepared: Pre
   return { x, y, width: Math.max(1, right - x), height: Math.max(1, bottom - y) };
 }
 
+function softmax(values: Float32Array) {
+  const maximum = Math.max(...values);
+  const exponentials = Array.from(values, (value) => Math.exp(value - maximum));
+  const total = exponentials.reduce((sum, value) => sum + value, 0);
+  return exponentials.map((value) => value / Math.max(1e-9, total));
+}
+
+export function decodeTopology(
+  fieldsOutput: import("onnxruntime-web/wasm").Tensor,
+  classOutput: import("onnxruntime-web/wasm").Tensor,
+  prepared: PreparedImage,
+  latencyMs: number,
+): LearnedTopology {
+  const values = fieldsOutput.data as Float32Array;
+  const area = TOPOLOGY_FIELD_SIZE * TOPOLOGY_FIELD_SIZE;
+  const probability = (channel: number, index: number) => sigmoid(values[channel * area + index]);
+  const maskFor = (channel: number, threshold: number) => {
+    const mask = new Uint8Array(area);
+    for (let index = 0; index < area; index += 1) mask[index] = probability(channel, index) >= threshold ? 1 : 0;
+    return mask;
+  };
+  const centerlineMask = maskFor(1, 0.46);
+  const describe = (channel: number, role: "endpoint" | "junction", threshold: number, maximum: number) => components(maskFor(channel, threshold), TOPOLOGY_FIELD_SIZE)
+    .filter((component) => component.pixels.length <= area * 0.06)
+    .map((component) => {
+      let total = 0;
+      let weightedX = 0;
+      let weightedY = 0;
+      let confidence = 0;
+      for (const index of component.pixels) {
+        const weight = probability(channel, index);
+        total += weight;
+        weightedX += (index % TOPOLOGY_FIELD_SIZE) * weight;
+        weightedY += Math.floor(index / TOPOLOGY_FIELD_SIZE) * weight;
+        confidence = Math.max(confidence, weight);
+      }
+      return { role, x: weightedX / Math.max(1e-6, total), y: weightedY / Math.max(1e-6, total), confidence };
+    })
+    .sort((a, b) => b.confidence - a.confidence)
+    .slice(0, maximum);
+  const endpointCandidates = describe(2, "endpoint", 0.42, 14);
+  const junctionCandidates = describe(3, "junction", 0.42, 8);
+  const candidates = [...junctionCandidates, ...endpointCandidates].filter((candidate, index, all) => !all.slice(0, index).some((other) => (
+    other.role === candidate.role && Math.hypot(other.x - candidate.x, other.y - candidate.y) < 2.5
+  )));
+
+  const centerlinePixels: number[] = [];
+  for (let index = 0; index < area; index += 1) if (centerlineMask[index]) centerlinePixels.push(index);
+  const contentCenter = {
+    x: (prepared.contentRect.x + prepared.contentRect.width / 2) * TOPOLOGY_FIELD_SIZE / BODY_SIZE,
+    y: (prepared.contentRect.y + prepared.contentRect.height / 2) * TOPOLOGY_FIELD_SIZE / BODY_SIZE,
+  };
+  const centralPixel = centerlinePixels.reduce((best, index) => {
+    const score = Math.hypot(index % TOPOLOGY_FIELD_SIZE - contentCenter.x, Math.floor(index / TOPOLOGY_FIELD_SIZE) - contentCenter.y)
+      - probability(0, index) * 5;
+    return score < best.score ? { index, score } : best;
+  }, { index: Math.round(contentCenter.y) * TOPOLOGY_FIELD_SIZE + Math.round(contentCenter.x), score: Infinity }).index;
+  if (!junctionCandidates.length) candidates.unshift({
+    role: "junction",
+    x: centralPixel % TOPOLOGY_FIELD_SIZE,
+    y: Math.floor(centralPixel / TOPOLOGY_FIELD_SIZE),
+    confidence: probability(1, centralPixel),
+  });
+
+  const nearestLinePixel = (x: number, y: number) => centerlinePixels.reduce((best, index) => {
+    const distance = Math.hypot(index % TOPOLOGY_FIELD_SIZE - x, Math.floor(index / TOPOLOGY_FIELD_SIZE) - y);
+    return distance < best.distance ? { index, distance } : best;
+  }, { index: Math.round(y) * TOPOLOGY_FIELD_SIZE + Math.round(x), distance: Infinity }).index;
+  const anchors = candidates.map((candidate) => nearestLinePixel(candidate.x, candidate.y));
+  const rootIndex = candidates.reduce((best, candidate, index) => {
+    if (candidate.role !== "junction") return best;
+    const distance = Math.hypot(candidate.x - contentCenter.x, candidate.y - contentCenter.y);
+    return distance < best.distance ? { index, distance } : best;
+  }, { index: 0, distance: Infinity }).index;
+  const nodes: TopologyNode[] = candidates.map((candidate, index) => {
+    const point = prepared.mapPoint(
+      (candidate.x + 0.5) * BODY_SIZE / TOPOLOGY_FIELD_SIZE,
+      (candidate.y + 0.5) * BODY_SIZE / TOPOLOGY_FIELD_SIZE,
+    );
+    return { id: `topology-${index}`, role: index === rootIndex ? "root" : candidate.role, ...point, confidence: candidate.confidence };
+  });
+
+  type CandidatePath = { from: number; to: number; distance: number; confidence: number; indices: number[] };
+  const paths: CandidatePath[] = [];
+  const directions = [-TOPOLOGY_FIELD_SIZE - 1, -TOPOLOGY_FIELD_SIZE, -TOPOLOGY_FIELD_SIZE + 1, -1, 1, TOPOLOGY_FIELD_SIZE - 1, TOPOLOGY_FIELD_SIZE, TOPOLOGY_FIELD_SIZE + 1];
+  for (let from = 0; from < anchors.length; from += 1) {
+    const distances = new Int16Array(area);
+    distances.fill(-1);
+    const previous = new Int16Array(area);
+    previous.fill(-1);
+    const queue = [anchors[from]];
+    distances[anchors[from]] = 0;
+    for (let cursor = 0; cursor < queue.length; cursor += 1) {
+      const current = queue[cursor];
+      const x = current % TOPOLOGY_FIELD_SIZE;
+      const y = Math.floor(current / TOPOLOGY_FIELD_SIZE);
+      for (const offset of directions) {
+        const next = current + offset;
+        if (next < 0 || next >= area || distances[next] >= 0 || !centerlineMask[next]) continue;
+        const nextX = next % TOPOLOGY_FIELD_SIZE;
+        const nextY = Math.floor(next / TOPOLOGY_FIELD_SIZE);
+        if (Math.abs(nextX - x) > 1 || Math.abs(nextY - y) > 1) continue;
+        distances[next] = distances[current] + 1;
+        previous[next] = current;
+        queue.push(next);
+      }
+    }
+    for (let to = from + 1; to < anchors.length; to += 1) {
+      let current = anchors[to];
+      const indices: number[] = [];
+      if (distances[current] >= 0) {
+        while (current >= 0 && current !== anchors[from] && indices.length < area) {
+          indices.push(current);
+          current = previous[current];
+        }
+        indices.push(anchors[from]);
+        indices.reverse();
+      } else {
+        indices.push(anchors[from], anchors[to]);
+      }
+      paths.push({
+        from,
+        to,
+        distance: distances[anchors[to]] >= 0 ? distances[anchors[to]] : Math.hypot(candidates[from].x - candidates[to].x, candidates[from].y - candidates[to].y) * 4,
+        confidence: (candidates[from].confidence + candidates[to].confidence) / 2 * (distances[anchors[to]] >= 0 ? 1 : 0.55),
+        indices,
+      });
+    }
+  }
+  paths.sort((a, b) => a.distance - b.distance);
+  const parents = nodes.map((_, index) => index);
+  const find = (index: number): number => parents[index] === index ? index : (parents[index] = find(parents[index]));
+  const edges: LearnedTopology["edges"] = [];
+  for (const candidate of paths) {
+    const left = find(candidate.from);
+    const right = find(candidate.to);
+    if (left === right) continue;
+    parents[left] = right;
+    edges.push({
+      id: `topology-edge-${edges.length}`,
+      from: nodes[candidate.from].id,
+      to: nodes[candidate.to].id,
+      confidence: candidate.confidence,
+      path: candidate.indices.filter((_, index) => index % 2 === 0 || index === candidate.indices.length - 1).map((pixel) => prepared.mapPoint(
+        (pixel % TOPOLOGY_FIELD_SIZE + 0.5) * BODY_SIZE / TOPOLOGY_FIELD_SIZE,
+        (Math.floor(pixel / TOPOLOGY_FIELD_SIZE) + 0.5) * BODY_SIZE / TOPOLOGY_FIELD_SIZE,
+      )),
+    });
+    if (edges.length === nodes.length - 1) break;
+  }
+  const classProbabilities = softmax(classOutput.data as Float32Array);
+  const kindIndex = classProbabilities.indexOf(Math.max(...classProbabilities));
+  const fieldConfidence = centerlinePixels.length
+    ? centerlinePixels.reduce((total, index) => total + probability(1, index), 0) / centerlinePixels.length
+    : 0;
+  return {
+    model: "wallalive-topology-v7",
+    latencyMs,
+    kind: TOPOLOGY_CLASSES[Math.max(0, kindIndex)],
+    kindConfidence: classProbabilities[Math.max(0, kindIndex)] ?? 0,
+    fieldConfidence,
+    applicable: nodes.length >= 2 && edges.length >= 1 && fieldConfidence >= 0.48,
+    nodes,
+    edges,
+  };
+}
+
 function decodePose(
   output: import("onnxruntime-web/wasm").Tensor,
   prepared: PreparedImage,
   limbHints: LearnedPartHint[],
   latencyMs: number,
+  topology: LearnedTopology,
 ): LearnedPose {
   const values = output.data as Float32Array;
   const area = POSE_HEATMAP_SIZE * POSE_HEATMAP_SIZE;
@@ -413,7 +593,8 @@ function decodePose(
   const orderedHumanoid = averageY("left_shoulder", "right_shoulder") < averageY("left_hip", "right_hip")
     && averageY("left_hip", "right_hip") < averageY("left_knee", "right_knee")
     && averageY("left_knee", "right_knee") < averageY("left_ankle", "right_ankle");
-  const applicable = arms >= 1 && arms <= 2 && legs >= 1 && legs <= 2 && orderedHumanoid;
+  const applicable = topology.kind === "biped" && topology.kindConfidence >= 0.42
+    && arms >= 1 && arms <= 2 && legs >= 1 && legs <= 2 && orderedHumanoid;
   return { model: "wallalive-amateur-pose-v6", latencyMs, applicable, joints };
 }
 
@@ -505,22 +686,30 @@ function supplementFallbackHints(primary: LearnedPartHint[], fallback: LearnedPa
 
 export async function recognizeDrawingParts(extraction: DrawingExtraction): Promise<DrawingExtraction> {
   const started = performance.now();
-  const [{ ort, body, faceV3, faceV4, pose }, image] = await Promise.all([loadSessions(), loadImage(extraction.textureUrl)]);
+  const [{ ort, body, faceV3, faceV4, pose, topology }, image] = await Promise.all([loadSessions(), loadImage(extraction.textureUrl)]);
   const prepared = prepareImage(image, BODY_SIZE);
   const bodyTensor = new ort.Tensor("float32", prepared.values, [1, 3, BODY_SIZE, BODY_SIZE]);
   const poseStarted = performance.now();
-  const [bodyResults, poseResults] = await Promise.all([
+  const [bodyResults, poseResults, topologyResults] = await Promise.all([
     body.run({ pixel_values: bodyTensor }),
     pose.run({ pose_values: bodyTensor }),
+    topology.run({ topology_values: bodyTensor }),
   ]);
   const partOutput = bodyResults.part_logits ?? Object.values(bodyResults)[0];
   const coarseOutput = bodyResults.coarse_logits ?? Object.values(bodyResults)[1];
   const fullHints = decodeHints(partOutput, BODY_SIZE, PARTS, BODY_THRESHOLDS, prepared.values, prepared.mapPoint, { skipBody: true });
+  const learnedTopology = decodeTopology(
+    topologyResults.topology_fields ?? Object.values(topologyResults)[0],
+    topologyResults.topology_logits ?? Object.values(topologyResults)[1],
+    prepared,
+    Math.round(performance.now() - poseStarted),
+  );
   const learnedPose = decodePose(
     poseResults.joint_heatmaps ?? Object.values(poseResults)[0],
     prepared,
     fullHints,
     Math.round(performance.now() - poseStarted),
+    learnedTopology,
   );
 
   const faceCrop = modelRectToImageCrop(locateHead(coarseOutput, prepared), prepared.mapPoint);
@@ -570,5 +759,5 @@ export async function recognizeDrawingParts(extraction: DrawingExtraction): Prom
     // pair count so they cannot overwhelm unusual v3 multi-part predictions.
     hints = supplementFallbackHints(hints, oldHints);
   }
-  return mergeLearnedPartHints(extraction, hints, Math.round(performance.now() - started), learnedPose);
+  return mergeLearnedPartHints(extraction, hints, Math.round(performance.now() - started), learnedPose, learnedTopology);
 }

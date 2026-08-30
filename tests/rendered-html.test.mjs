@@ -4,6 +4,7 @@ import test from "node:test";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { parseAniGenPreview } from "../app/lib/anigen.ts";
 import { extractMedialSkeleton, inferSemanticRig, inkAroundEnclosedRegion, mapCoverTargetToSource, mergeLearnedPartHints, recoverEnclosedTargetRegion, recoverTargetSilhouette, scoreDrawingCandidate } from "../app/lib/drawing.ts";
+import { decodeTopology } from "../app/lib/learned-parts.ts";
 import { prepareNeuralCharacter, remapDominantHuePixels } from "../app/lib/rigged-model.ts";
 
 async function render() {
@@ -67,6 +68,8 @@ test("registers eight strict WebMCP tools without camera authority", async () =>
   assert.match(page, /ANIGEN RIG \+ DRAWING PARTS/);
   assert.match(page, /COLOR MATCHED/);
   assert.match(page, /viewableDegrees: 360/);
+  assert.match(page, /topologyRecognition/);
+  assert.match(page, /variable graph decoded from learned centerline, endpoints, and junction fields/);
 });
 
 test("implements local drawing extraction and real WebXR hit testing", async () => {
@@ -113,20 +116,23 @@ test("implements local drawing extraction and real WebXR hit testing", async () 
   assert.match(stage, /TubeGeometry/);
 });
 
-test("ships validation-calibrated same-origin drawing and pose models", async () => {
+test("ships validation-calibrated same-origin drawing, pose, and variable-topology models", async () => {
   const modelUrl = new URL("../public/models/wallalive-parts-v3.onnx", import.meta.url);
   const faceModelUrl = new URL("../public/models/wallalive-face-v3.onnx", import.meta.url);
   const faceV4ModelUrl = new URL("../public/models/wallalive-face-v4.onnx", import.meta.url);
   const poseModelUrl = new URL("../public/models/wallalive-amateur-pose-v6.onnx", import.meta.url);
+  const topologyModelUrl = new URL("../public/models/wallalive-topology-v7.onnx", import.meta.url);
   const faceV4Report = JSON.parse(await readFile(new URL("../public/models/wallalive-face-v4.json", import.meta.url), "utf8"));
   const ensembleReport = JSON.parse(await readFile(new URL("../public/models/wallalive-face-ensemble-v4.json", import.meta.url), "utf8"));
   const componentGateReport = JSON.parse(await readFile(new URL("../public/models/wallalive-component-gate-v5.json", import.meta.url), "utf8"));
   const poseReport = JSON.parse(await readFile(new URL("../public/models/wallalive-amateur-pose-v6.json", import.meta.url), "utf8"));
+  const topologyReport = JSON.parse(await readFile(new URL("../public/models/wallalive-topology-v7.json", import.meta.url), "utf8"));
   const report = JSON.parse(await readFile(new URL("../public/models/wallalive-parts-v3.json", import.meta.url), "utf8"));
   const model = await stat(modelUrl);
   const faceModel = await stat(faceModelUrl);
   const faceV4Model = await stat(faceV4ModelUrl);
   const poseModel = await stat(poseModelUrl);
+  const topologyModel = await stat(topologyModelUrl);
   const recognizer = await readFile(new URL("../app/lib/learned-parts.ts", import.meta.url), "utf8");
   const componentGate = await readFile(new URL("../app/lib/face-component-gate.ts", import.meta.url), "utf8");
 
@@ -134,6 +140,7 @@ test("ships validation-calibrated same-origin drawing and pose models", async ()
   assert.ok(faceModel.size > 400_000 && faceModel.size < 500_000, `expected a compact substantive face ONNX model, got ${faceModel.size} bytes`);
   assert.ok(faceV4Model.size > 1_700_000 && faceV4Model.size < 1_900_000, `expected a substantive high-resolution face ONNX model, got ${faceV4Model.size} bytes`);
   assert.ok(poseModel.size > 600_000 && poseModel.size < 700_000, `expected a compact substantive pose ONNX model, got ${poseModel.size} bytes`);
+  assert.ok(topologyModel.size > 550_000 && topologyModel.size < 650_000, `expected a compact substantive topology ONNX model, got ${topologyModel.size} bytes`);
   assert.equal(faceV4Report.architecture, "WallAlive ChildlikeSHAPES FaceUNet v4");
   assert.deepEqual(faceV4Report.input, [1, 3, 128, 128]);
   assert.equal(faceV4Report.parameters, 435_624);
@@ -199,6 +206,21 @@ test("ships validation-calibrated same-origin drawing and pose models", async ()
   assert.equal(poseReport.official_test.mean_error_input_pixels, 5.578);
   assert.deepEqual(poseReport.onnx_official_test, poseReport.official_test);
   assert.equal(poseReport.onnx_export_verified, true);
+  assert.equal(topologyReport.architecture, "WallAlive TopologyNet v7");
+  assert.deepEqual(topologyReport.input, [1, 3, 96, 96]);
+  assert.deepEqual(topologyReport.outputs.topology_fields, [1, 4, 48, 48]);
+  assert.deepEqual(topologyReport.field_names, ["foreground", "centerline", "endpoint", "junction"]);
+  assert.deepEqual(topologyReport.topology_classes, ["biped", "quadruped", "winged", "aquatic", "radial", "branched", "machine", "chain"]);
+  assert.equal(topologyReport.parameters, 146_988);
+  assert.equal(topologyReport.real_training_samples, 5_152);
+  assert.equal(topologyReport.test_split_used_for_selection, false);
+  assert.ok(topologyReport.official_test.centerline_f1_tolerance_1px >= 0.99);
+  assert.ok(topologyReport.official_test.field_iou.endpoint >= 0.55);
+  assert.ok(topologyReport.official_test.field_iou.junction >= 0.64);
+  assert.ok(topologyReport.quickdraw_test_accuracy >= 0.94);
+  assert.deepEqual(topologyReport.onnx_official_test, topologyReport.official_test);
+  assert.equal(topologyReport.onnx_quickdraw_test_accuracy, topologyReport.quickdraw_test_accuracy);
+  assert.equal(topologyReport.onnx_export_verified, true);
   assert.match(componentGate, /faceComponentGateScore/);
   assert.match(componentGate, /model_disagreement|disagreement/);
   assert.match(componentGate, /cheek:[\s\S]*threshold: 0\.24/);
@@ -209,13 +231,17 @@ test("ships validation-calibrated same-origin drawing and pose models", async ()
   assert.match(recognizer, /const FACE_V3_MODEL_PATH = ["']\/models\/wallalive-face-v3\.onnx["']/);
   assert.match(recognizer, /const FACE_V4_MODEL_PATH = ["']\/models\/wallalive-face-v4\.onnx["']/);
   assert.match(recognizer, /const POSE_MODEL_PATH = ["']\/models\/wallalive-amateur-pose-v6\.onnx["']/);
+  assert.match(recognizer, /const TOPOLOGY_MODEL_PATH = ["']\/models\/wallalive-topology-v7\.onnx["']/);
   assert.match(recognizer, /FALLBACK_MODEL_PATHS = \[["']\/models\/wallalive-parts-v2\.onnx/);
   assert.match(recognizer, /const BODY_SIZE = 96/);
   assert.match(recognizer, /const FACE_V3_SIZE = 96/);
   assert.match(recognizer, /const FACE_SIZE = 128/);
   assert.match(recognizer, /const POSE_HEATMAP_SIZE = 48/);
+  assert.match(recognizer, /const TOPOLOGY_FIELD_SIZE = 48/);
   assert.match(recognizer, /Promise\.all\(\[/);
   assert.match(recognizer, /orderedHumanoid/);
+  assert.match(recognizer, /topology\.kind === ["']biped["']/);
+  assert.match(recognizer, /function decodeTopology/);
   assert.match(recognizer, /arms >= 1 && arms <= 2 && legs >= 1 && legs <= 2/);
   assert.match(recognizer, /blendFaceLogits/);
   assert.match(recognizer, /const rawX0 = Math\.floor\(sourceX\)/);
@@ -225,6 +251,45 @@ test("ships validation-calibrated same-origin drawing and pose models", async ()
   assert.match(recognizer, /loadFallbackSessions/);
   assert.match(recognizer, /import\(["']onnxruntime-web\/wasm["']\)/);
   assert.doesNotMatch(recognizer, /https?:\/\//);
+});
+
+test("decodes a variable learned topology graph without a fixed human joint count", () => {
+  const size = 48;
+  const area = size * size;
+  const values = new Float32Array(area * 4).fill(-8);
+  const set = (channel, x, y, value = 8) => { values[channel * area + y * size + x] = value; };
+  const line = (x0, y0, x1, y1) => {
+    const steps = Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0));
+    for (let index = 0; index <= steps; index += 1) {
+      const x = Math.round(x0 + (x1 - x0) * index / steps);
+      const y = Math.round(y0 + (y1 - y0) * index / steps);
+      set(0, x, y);
+      set(1, x, y);
+    }
+  };
+  line(24, 25, 9, 7);
+  line(24, 25, 39, 7);
+  line(24, 25, 24, 43);
+  for (const [x, y] of [[9, 7], [39, 7], [24, 43]]) {
+    set(2, x, y);
+    set(2, Math.min(47, x + 1), y, 6);
+  }
+  set(3, 24, 25);
+  set(3, 25, 25, 6);
+  const classes = new Float32Array(8).fill(-4);
+  classes[5] = 8;
+  const topology = decodeTopology(
+    { data: values },
+    { data: classes },
+    { mapPoint: (x, y) => ({ x: x / 96, y: y / 96 }), contentRect: { x: 0, y: 0, width: 96, height: 96 } },
+    12,
+  );
+  assert.equal(topology.kind, "branched");
+  assert.equal(topology.applicable, true);
+  assert.equal(topology.nodes.filter((node) => node.role === "root").length, 1);
+  assert.equal(topology.nodes.filter((node) => node.role === "endpoint").length, 3);
+  assert.equal(topology.edges.length, topology.nodes.length - 1);
+  assert.ok(topology.edges.every((edge) => edge.path.length >= 2));
 });
 
 test("learned semantics snap to exact drawing pixels for position, outline, and color", () => {

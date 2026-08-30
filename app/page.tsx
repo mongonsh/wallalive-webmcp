@@ -411,6 +411,10 @@ export default function Home() {
         detectedKinds: [],
       },
       poseRecognition: captureRef.current.poseRecognition ?? null,
+      topologyRecognition: captureRef.current.topologyRecognition ? {
+        ...captureRef.current.topologyRecognition,
+        contract: "variable graph decoded from learned centerline, endpoints, and junction fields; no fixed human joint count",
+      } : null,
       localPreviewRegions: captureRef.current.rig.parts.map((part) => ({ id: part.id, kind: part.kind, side: part.side, confidence: part.confidence, source: part.source, posePathPoints: part.path?.length ?? 0 })),
       inflation: characterRef.current.inflation,
       neuralModelUsed: Boolean(neuralAssetRef.current),
@@ -694,12 +698,19 @@ export default function Home() {
                     const end = capture.poseRecognition?.joints.find((joint) => joint.name === to);
                     return start && end ? <line key={`${from}-${to}`} x1={start.x * 100} y1={start.y * 100} x2={end.x * 100} y2={end.y * 100} /> : null;
                   }) : null}
+                  {!capture.poseRecognition?.applicable && capture.topologyRecognition?.applicable ? capture.topologyRecognition.edges.map((edge) => {
+                    const start = capture.topologyRecognition?.nodes.find((node) => node.id === edge.from);
+                    const end = capture.topologyRecognition?.nodes.find((node) => node.id === edge.to);
+                    return start && end ? <line key={edge.id} x1={start.x * 100} y1={start.y * 100} x2={end.x * 100} y2={end.y * 100} /> : null;
+                  }) : null}
                   {capture.poseRecognition?.applicable
                     ? capture.poseRecognition.joints.map((joint) => <circle key={joint.name} cx={joint.x * 100} cy={joint.y * 100} r="1.7" />)
+                    : capture.topologyRecognition?.applicable
+                      ? capture.topologyRecognition.nodes.map((node) => <circle key={node.id} cx={node.x * 100} cy={node.y * 100} r={node.role === "root" ? "2.4" : "1.7"} />)
                     : capture.skeleton.map((point, index) => <circle key={index} cx={(point.x / 1.4 + 0.5) * 100} cy={(0.5 - point.y / 1.4) * 100} r={Math.max(1.1, point.radius / 1.4 * 100)} />)}
                 </svg>
               </div>
-              <div><p className="kicker">{neuralAsset ? "ANIGEN RIG + DRAWING PARTS" : "LOCAL PREVIEW DNA"}</p><strong>{capture.rig.detectedKinds.filter((kind) => kind !== "body").join(" · ") || capture.analysis.shapeHint}</strong><span><i style={{ background: capture.rig.bodyColor }} /><i style={{ background: capture.rig.lineColor }} /> {riggedAssetInfo ? `${riggedAssetInfo.bones} BONES · ${riggedAssetInfo.semanticParts} PROJECTED PARTS${riggedAssetInfo.colorTransfer ? " · COLOR MATCHED" : ""} · ${riggedAssetInfo.vertices.toLocaleString()} VERTICES` : neuralAsset ? "RIGGED GLB LOADING" : `${capture.rig.parts.length} ROUGH REGIONS`}</span></div>
+              <div><p className="kicker">{neuralAsset ? "ANIGEN RIG + DRAWING PARTS" : "LOCAL PREVIEW DNA"}</p><strong>{capture.rig.detectedKinds.filter((kind) => kind !== "body").join(" · ") || capture.topologyRecognition?.kind || capture.analysis.shapeHint}</strong><span><i style={{ background: capture.rig.bodyColor }} /><i style={{ background: capture.rig.lineColor }} /> {riggedAssetInfo ? `${riggedAssetInfo.bones} BONES · ${riggedAssetInfo.semanticParts} PROJECTED PARTS${riggedAssetInfo.colorTransfer ? " · COLOR MATCHED" : ""} · ${riggedAssetInfo.vertices.toLocaleString()} VERTICES` : neuralAsset ? "RIGGED GLB LOADING" : capture.topologyRecognition?.applicable ? `${capture.topologyRecognition.nodes.length} VARIABLE JOINTS · ${capture.topologyRecognition.edges.length} BRANCHES` : `${capture.rig.parts.length} ROUGH REGIONS`}</span></div>
             </div>
           ) : null}
 

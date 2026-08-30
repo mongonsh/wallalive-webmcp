@@ -28,6 +28,34 @@ export type LearnedPose = {
   joints: Array<{ name: PoseJointName; x: number; y: number; confidence: number }>;
 };
 
+export const TOPOLOGY_CLASSES = ["biped", "quadruped", "winged", "aquatic", "radial", "branched", "machine", "chain"] as const;
+export type TopologyClass = (typeof TOPOLOGY_CLASSES)[number];
+export type TopologyNodeRole = "root" | "junction" | "endpoint";
+export type TopologyNode = {
+  id: string;
+  role: TopologyNodeRole;
+  x: number;
+  y: number;
+  confidence: number;
+};
+export type TopologyEdge = {
+  id: string;
+  from: string;
+  to: string;
+  confidence: number;
+  path: Array<{ x: number; y: number }>;
+};
+export type LearnedTopology = {
+  model: "wallalive-topology-v7";
+  latencyMs: number;
+  kind: TopologyClass;
+  kindConfidence: number;
+  fieldConfidence: number;
+  applicable: boolean;
+  nodes: TopologyNode[];
+  edges: TopologyEdge[];
+};
+
 export type SemanticPartKind = "body" | "eye" | "pupil" | "cheek" | "mouth" | "ear" | "arm" | "hand" | "leg" | "foot" | "marking";
 export type SemanticSide = "left" | "right" | "center";
 export type SemanticPartSource = "image-region" | "silhouette-branch" | "structural-inference" | "learned-model" | "learned-pose";
@@ -112,11 +140,12 @@ export type DrawingExtraction = {
   analysis: DrawingAnalysis;
   semanticRegions?: SemanticRegionCandidate[];
   learnedRecognition?: {
-    model: "wallalive-v3-v4-gate-v5-pose-v6";
+    model: "wallalive-v3-v4-gate-v5-pose-v6-topology-v7";
     latencyMs: number;
     detectedKinds: SemanticPartKind[];
   };
   poseRecognition?: LearnedPose;
+  topologyRecognition?: LearnedTopology;
 };
 
 type RGB = { r: number; g: number; b: number };
@@ -1419,7 +1448,13 @@ export function inferSemanticRig(
   };
 }
 
-export function mergeLearnedPartHints(extraction: DrawingExtraction, hints: LearnedPartHint[], latencyMs: number, pose?: LearnedPose): DrawingExtraction {
+export function mergeLearnedPartHints(
+  extraction: DrawingExtraction,
+  hints: LearnedPartHint[],
+  latencyMs: number,
+  pose?: LearnedPose,
+  topology?: LearnedTopology,
+): DrawingExtraction {
   const replaceableFaceKinds = new Set<SemanticPartKind>(["eye", "cheek", "mouth", "ear"]);
   const withoutHeuristicFace = () => {
     const parts = extraction.rig.parts.filter((part) => !replaceableFaceKinds.has(part.kind) && part.kind !== "pupil");
@@ -1436,8 +1471,9 @@ export function mergeLearnedPartHints(extraction: DrawingExtraction, hints: Lear
   if (!accepted.length) return {
     ...extraction,
     rig: { ...extraction.rig, ...withoutHeuristicFace() },
-    learnedRecognition: { model: "wallalive-v3-v4-gate-v5-pose-v6", latencyMs, detectedKinds: [] },
+    learnedRecognition: { model: "wallalive-v3-v4-gate-v5-pose-v6-topology-v7", latencyMs, detectedKinds: [] },
     poseRecognition: pose,
+    topologyRecognition: topology,
   };
   const body = extraction.rig.parts.find((part) => part.kind === "body");
   if (!body) return extraction;
@@ -1749,8 +1785,9 @@ export function mergeLearnedPartHints(extraction: DrawingExtraction, hints: Lear
   return {
     ...extraction,
     rig: { ...extraction.rig, parts, joints, detectedKinds },
-    learnedRecognition: { model: "wallalive-v3-v4-gate-v5-pose-v6", latencyMs, detectedKinds: [...predictedKinds] },
+    learnedRecognition: { model: "wallalive-v3-v4-gate-v5-pose-v6-topology-v7", latencyMs, detectedKinds: [...predictedKinds] },
     poseRecognition: pose,
+    topologyRecognition: topology,
   };
 }
 
