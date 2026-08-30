@@ -28,7 +28,7 @@ https://github.com/mongonsh/wallalive-webmcp
 
 Prepared video: `outputs/WallAlive-WebMCP-demo.mp4`
 
-Public backup: https://github.com/mongonsh/wallalive-webmcp/releases/tag/demo-video-v1
+Public backup: https://github.com/mongonsh/wallalive-webmcp/releases/tag/demo-video-v2
 
 ## Inspiration
 
