@@ -3,7 +3,7 @@ import { readFile, stat } from "node:fs/promises";
 import test from "node:test";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { parseAniGenPreview } from "../app/lib/anigen.ts";
-import { extractMedialSkeleton, inferSemanticRig, recoverTargetSilhouette, scoreDrawingCandidate } from "../app/lib/drawing.ts";
+import { extractMedialSkeleton, inferSemanticRig, mapCoverTargetToSource, recoverEnclosedTargetRegion, recoverTargetSilhouette, scoreDrawingCandidate } from "../app/lib/drawing.ts";
 import { prepareNeuralCharacter, remapDominantHuePixels } from "../app/lib/rigged-model.ts";
 
 async function render() {
@@ -256,6 +256,14 @@ test("extracts a radius-bearing medial skeleton from a filled character body", (
   assert.ok(skeleton.every((point) => mask[point.y * size + point.x] === 1));
 });
 
+test("maps a visible tap through object-fit cover into raw camera coordinates", () => {
+  const leftEdge = mapCoverTargetToSource({ x: 0, y: 0.5 }, 1280, 720, 400, 600);
+  const center = mapCoverTargetToSource({ x: 0.5, y: 0.5 }, 1280, 720, 400, 600);
+  assert.ok(leftEdge.x > 0.3 && leftEdge.x < 0.34, `expected the cropped raw-camera x coordinate, got ${leftEdge.x}`);
+  assert.equal(center.x, 0.5);
+  assert.equal(center.y, 0.5);
+});
+
 test("recovers one upright target silhouette from fragmented colored line art", () => {
   const width = 121;
   const height = 121;
@@ -285,6 +293,78 @@ test("recovers one upright target silhouette from fragmented colored line art", 
   const ys = pixels.map((index) => Math.floor(index / width));
   const aspect = (Math.max(...xs) - Math.min(...xs)) / (Math.max(...ys) - Math.min(...ys));
   assert.ok(aspect > 0.72 && aspect < 1.08, `expected an upright body, got aspect ${aspect}`);
+});
+
+test("target silhouette excludes disconnected same-color writing and neighboring drawings", () => {
+  const width = 161;
+  const height = 141;
+  const mask = new Uint8Array(width * height);
+  const center = { x: 62, y: 72 };
+  const plot = (x, y) => {
+    if (x >= 0 && x < width && y >= 0 && y < height) mask[y * width + x] = 1;
+  };
+
+  // The tapped character: one mostly closed, round outline with two small gaps.
+  for (let angleIndex = 0; angleIndex < 360; angleIndex += 1) {
+    if ((angleIndex > 72 && angleIndex < 82) || (angleIndex > 250 && angleIndex < 260)) continue;
+    const angle = angleIndex / 180 * Math.PI;
+    plot(
+      Math.round(center.x + Math.cos(angle) * 26),
+      Math.round(center.y + Math.sin(angle) * 33),
+    );
+  }
+
+  // Separate red writing and another sketch surround the character on the paper.
+  // They occupy many viewing angles, which used to inflate the global radial fill.
+  for (let angleIndex = -105; angleIndex <= 112; angleIndex += 3) {
+    const angle = angleIndex / 180 * Math.PI;
+    const wobble = angleIndex % 12 === 0 ? 7 : 0;
+    plot(
+      Math.round(center.x + Math.cos(angle) * (61 + wobble)),
+      Math.round(center.y + Math.sin(angle) * (53 + wobble)),
+    );
+  }
+  for (let x = 111; x <= 151; x += 8) {
+    for (let y = 37; y <= 57; y += 1) plot(x, y);
+  }
+
+  const recovered = recoverTargetSilhouette(mask, width, height, { x: center.x / width, y: center.y / height });
+  assert.equal(recovered[center.y * width + center.x], 1, "the tapped character body should be filled");
+  assert.equal(recovered[center.y * width + 121], 0, "neighboring drawing must not become part of the target");
+  assert.equal(recovered[47 * width + 135], 0, "writing must not become part of the target");
+
+  const selected = [...recovered.keys()].filter((index) => recovered[index]);
+  const maxX = Math.max(...selected.map((index) => index % width));
+  assert.ok(maxX <= 94, `target mask leaked into neighboring content (max x ${maxX})`);
+});
+
+test("target-seeded flood fill closes compression gaps without crossing exterior ink", () => {
+  const width = 151;
+  const height = 131;
+  const mask = new Uint8Array(width * height);
+  const center = { x: 58, y: 67 };
+  const plot = (x, y) => {
+    if (x >= 0 && x < width && y >= 0 && y < height) mask[y * width + x] = 1;
+  };
+  for (let angleIndex = 0; angleIndex < 360; angleIndex += 1) {
+    if ((angleIndex > 86 && angleIndex < 91) || (angleIndex > 267 && angleIndex < 272)) continue;
+    const angle = angleIndex / 180 * Math.PI;
+    plot(Math.round(center.x + Math.cos(angle) * 29), Math.round(center.y + Math.sin(angle) * 38));
+  }
+  // An exterior label nearly touches the top-left edge but is not part of the body.
+  for (let x = 9; x <= 47; x += 1) {
+    plot(x, 17);
+    plot(x, 30);
+  }
+  for (let y = 17; y <= 30; y += 1) {
+    plot(9, y);
+    plot(47, y);
+  }
+
+  const recovered = recoverEnclosedTargetRegion(mask, width, height, { x: center.x / width, y: center.y / height });
+  assert.ok(recovered, "expected the tap to remain enclosed after closing small outline gaps");
+  assert.equal(recovered[center.y * width + center.x], 1);
+  assert.equal(recovered[23 * width + 25], 0, "an exterior label must remain outside the target region");
 });
 
 test("builds a semantic joint rig from facial regions and silhouette branches", () => {

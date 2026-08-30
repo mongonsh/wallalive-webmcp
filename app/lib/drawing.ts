@@ -96,6 +96,25 @@ const boostInkColor = (color: RGB): RGB => {
   };
 };
 
+export function mapCoverTargetToSource(
+  target: CaptureTarget,
+  sourceWidth: number,
+  sourceHeight: number,
+  viewportWidth: number,
+  viewportHeight: number,
+): CaptureTarget {
+  if (!sourceWidth || !sourceHeight || !viewportWidth || !viewportHeight) return target;
+  const scale = Math.max(viewportWidth / sourceWidth, viewportHeight / sourceHeight);
+  const renderedWidth = sourceWidth * scale;
+  const renderedHeight = sourceHeight * scale;
+  const cropX = Math.max(0, (renderedWidth - viewportWidth) / 2);
+  const cropY = Math.max(0, (renderedHeight - viewportHeight) / 2);
+  return {
+    x: clamp((target.x * viewportWidth + cropX) / renderedWidth, 0, 1),
+    y: clamp((target.y * viewportHeight + cropY) / renderedHeight, 0, 1),
+  };
+}
+
 function hueOf(color: RGB) {
   const r = color.r / 255;
   const g = color.g / 255;
@@ -149,40 +168,56 @@ function inkScore(pixel: RGB, background: RGB) {
 }
 
 function dilate(mask: Uint8Array, width: number, height: number, radius: number) {
+  if (radius <= 0) return new Uint8Array(mask);
+  const stride = width + 1;
+  const integral = new Uint32Array((width + 1) * (height + 1));
+  for (let y = 0; y < height; y += 1) {
+    let rowSum = 0;
+    for (let x = 0; x < width; x += 1) {
+      rowSum += mask[y * width + x];
+      integral[(y + 1) * stride + x + 1] = integral[y * stride + x + 1] + rowSum;
+    }
+  }
   const result = new Uint8Array(mask.length);
   for (let y = 0; y < height; y += 1) {
     for (let x = 0; x < width; x += 1) {
-      let found = false;
-      for (let oy = -radius; oy <= radius && !found; oy += 1) {
-        for (let ox = -radius; ox <= radius; ox += 1) {
-          const nx = x + ox;
-          const ny = y + oy;
-          if (nx >= 0 && nx < width && ny >= 0 && ny < height && mask[ny * width + nx]) {
-            found = true;
-            break;
-          }
-        }
-      }
-      if (found) result[y * width + x] = 1;
+      const minX = Math.max(0, x - radius);
+      const minY = Math.max(0, y - radius);
+      const maxX = Math.min(width - 1, x + radius);
+      const maxY = Math.min(height - 1, y + radius);
+      const sum = integral[(maxY + 1) * stride + maxX + 1]
+        - integral[minY * stride + maxX + 1]
+        - integral[(maxY + 1) * stride + minX]
+        + integral[minY * stride + minX];
+      if (sum) result[y * width + x] = 1;
     }
   }
   return result;
 }
 
 function erode(mask: Uint8Array, width: number, height: number, radius: number) {
+  if (radius <= 0) return new Uint8Array(mask);
+  const stride = width + 1;
+  const integral = new Uint32Array((width + 1) * (height + 1));
+  for (let y = 0; y < height; y += 1) {
+    let rowSum = 0;
+    for (let x = 0; x < width; x += 1) {
+      rowSum += mask[y * width + x];
+      integral[(y + 1) * stride + x + 1] = integral[y * stride + x + 1] + rowSum;
+    }
+  }
   const result = new Uint8Array(mask.length);
   for (let y = radius; y < height - radius; y += 1) {
     for (let x = radius; x < width - radius; x += 1) {
-      let solid = true;
-      for (let oy = -radius; oy <= radius && solid; oy += 1) {
-        for (let ox = -radius; ox <= radius; ox += 1) {
-          if (!mask[(y + oy) * width + x + ox]) {
-            solid = false;
-            break;
-          }
-        }
-      }
-      if (solid) result[y * width + x] = 1;
+      const minX = x - radius;
+      const minY = y - radius;
+      const maxX = x + radius;
+      const maxY = y + radius;
+      const sum = integral[(maxY + 1) * stride + maxX + 1]
+        - integral[minY * stride + maxX + 1]
+        - integral[(maxY + 1) * stride + minX]
+        + integral[minY * stride + minX];
+      if (sum === (radius * 2 + 1) ** 2) result[y * width + x] = 1;
     }
   }
   return result;
@@ -361,14 +396,147 @@ function recoverSilhouette(mask: Uint8Array, width: number, height: number) {
   return silhouette;
 }
 
-export function recoverTargetSilhouette(mask: Uint8Array, width: number, height: number, target: CaptureTarget) {
+function isolateTargetInk(mask: Uint8Array, width: number, height: number, target: CaptureTarget) {
+  const components = connectedComponents(mask, width, height);
+  if (components.length <= 1) return mask;
+
   const centerX = target.x * width;
   const centerY = target.y * height;
+  const angleBins = 72;
+  const describe = (component: Component) => {
+    const occupiedAngles = new Uint8Array(angleBins);
+    const radii: number[] = [];
+    for (const index of component.pixels) {
+      const x = index % width;
+      const y = Math.floor(index / width);
+      const dx = x - centerX;
+      const dy = y - centerY;
+      const angle = (Math.atan2(dy, dx) + Math.PI * 2) % (Math.PI * 2);
+      occupiedAngles[Math.floor(angle / (Math.PI * 2) * angleBins) % angleBins] = 1;
+      radii.push(Math.hypot(dx, dy));
+    }
+    radii.sort((a, b) => a - b);
+    const outsideX = Math.max(component.minX - centerX, 0, centerX - component.maxX);
+    const outsideY = Math.max(component.minY - centerY, 0, centerY - component.maxY);
+    const boxWidth = component.maxX - component.minX + 1;
+    const boxHeight = component.maxY - component.minY + 1;
+    return {
+      component,
+      boxWidth,
+      boxHeight,
+      boxArea: boxWidth * boxHeight,
+      boxDistance: Math.hypot(outsideX, outsideY),
+      containsTarget: outsideX === 0 && outsideY === 0,
+      angularCoverage: occupiedAngles.reduce((sum, value) => sum + value, 0),
+      medianRadius: radii[Math.floor(radii.length / 2)] ?? 0,
+      maxRadius: radii[radii.length - 1] ?? 0,
+    };
+  };
+  const descriptions = components.map(describe);
+  const frameArea = width * height;
+  const frameSpan = Math.min(width, height);
+  const seed = descriptions.sort((a, b) => {
+    const score = (value: typeof a) => value.angularCoverage * 6
+      + (value.containsTarget ? 180 : 0)
+      + Math.log1p(value.component.pixels.length) * 9
+      + Math.min(42, Math.max(value.boxWidth, value.boxHeight) / frameSpan * 42)
+      - value.boxDistance / frameSpan * 190
+      - value.boxArea / frameArea * 55;
+    return score(b) - score(a);
+  })[0];
+  if (!seed) return mask;
+
+  const seedSpan = Math.max(seed.boxWidth, seed.boxHeight);
+  const expansionLimit = seedSpan * 1.24;
+  const proximityLimit = Math.max(4, seedSpan * 0.18);
+  const seedAlreadyWrapsTarget = seed.angularCoverage >= angleBins * 0.45;
+  const selected = descriptions.filter((value) => {
+    if (value === seed) return true;
+    if (seedAlreadyWrapsTarget) return false;
+    const insideSeedBounds = value.component.centerX >= seed.component.minX - proximityLimit
+      && value.component.centerX <= seed.component.maxX + proximityLimit
+      && value.component.centerY >= seed.component.minY - proximityLimit
+      && value.component.centerY <= seed.component.maxY + proximityLimit;
+    const unionWidth = Math.max(seed.component.maxX, value.component.maxX) - Math.min(seed.component.minX, value.component.minX) + 1;
+    const unionHeight = Math.max(seed.component.maxY, value.component.maxY) - Math.min(seed.component.minY, value.component.minY) + 1;
+    const sameOutlineRadius = value.medianRadius >= seed.medianRadius * 0.68
+      && value.medianRadius <= seed.medianRadius * 1.2
+      && value.maxRadius <= seed.maxRadius * 1.2;
+    return insideSeedBounds
+      && sameOutlineRadius
+      && value.angularCoverage >= 2
+      && unionWidth <= expansionLimit
+      && unionHeight <= expansionLimit;
+  });
+
+  const isolated = new Uint8Array(mask.length);
+  for (const { component } of selected) {
+    for (const index of component.pixels) isolated[index] = 1;
+  }
+  return isolated;
+}
+
+export function recoverEnclosedTargetRegion(mask: Uint8Array, width: number, height: number, target: CaptureTarget) {
+  const targetX = clamp(Math.round(target.x * width), 0, width - 1);
+  const targetY = clamp(Math.round(target.y * height), 0, height - 1);
+  const frameArea = width * height;
+
+  for (let radius = 1; radius <= 14; radius += 1) {
+    const barrier = dilate(mask, width, height, radius);
+    const openSpace = new Uint8Array(mask.length);
+    for (let index = 0; index < openSpace.length; index += 1) openSpace[index] = barrier[index] ? 0 : 1;
+    const candidate = connectedComponents(openSpace, width, height).filter((component) => {
+      const touchesFrame = component.minX === 0 || component.minY === 0 || component.maxX === width - 1 || component.maxY === height - 1;
+      if (touchesFrame || component.pixels.length < frameArea * 0.0025 || component.pixels.length > frameArea * 0.3) return false;
+      const boxWidth = component.maxX - component.minX + 1;
+      const boxHeight = component.maxY - component.minY + 1;
+      const outsideX = Math.max(component.minX - targetX, 0, targetX - component.maxX);
+      const outsideY = Math.max(component.minY - targetY, 0, targetY - component.maxY);
+      return boxWidth >= width * 0.035
+        && boxHeight >= height * 0.035
+        && Math.hypot(outsideX, outsideY) <= Math.min(width, height) * 0.09;
+    }).sort((a, b) => {
+      const score = (component: Component) => {
+        const outsideX = Math.max(component.minX - targetX, 0, targetX - component.maxX);
+        const outsideY = Math.max(component.minY - targetY, 0, targetY - component.maxY);
+        const centerDistance = Math.hypot(component.centerX - targetX, component.centerY - targetY);
+        return Math.sqrt(component.pixels.length)
+          / (1 + Math.hypot(outsideX, outsideY) * 0.18 + centerDistance / Math.min(width, height) * 1.4);
+      };
+      return score(b) - score(a);
+    })[0];
+    if (!candidate) continue;
+
+    const region = new Uint8Array(mask.length);
+    for (const index of candidate.pixels) region[index] = 1;
+
+    // The temporary barrier grows inward to close camera-compression gaps.
+    // Expanding the enclosed region by the same amount restores the drawn edge
+    // without crossing into unrelated marks outside that boundary.
+    return dilate(region, width, height, radius);
+  }
+  return null;
+}
+
+export function recoverTargetSilhouette(mask: Uint8Array, width: number, height: number, target: CaptureTarget, isolateInk = true) {
+  const targetInk = isolateInk ? isolateTargetInk(mask, width, height, target) : mask;
+  const centerX = target.x * width;
+  const centerY = target.y * height;
+  const closedSilhouette = recoverSilhouette(targetInk, width, height);
+  const inkIndices = [...targetInk.keys()].filter((index) => targetInk[index]);
+  if (inkIndices.length) {
+    const inkXs = inkIndices.map((index) => index % width);
+    const inkYs = inkIndices.map((index) => Math.floor(index / width));
+    const inkBoundsArea = (Math.max(...inkXs) - Math.min(...inkXs) + 1) * (Math.max(...inkYs) - Math.min(...inkYs) + 1);
+    const closedPixels = closedSilhouette.reduce((sum, value) => sum + value, 0);
+    const targetIndex = clamp(Math.round(centerY), 0, height - 1) * width + clamp(Math.round(centerX), 0, width - 1);
+    if (closedSilhouette[targetIndex] && closedPixels >= inkBoundsArea * 0.2) return closedSilhouette;
+  }
   const binCount = 96;
   const radii = new Float32Array(binCount);
   for (let y = 0; y < height; y += 1) {
     for (let x = 0; x < width; x += 1) {
-      if (!mask[y * width + x]) continue;
+      if (!targetInk[y * width + x]) continue;
       const dx = x - centerX;
       const dy = y - centerY;
       const angle = (Math.atan2(dy, dx) + Math.PI * 2) % (Math.PI * 2);
@@ -377,7 +545,7 @@ export function recoverTargetSilhouette(mask: Uint8Array, width: number, height:
     }
   }
   const present = [...radii].filter((radius) => radius > 2).sort((a, b) => a - b);
-  if (present.length < binCount * 0.24) return recoverSilhouette(mask, width, height);
+  if (present.length < binCount * 0.24) return recoverSilhouette(targetInk, width, height);
   const medianRadius = present[Math.floor(present.length / 2)];
   for (let index = 0; index < binCount; index += 1) {
     if (radii[index] > 2) continue;
@@ -393,9 +561,10 @@ export function recoverTargetSilhouette(mask: Uint8Array, width: number, height:
   for (let pass = 0; pass < 3; pass += 1) {
     const next = new Float32Array(binCount);
     for (let index = 0; index < binCount; index += 1) {
-      const window = [-2, -1, 0, 1, 2].map((offset) => radii[(index + offset + binCount) % binCount]).sort((a, b) => a - b);
-      const localMedian = window[2];
-      next[index] = clamp(radii[index] * 0.45 + localMedian * 0.55, medianRadius * 0.62, medianRadius * 1.28);
+      const window = [-4, -3, -2, -1, 0, 1, 2, 3, 4].map((offset) => radii[(index + offset + binCount) % binCount]).sort((a, b) => a - b);
+      const localMedian = window[4];
+      const locallyClamped = Math.min(radii[index], localMedian * 1.14);
+      next[index] = clamp(locallyClamped * 0.28 + localMedian * 0.72, medianRadius * 0.64, medianRadius * 1.22);
     }
     radii.set(next);
   }
@@ -420,6 +589,34 @@ export function recoverTargetSilhouette(mask: Uint8Array, width: number, height:
     }
   }
   return result;
+}
+
+function inkAroundEnclosedRegion(mask: Uint8Array, region: Uint8Array, width: number, height: number) {
+  let minX = width;
+  let minY = height;
+  let maxX = 0;
+  let maxY = 0;
+  for (let index = 0; index < region.length; index += 1) {
+    if (!region[index]) continue;
+    const x = index % width;
+    const y = Math.floor(index / width);
+    minX = Math.min(minX, x);
+    minY = Math.min(minY, y);
+    maxX = Math.max(maxX, x);
+    maxY = Math.max(maxY, y);
+  }
+  if (minX > maxX || minY > maxY) return mask;
+  const span = Math.max(maxX - minX + 1, maxY - minY + 1);
+  const padding = Math.max(8, Math.round(span * 0.7));
+  const windowMinX = Math.max(0, minX - padding);
+  const windowMinY = Math.max(0, minY - padding);
+  const windowMaxX = Math.min(width - 1, maxX + padding);
+  const windowMaxY = Math.min(height - 1, maxY + padding);
+  const localized = new Uint8Array(mask.length);
+  for (let y = windowMinY; y <= windowMaxY; y += 1) {
+    for (let x = windowMinX; x <= windowMaxX; x += 1) localized[y * width + x] = mask[y * width + x];
+  }
+  return localized;
 }
 
 function pointLineDistance(point: ContourPoint, start: ContourPoint, end: ContourPoint) {
@@ -596,7 +793,7 @@ function skeletonFromTexture(canvas: HTMLCanvasElement): SkeletonPoint[] {
   }));
 }
 
-function analyzeSemanticCanvas(canvas: HTMLCanvasElement, preferredLine: RGB) {
+function analyzeSemanticCanvas(canvas: HTMLCanvasElement, preferredLine: RGB, enableGuidedFace: boolean) {
   const width = canvas.width;
   const height = canvas.height;
   const context = canvas.getContext("2d", { willReadFrequently: true });
@@ -645,13 +842,44 @@ function analyzeSemanticCanvas(canvas: HTMLCanvasElement, preferredLine: RGB) {
     const rgba = index * 4;
     const pixel = { r: pixels[rgba], g: pixels[rgba + 1], b: pixels[rgba + 2] };
     const pixelChroma = Math.max(pixel.r, pixel.g, pixel.b) - Math.min(pixel.r, pixel.g, pixel.b);
-    const inkMatches = lineChroma < 12 || (pixelChroma > 9 && hueDistance(pixel, line) < 48);
-    if (colorDistance(pixel, bodyRgb) > 30 && inkMatches) featureMask[index] = 1;
+    const inkMatches = lineChroma < 12 || (pixelChroma > 6 && hueDistance(pixel, line) < 64);
+    if (colorDistance(pixel, bodyRgb) > 18 && inkMatches) featureMask[index] = 1;
   }
-  const connectedFeatures = erode(dilate(featureMask, width, height, 1), width, height, 1);
+  const connectedFeatures = erode(dilate(featureMask, width, height, 2), width, height, 1);
   const components = connectedComponents(connectedFeatures, width, height)
     .filter((component) => component.pixels.length >= 8 && component.pixels.length <= Math.max(24, opaqueCount * 0.16));
-  const regions: SemanticRegionCandidate[] = components.map((component, index) => {
+  const enclosedSpace = new Uint8Array(opaque.length);
+  const featureBarrier = dilate(featureMask, width, height, 4);
+  for (let index = 0; index < enclosedSpace.length; index += 1) enclosedSpace[index] = interior[index] && !featureBarrier[index] ? 1 : 0;
+  const enclosedFeatures = connectedComponents(enclosedSpace, width, height).filter((component) => {
+    const boxWidth = component.maxX - component.minX + 1;
+    const boxHeight = component.maxY - component.minY + 1;
+    if (component.pixels.length < 28 || component.pixels.length > opaqueCount * 0.035 || boxWidth < 6 || boxHeight < 6) return false;
+    return !component.pixels.some((pixelIndex) => {
+      const x = pixelIndex % width;
+      const y = Math.floor(pixelIndex / width);
+      return x <= 0 || y <= 0 || x >= width - 1 || y >= height - 1
+        || !interior[pixelIndex - 1] || !interior[pixelIndex + 1]
+        || !interior[pixelIndex - width] || !interior[pixelIndex + width];
+    });
+  });
+  const enclosedRegions: SemanticRegionCandidate[] = enclosedFeatures.map((component, index) => {
+    const boxWidth = component.maxX - component.minX + 1;
+    const boxHeight = component.maxY - component.minY + 1;
+    return {
+      id: `enclosed-region-${index + 1}`,
+      x: Number((((component.centerX + 0.5) / width - 0.5) * 1.4).toFixed(4)),
+      y: Number(((0.5 - (component.centerY + 0.5) / height) * 1.4).toFixed(4)),
+      width: Number(((boxWidth / width) * 1.4).toFixed(4)),
+      height: Number(((boxHeight / height) * 1.4).toFixed(4)),
+      rotation: componentRotation(component, width),
+      outline: componentOutline(component, width, height),
+      color: toHex(line),
+      pixelCount: component.pixels.length,
+      density: 1,
+    };
+  });
+  const strokeRegions: SemanticRegionCandidate[] = components.map((component, index) => {
     let r = 0;
     let g = 0;
     let b = 0;
@@ -676,6 +904,78 @@ function analyzeSemanticCanvas(canvas: HTMLCanvasElement, preferredLine: RGB) {
       density: Number((component.pixels.length / (boxWidth * boxHeight)).toFixed(3)),
     };
   });
+  const bodyComponent = connectedComponents(opaque, width, height).sort((a, b) => b.pixels.length - a.pixels.length)[0];
+  const guidedRegions: SemanticRegionCandidate[] = [];
+  if (bodyComponent && enableGuidedFace) {
+    const bodyPixelWidth = bodyComponent.maxX - bodyComponent.minX + 1;
+    const bodyPixelHeight = bodyComponent.maxY - bodyComponent.minY + 1;
+    const findWindowRegion = (id: string, left: number, top: number, right: number, bottom: number) => {
+      const minX = Math.round(bodyComponent.minX + bodyPixelWidth * left);
+      const minY = Math.round(bodyComponent.minY + bodyPixelHeight * top);
+      const maxX = Math.round(bodyComponent.minX + bodyPixelWidth * right);
+      const maxY = Math.round(bodyComponent.minY + bodyPixelHeight * bottom);
+      const windowMask = new Uint8Array(featureMask.length);
+      for (let y = Math.max(0, minY); y <= Math.min(height - 1, maxY); y += 1) {
+        for (let x = Math.max(0, minX); x <= Math.min(width - 1, maxX); x += 1) {
+          const index = y * width + x;
+          windowMask[index] = connectedFeatures[index];
+        }
+      }
+      const expectedX = (minX + maxX) / 2;
+      const expectedY = (minY + maxY) / 2;
+      const component = connectedComponents(windowMask, width, height).filter((candidate) => candidate.pixels.length >= 10).sort((a, b) => {
+        const score = (candidate: Component) => Math.sqrt(candidate.pixels.length)
+          - Math.hypot(candidate.centerX - expectedX, candidate.centerY - expectedY) * 0.08;
+        return score(b) - score(a);
+      })[0];
+      if (!component) return null;
+      const boxWidth = component.maxX - component.minX + 1;
+      const boxHeight = component.maxY - component.minY + 1;
+      let r = 0;
+      let g = 0;
+      let b = 0;
+      for (const pixelIndex of component.pixels) {
+        const rgba = pixelIndex * 4;
+        r += pixels[rgba];
+        g += pixels[rgba + 1];
+        b += pixels[rgba + 2];
+      }
+      return {
+        id,
+        x: Number((((component.centerX + 0.5) / width - 0.5) * 1.4).toFixed(4)),
+        y: Number(((0.5 - (component.centerY + 0.5) / height) * 1.4).toFixed(4)),
+        width: Number(((boxWidth / width) * 1.4).toFixed(4)),
+        height: Number(((boxHeight / height) * 1.4).toFixed(4)),
+        rotation: componentRotation(component, width),
+        outline: componentOutline(component, width, height),
+        color: toHex({ r: r / component.pixels.length, g: g / component.pixels.length, b: b / component.pixels.length }),
+        pixelCount: component.pixels.length,
+        density: Number((component.pixels.length / (boxWidth * boxHeight)).toFixed(3)),
+      } satisfies SemanticRegionCandidate;
+    };
+    const guidedEyes = [
+      findWindowRegion("guided-eye-left", 0.16, 0.2, 0.5, 0.42),
+      findWindowRegion("guided-eye-right", 0.5, 0.2, 0.84, 0.42),
+    ].filter((region): region is SemanticRegionCandidate => Boolean(region));
+    const pairedEyeSignal = guidedEyes.length === 2
+      && Math.abs(guidedEyes[0].y - guidedEyes[1].y) < bodyPixelHeight / height * 1.4 * 0.14
+      && Math.max(guidedEyes[0].pixelCount, guidedEyes[1].pixelCount) / Math.max(1, Math.min(guidedEyes[0].pixelCount, guidedEyes[1].pixelCount)) < 4;
+    if (pairedEyeSignal) {
+      guidedRegions.push(...guidedEyes);
+      for (const region of [
+        findWindowRegion("guided-cheek-left", 0.1, 0.36, 0.45, 0.58),
+        findWindowRegion("guided-cheek-right", 0.55, 0.36, 0.9, 0.58),
+        findWindowRegion("guided-mouth", 0.34, 0.44, 0.66, 0.62),
+      ]) if (region) guidedRegions.push(region);
+    }
+  }
+  const structuralRegions = [...guidedRegions, ...enclosedRegions];
+  const regions = [...structuralRegions, ...strokeRegions.filter((region) => !structuralRegions.some((enclosed) => (
+    Math.abs(region.x - enclosed.x) < Math.max(region.width, enclosed.width) * 0.32
+      && Math.abs(region.y - enclosed.y) < Math.max(region.height, enclosed.height) * 0.32
+      && region.width >= enclosed.width * 0.72
+      && region.height >= enclosed.height * 0.72
+  )))];
   return { bodyColor: toHex(surface), lineColor: toHex(line), regions };
 }
 
@@ -764,7 +1064,11 @@ export function inferSemanticRig(
     });
   };
 
-  const eyeResult = findPair(faceCandidates);
+  const guidedEyePair = [regions.find((region) => region.id === "guided-eye-left"), regions.find((region) => region.id === "guided-eye-right")]
+    .filter((region): region is SemanticRegionCandidate => Boolean(region));
+  const eyeResult = guidedEyePair.length === 2
+    ? { pair: guidedEyePair.sort((a, b) => a.x - b.x) as [SemanticRegionCandidate, SemanticRegionCandidate], score: 0.8 }
+    : findPair(faceCandidates);
   const eyePair = eyeResult.pair;
   const eyeAssignments: Array<{ region: SemanticRegionCandidate; side: SemanticSide; partId: string }> = [];
   if (eyePair) {
@@ -816,7 +1120,7 @@ export function inferSemanticRig(
   // inventing pupils for dot eyes or closed eyelids.
   if (eyeAssignments.length) {
     eyeAssignments.forEach(({ region: eye, side, partId }) => {
-      const pupil = regions.filter((region) => !usedRegions.has(region.id)
+      const pupil = regions.filter((region) => !region.id.startsWith("guided-") && !usedRegions.has(region.id)
         && region.width <= eye.width * 0.72
         && region.height <= eye.height * 0.72
         && Math.abs(region.x - eye.x) <= Math.max(eye.width * 0.42, bodyWidth * 0.018)
@@ -853,12 +1157,16 @@ export function inferSemanticRig(
   const eyeY = eyeAssignments.length
     ? eyeAssignments.reduce((sum, assignment) => sum + assignment.region.y, 0) / eyeAssignments.length
     : contourBounds.minY + bodyHeight * 0.64;
-  const cheekResult = findPair(faceCandidates.filter((region) => !usedRegions.has(region.id)
-    && region.y < eyeY - bodyHeight * 0.055
-    && region.y > contourBounds.minY + bodyHeight * 0.25), eyeY - bodyHeight * 0.16);
+  const guidedCheekPair = [regions.find((region) => region.id === "guided-cheek-left"), regions.find((region) => region.id === "guided-cheek-right")]
+    .filter((region): region is SemanticRegionCandidate => Boolean(region));
+  const cheekResult = guidedCheekPair.length === 2
+    ? { pair: guidedCheekPair.sort((a, b) => a.x - b.x) as [SemanticRegionCandidate, SemanticRegionCandidate], score: 0.5 }
+    : findPair(faceCandidates.filter((region) => !usedRegions.has(region.id)
+      && region.y < eyeY - bodyHeight * 0.055
+      && region.y > contourBounds.minY + bodyHeight * 0.25), eyeY - bodyHeight * 0.16);
   if (cheekResult.pair) addPairedRegion("cheek", cheekResult.pair, clamp(0.68 + cheekResult.score * 0.04, 0.6, 0.9));
 
-  const mouth = regions.filter((region) => !usedRegions.has(region.id)
+  const mouth = regions.find((region) => region.id === "guided-mouth") ?? regions.filter((region) => !usedRegions.has(region.id)
     && region.y < eyeY - bodyHeight * 0.035
     && region.y > contourBounds.minY + bodyHeight * 0.18
     && Math.abs(region.x - root.x) < bodyWidth * 0.25)
@@ -1061,13 +1369,25 @@ function extractDrawingFromSource(sourceImage: CanvasImageSource, sourceWidth: n
   }
 
   const colorCloseRadius = clamp(Math.round(Math.min(width, height) * 0.014), 5, 9);
-  const colorConnectedInk = erode(dilate(chromaticInk, width, height, colorCloseRadius), width, height, Math.max(2, colorCloseRadius - 3));
-  const colorSolidComponents = connectedComponents(recoverTargetSilhouette(colorConnectedInk, width, height, target), width, height);
+  const enclosedTargetRegion = recoverEnclosedTargetRegion(chromaticInk, width, height, target);
+  const preconnectedChromaticInk = erode(dilate(chromaticInk, width, height, 2), width, height, 1);
+  const isolatedChromaticInk = isolateTargetInk(preconnectedChromaticInk, width, height, target);
+  const colorConnectedInk = erode(dilate(isolatedChromaticInk, width, height, colorCloseRadius), width, height, Math.max(2, colorCloseRadius - 3));
+  const localizedTargetInk = enclosedTargetRegion ? inkAroundEnclosedRegion(chromaticInk, enclosedTargetRegion, width, height) : null;
+  const enclosedComponent = enclosedTargetRegion ? connectedComponents(enclosedTargetRegion, width, height)[0] : null;
+  const silhouetteTarget = enclosedComponent ? {
+    x: target.x * 0.5 + enclosedComponent.centerX / width * 0.5,
+    y: target.y * 0.5 + enclosedComponent.centerY / height * 0.5,
+  } : target;
+  const recoveredColorSilhouette = localizedTargetInk
+    ? recoverTargetSilhouette(localizedTargetInk, width, height, silhouetteTarget, false)
+    : recoverTargetSilhouette(colorConnectedInk, width, height, target);
+  const colorSolidComponents = connectedComponents(recoveredColorSilhouette, width, height);
   const colorAnchor = chooseDrawing(colorSolidComponents, frame.data, width, height, target);
   const connectedInk = erode(dilate(rawInk, width, height, 2), width, height, 1);
   const fallbackComponents = connectedComponents(connectedInk, width, height);
   const colorInkCount = colorAnchor?.pixels.reduce((count, index) => count + chromaticInk[index], 0) ?? 0;
-  const useColorInk = Boolean(colorAnchor && colorInkCount >= Math.max(24, colorAnchor.pixels.length * 0.002));
+  const useColorInk = Boolean(colorAnchor && (enclosedTargetRegion || colorInkCount >= Math.max(24, colorAnchor.pixels.length * 0.002)));
   const components = useColorInk ? colorSolidComponents : fallbackComponents;
   const anchor = useColorInk ? colorAnchor : chooseDrawing(fallbackComponents, frame.data, width, height, target);
   if (!anchor) throw new Error("I couldn't find one clear character outline. Tap the drawing, move closer, and capture again.");
@@ -1165,7 +1485,7 @@ function extractDrawingFromSource(sourceImage: CanvasImageSource, sourceWidth: n
   }
   const skeleton = skeletonFromTexture(output);
   if (!skeleton.length) throw new Error("The drawing body could not be skeletonized. Use one closed, bold character outline.");
-  const semantic = analyzeSemanticCanvas(output, dominant);
+  const semantic = analyzeSemanticCanvas(output, dominant, coverage < 0.035);
   const rig = inferSemanticRig(skeleton, contour, semantic.regions, semantic.bodyColor, semantic.lineColor);
 
   return {
@@ -1190,7 +1510,15 @@ function extractDrawingFromSource(sourceImage: CanvasImageSource, sourceWidth: n
 
 export function extractDrawingFromVideo(video: HTMLVideoElement, target: CaptureTarget = { x: 0.5, y: 0.48 }): DrawingExtraction {
   if (!video.videoWidth || !video.videoHeight) throw new Error("The camera is still focusing. Try capture again in a moment.");
-  return extractDrawingFromSource(video, video.videoWidth, video.videoHeight, target);
+  const bounds = video.getBoundingClientRect();
+  const sourceTarget = mapCoverTargetToSource(
+    target,
+    video.videoWidth,
+    video.videoHeight,
+    bounds.width || video.clientWidth,
+    bounds.height || video.clientHeight,
+  );
+  return extractDrawingFromSource(video, video.videoWidth, video.videoHeight, sourceTarget);
 }
 
 export function extractDrawingFromCanvas(canvas: HTMLCanvasElement, target: CaptureTarget = { x: 0.5, y: 0.48 }): DrawingExtraction {
