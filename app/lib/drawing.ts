@@ -1408,7 +1408,7 @@ export function mergeLearnedPartHints(extraction: DrawingExtraction, hints: Lear
   });
   const learned = accepted.map(toRigHint);
   const predictedKinds = new Set(learned.map((hint) => hint.kind));
-  const replaceableFaceKinds = new Set<SemanticPartKind>(["eye", "cheek", "mouth"]);
+  const replaceableFaceKinds = new Set<SemanticPartKind>(["eye", "cheek", "mouth", "ear"]);
   const parts = extraction.rig.parts.filter((part) => !(
     replaceableFaceKinds.has(part.kind)
       && predictedKinds.has(part.kind as LearnedPartHint["kind"])
@@ -1553,6 +1553,12 @@ export function mergeLearnedPartHints(extraction: DrawingExtraction, hints: Lear
       .sort((a, b) => Math.hypot(a.center.x - hint.center.x, a.center.y - hint.center.y)
         - Math.hypot(b.center.x - hint.center.x, b.center.y - hint.center.y))[0];
     if (!parent) continue;
+    const attached = parts.find((part) => part.kind === hint.kind && part.parentId === parent.id);
+    if (attached) {
+      attached.confidence = Math.max(attached.confidence, hint.confidence);
+      attached.source = "learned-model";
+      continue;
+    }
     parts.push({
       id: nextId(hint.kind, side),
       kind: hint.kind,

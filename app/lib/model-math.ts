@@ -4,3 +4,21 @@ export function averageLogitConfidence(logits: Float32Array, indices: number[], 
   if (!indices.length) return 0;
   return indices.reduce((total, index) => total + sigmoid(logits[channelOffset + index]), 0) / indices.length;
 }
+
+type SpatialHint = {
+  kind: string;
+  center: { x: number; y: number };
+  size: { x: number; y: number };
+  rotation: number;
+};
+
+export function sameSemanticInstance(candidate: SpatialHint, hint: SpatialHint) {
+  if (candidate.kind !== hint.kind) return false;
+  const separation = Math.hypot(candidate.center.x - hint.center.x, candidate.center.y - hint.center.y);
+  const extent = Math.max(candidate.size.x, candidate.size.y, hint.size.x, hint.size.y) * 0.75;
+  const reach = Math.min(0.14, Math.max(0.065, extent));
+  if (separation >= reach) return false;
+  if (hint.kind !== "arm" && hint.kind !== "leg") return true;
+  const rawAngle = Math.abs(candidate.rotation - hint.rotation) % Math.PI;
+  return Math.min(rawAngle, Math.PI - rawAngle) < 0.52;
+}

@@ -1,5 +1,5 @@
 import { mergeLearnedPartHints, type DrawingExtraction, type LearnedPartHint } from "./drawing";
-import { averageLogitConfidence } from "./model-math";
+import { averageLogitConfidence, sameSemanticInstance } from "./model-math";
 
 const BODY_MODEL_PATH = "/models/wallalive-parts-v3.onnx";
 const FACE_MODEL_PATH = "/models/wallalive-face-v3.onnx";
@@ -262,7 +262,10 @@ function decodeHints<K extends readonly LearnedPartHint["kind"][]>(
       .filter((component) => component.pixels.length >= minimumArea && component.pixels.length <= area * maximumFraction)
       .sort((a, b) => b.pixels.length - a.pixels.length)
       .slice(0, maximumInstances(kind));
-    for (const component of candidates) hints.push(describeComponent(kind, component, probabilities, offset, size, mapPoint));
+    for (const component of candidates) {
+      const hint = describeComponent(kind, component, probabilities, offset, size, mapPoint);
+      if (!hints.some((candidate) => sameSemanticInstance(candidate, hint))) hints.push(hint);
+    }
   }
   return hints;
 }
@@ -310,11 +313,7 @@ function supplementHints(primary: LearnedPartHint[], fallback: LearnedPartHint[]
     if (onlyMissingKinds && !missingKinds.has(hint.kind)) continue;
     const sameKind = combined.filter((candidate) => candidate.kind === hint.kind);
     if (sameKind.length >= maximumInstances(hint.kind)) continue;
-    if (sameKind.some((candidate) => {
-      const separation = Math.hypot(candidate.center.x - hint.center.x, candidate.center.y - hint.center.y);
-      const sameInstanceReach = Math.max(0.055, Math.min(0.11, Math.max(candidate.size.x, candidate.size.y, hint.size.x, hint.size.y) * 0.58));
-      return separation < sameInstanceReach;
-    })) continue;
+    if (sameKind.some((candidate) => sameSemanticInstance(candidate, hint))) continue;
     combined.push({ ...hint, confidence: hint.confidence * 0.90 });
   }
   return combined;
