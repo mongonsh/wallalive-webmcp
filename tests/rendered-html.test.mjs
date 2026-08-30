@@ -119,11 +119,13 @@ test("ships validation-calibrated same-origin ChildlikeSHAPES drawing models", a
   const faceV4ModelUrl = new URL("../public/models/wallalive-face-v4.onnx", import.meta.url);
   const faceV4Report = JSON.parse(await readFile(new URL("../public/models/wallalive-face-v4.json", import.meta.url), "utf8"));
   const ensembleReport = JSON.parse(await readFile(new URL("../public/models/wallalive-face-ensemble-v4.json", import.meta.url), "utf8"));
+  const componentGateReport = JSON.parse(await readFile(new URL("../public/models/wallalive-component-gate-v5.json", import.meta.url), "utf8"));
   const report = JSON.parse(await readFile(new URL("../public/models/wallalive-parts-v3.json", import.meta.url), "utf8"));
   const model = await stat(modelUrl);
   const faceModel = await stat(faceModelUrl);
   const faceV4Model = await stat(faceV4ModelUrl);
   const recognizer = await readFile(new URL("../app/lib/learned-parts.ts", import.meta.url), "utf8");
+  const componentGate = await readFile(new URL("../app/lib/face-component-gate.ts", import.meta.url), "utf8");
 
   assert.ok(model.size > 1_100_000 && model.size < 1_250_000, `expected a compact substantive body ONNX model, got ${model.size} bytes`);
   assert.ok(faceModel.size > 400_000 && faceModel.size < 500_000, `expected a compact substantive face ONNX model, got ${faceModel.size} bytes`);
@@ -163,6 +165,27 @@ test("ships validation-calibrated same-origin ChildlikeSHAPES drawing models", a
     assert.ok(ensembleReport.official_test_face_iou[kind] >= floor, `${kind} ensemble official-test IoU should stay above ${floor}, got ${ensembleReport.official_test_face_iou[kind]}`);
     assert.ok(ensembleReport.official_test_face_iou[kind] > report.official_test_face_iou[kind], `${kind} ensemble should outperform the v3 face crop`);
   }
+  assert.equal(componentGateReport.test_split_used_for_selection, false);
+  assert.equal(componentGateReport.segmentation_configuration_frozen, true);
+  assert.equal(componentGateReport.configuration.eye.threshold, 0);
+  assert.equal(componentGateReport.configuration.mouth.threshold, 0);
+  assert.equal(componentGateReport.configuration.cheek.threshold, 0.24);
+  assert.equal(componentGateReport.configuration.ear.threshold, 0.26);
+  for (const kind of ["cheek", "ear"]) {
+    const metrics = componentGateReport.official_test_browser_metrics[kind];
+    assert.ok(metrics.selected.precision > metrics.baseline.precision, `${kind} gate must improve official-test precision`);
+    assert.ok(metrics.selected.f1 > metrics.baseline.f1, `${kind} gate must improve official-test component F1`);
+    assert.ok(metrics.selected.false_positive_rate_on_absent < metrics.baseline.false_positive_rate_on_absent, `${kind} gate must reduce absent-image false positives`);
+    assert.ok(metrics.selected.count_exact_rate > metrics.baseline.count_exact_rate, `${kind} gate must improve count accuracy`);
+  }
+  assert.deepEqual(componentGateReport.official_test_browser_metrics.eye.selected, componentGateReport.official_test_browser_metrics.eye.baseline);
+  assert.deepEqual(componentGateReport.official_test_browser_metrics.mouth.selected, componentGateReport.official_test_browser_metrics.mouth.baseline);
+  assert.match(componentGate, /faceComponentGateScore/);
+  assert.match(componentGate, /model_disagreement|disagreement/);
+  assert.match(componentGate, /cheek:[\s\S]*threshold: 0\.24/);
+  assert.match(componentGate, /ear:[\s\S]*threshold: 0\.26/);
+  assert.match(recognizer, /acceptFaceComponent/);
+  assert.doesNotMatch(recognizer, /anchorKinds[^\n]*cheek/);
   assert.match(recognizer, /const BODY_MODEL_PATH = ["']\/models\/wallalive-parts-v3\.onnx["']/);
   assert.match(recognizer, /const FACE_V3_MODEL_PATH = ["']\/models\/wallalive-face-v3\.onnx["']/);
   assert.match(recognizer, /const FACE_V4_MODEL_PATH = ["']\/models\/wallalive-face-v4\.onnx["']/);
@@ -209,6 +232,37 @@ test("learned semantics snap to exact drawing pixels for position, outline, and 
   assert.equal(eye.outline, outline);
   assert.equal(eye.source, "learned-model");
   assert.equal(result.learnedRecognition?.latencyMs, 24);
+});
+
+test("an empty learned face result removes heuristic face inventions", () => {
+  const parts = [
+    { id: "body", kind: "body", side: "center", parentId: null, center: { x: 0, y: 0, z: 0 }, size: { x: 0.8, y: 0.9, z: 0.4 }, rotation: 0, color: "#f5efe7", confidence: 1, source: "silhouette-branch" },
+    { id: "eye-left", kind: "eye", side: "left", parentId: "body", center: { x: -0.12, y: 0.16, z: 0 }, size: { x: 0.08, y: 0.1, z: 0.02 }, rotation: 0, color: "#7d3040", confidence: 0.62, source: "image-region" },
+    { id: "pupil-left", kind: "pupil", side: "left", parentId: "eye-left", center: { x: -0.12, y: 0.16, z: 0.02 }, size: { x: 0.03, y: 0.04, z: 0.01 }, rotation: 0, color: "#241419", confidence: 0.58, source: "image-region" },
+    { id: "cheek-left", kind: "cheek", side: "left", parentId: "body", center: { x: -0.18, y: -0.02, z: 0 }, size: { x: 0.07, y: 0.04, z: 0.01 }, rotation: 0, color: "#d9788c", confidence: 0.55, source: "image-region" },
+    { id: "leg-left", kind: "leg", side: "left", parentId: "body", center: { x: -0.16, y: -0.5, z: 0 }, size: { x: 0.08, y: 0.3, z: 0.08 }, rotation: 0, color: "#f5efe7", confidence: 0.7, source: "skeleton-branch" },
+  ];
+  const extraction = {
+    previewUrl: "data:image/png;base64,preview",
+    textureUrl: "data:image/png;base64,texture",
+    contour: [],
+    skeleton: [],
+    analysis: { shapeHint: "round", dominantColor: "#f5efe7", secondaryColor: "#7d3040", coveragePercent: 40, aspectRatio: 0.9, edgeEnergy: "soft", sourceWidth: 512, sourceHeight: 512, skeletonPoints: 0 },
+    rig: {
+      version: "wallalive-semantic-rig-v2",
+      bodyColor: "#f5efe7",
+      lineColor: "#7d3040",
+      parts,
+      joints: parts.filter((part) => part.parentId).map((part) => ({ id: `joint-${part.id}`, parentId: part.parentId, childId: part.id, x: part.center.x, y: part.center.y })),
+      detectedKinds: [...new Set(parts.map((part) => part.kind))],
+    },
+  };
+
+  const result = mergeLearnedPartHints(extraction, [], 18);
+  assert.deepEqual(result.rig.parts.map((part) => part.kind), ["body", "leg"]);
+  assert.deepEqual(result.rig.joints.map((joint) => joint.childId), ["leg-left"]);
+  assert.deepEqual(result.rig.detectedKinds, ["body", "leg"]);
+  assert.deepEqual(result.learnedRecognition.detectedKinds, []);
 });
 
 test("ships a verified colored AniGen SkinnedMesh instead of a 2D extrusion", async () => {

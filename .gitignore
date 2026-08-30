@@ -43,3 +43,4 @@ yarn-error.log*
 # local ML tooling
 __pycache__/
 *.py[cod]
+:memory:.ses

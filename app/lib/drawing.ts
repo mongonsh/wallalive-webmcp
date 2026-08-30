@@ -89,7 +89,7 @@ export type DrawingExtraction = {
   analysis: DrawingAnalysis;
   semanticRegions?: SemanticRegionCandidate[];
   learnedRecognition?: {
-    model: "wallalive-parts-v3-face-ensemble-v4-childlikeshapes";
+    model: "wallalive-v3-v4-component-gate-v5-childlikeshapes";
     latencyMs: number;
     detectedKinds: SemanticPartKind[];
   };
@@ -1396,10 +1396,23 @@ export function inferSemanticRig(
 }
 
 export function mergeLearnedPartHints(extraction: DrawingExtraction, hints: LearnedPartHint[], latencyMs: number): DrawingExtraction {
-  const accepted = hints.filter((hint) => hint.confidence >= (hint.kind === "cheek" || hint.kind === "mouth" ? 0.42 : 0.48));
+  const replaceableFaceKinds = new Set<SemanticPartKind>(["eye", "cheek", "mouth", "ear"]);
+  const withoutHeuristicFace = () => {
+    const parts = extraction.rig.parts.filter((part) => !replaceableFaceKinds.has(part.kind) && part.kind !== "pupil");
+    const joints = parts.filter((part) => part.parentId && parts.some((parent) => parent.id === part.parentId)).map((part) => ({
+      id: `joint-${part.id}`,
+      parentId: part.parentId!,
+      childId: part.id,
+      x: part.anchor?.x ?? part.center.x,
+      y: part.anchor?.y ?? part.center.y,
+    }));
+    return { parts, joints, detectedKinds: [...new Set(parts.map((part) => part.kind))] };
+  };
+  const accepted = hints.filter((hint) => hint.confidence >= (hint.kind === "cheek" ? 0.18 : hint.kind === "mouth" ? 0.42 : 0.48));
   if (!accepted.length) return {
     ...extraction,
-    learnedRecognition: { model: "wallalive-parts-v3-face-ensemble-v4-childlikeshapes", latencyMs, detectedKinds: [] },
+    rig: { ...extraction.rig, ...withoutHeuristicFace() },
+    learnedRecognition: { model: "wallalive-v3-v4-component-gate-v5-childlikeshapes", latencyMs, detectedKinds: [] },
   };
   const body = extraction.rig.parts.find((part) => part.kind === "body");
   if (!body) return extraction;
@@ -1417,11 +1430,11 @@ export function mergeLearnedPartHints(extraction: DrawingExtraction, hints: Lear
   });
   const learned = plausible.map(toRigHint);
   const predictedKinds = new Set(learned.map((hint) => hint.kind));
-  const replaceableFaceKinds = new Set<SemanticPartKind>(["eye", "cheek", "mouth", "ear"]);
-  const parts = extraction.rig.parts.filter((part) => !(
-    replaceableFaceKinds.has(part.kind)
-      && predictedKinds.has(part.kind as LearnedPartHint["kind"])
-  ) && !(part.kind === "pupil" && predictedKinds.has("eye")));
+  // Once the learned face stack has run, it is authoritative for named face
+  // anatomy. Keeping a classical heuristic cheek when ML says “no cheek” was
+  // a hidden bypass that recreated the exact false-feature failure this gate
+  // is designed to prevent.
+  const parts = withoutHeuristicFace().parts;
   const regions = extraction.semanticRegions ?? [];
   const usedRegions = new Set<string>();
   const usedIds = new Set(parts.map((part) => part.id));
@@ -1627,7 +1640,7 @@ export function mergeLearnedPartHints(extraction: DrawingExtraction, hints: Lear
   return {
     ...extraction,
     rig: { ...extraction.rig, parts, joints, detectedKinds },
-    learnedRecognition: { model: "wallalive-parts-v3-face-ensemble-v4-childlikeshapes", latencyMs, detectedKinds: [...predictedKinds] },
+    learnedRecognition: { model: "wallalive-v3-v4-component-gate-v5-childlikeshapes", latencyMs, detectedKinds: [...predictedKinds] },
   };
 }
 

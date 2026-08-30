@@ -18,6 +18,7 @@ from typing import Any
 
 import numpy as np
 import torch
+from scipy import ndimage
 from torch.utils.data import DataLoader, Dataset
 
 try:
@@ -149,12 +150,22 @@ def evaluate(
     loader: DataLoader,
     weights: list[float],
     thresholds: list[float],
-) -> tuple[dict[str, float], dict[str, float]]:
+) -> tuple[dict[str, float], dict[str, float], dict[str, dict[str, float]]]:
     intersections = np.zeros(len(FACE_PARTS), dtype=np.int64)
     unions = np.zeros(len(FACE_PARTS), dtype=np.int64)
     presence_tp = np.zeros(len(FACE_PARTS), dtype=np.int64)
     presence_fp = np.zeros(len(FACE_PARTS), dtype=np.int64)
     presence_fn = np.zeros(len(FACE_PARTS), dtype=np.int64)
+    filtered_tp = np.zeros(len(FACE_PARTS), dtype=np.int64)
+    filtered_fp = np.zeros(len(FACE_PARTS), dtype=np.int64)
+    filtered_fn = np.zeros(len(FACE_PARTS), dtype=np.int64)
+    negative_images = np.zeros(len(FACE_PARTS), dtype=np.int64)
+    false_positive_images = np.zeros(len(FACE_PARTS), dtype=np.int64)
+    positive_images = np.zeros(len(FACE_PARTS), dtype=np.int64)
+    detected_positive_images = np.zeros(len(FACE_PARTS), dtype=np.int64)
+    count_absolute_error = np.zeros(len(FACE_PARTS), dtype=np.int64)
+    count_exact = np.zeros(len(FACE_PARTS), dtype=np.int64)
+    drawing_count = 0
     weight_array = np.asarray(weights, dtype=np.float32).reshape(1, -1, 1, 1)
     threshold_array = np.asarray(thresholds, dtype=np.float32).reshape(1, -1, 1, 1)
     for batch_index, (images96, images128, targets) in enumerate(loader):
@@ -169,6 +180,26 @@ def evaluate(
         presence_tp += (predicted_presence & true_presence).sum(axis=0)
         presence_fp += (predicted_presence & ~true_presence).sum(axis=0)
         presence_fn += (~predicted_presence & true_presence).sum(axis=0)
+        # Mirror the browser decoder: eight-connected masks, at least six
+        # pixels at 128², no component larger than 34% of the face crop, and
+        # bounded instance counts. This distinguishes harmless speckles from
+        # parts that can actually enter the semantic rig.
+        for drawing_index in range(predictions.shape[0]):
+            drawing_count += 1
+            for channel, part in enumerate(FACE_PARTS):
+                predicted_count = component_count(predictions[drawing_index, channel], part)
+                true_count = component_count(truth[drawing_index, channel], part, cap=False)
+                predicted_filtered = predicted_count > 0
+                true_filtered = true_count > 0
+                filtered_tp[channel] += int(predicted_filtered and true_filtered)
+                filtered_fp[channel] += int(predicted_filtered and not true_filtered)
+                filtered_fn[channel] += int(not predicted_filtered and true_filtered)
+                negative_images[channel] += int(not true_filtered)
+                false_positive_images[channel] += int(predicted_filtered and not true_filtered)
+                positive_images[channel] += int(true_filtered)
+                detected_positive_images[channel] += int(predicted_filtered and true_filtered)
+                count_absolute_error[channel] += abs(predicted_count - true_count)
+                count_exact[channel] += int(predicted_count == true_count)
         if (batch_index + 1) % 10 == 0:
             print(json.dumps({"test_batches": batch_index + 1}), flush=True)
     iou = {
@@ -179,7 +210,34 @@ def evaluate(
         part: round(float(2 * presence_tp[channel] / max(1, 2 * presence_tp[channel] + presence_fp[channel] + presence_fn[channel])), 4)
         for channel, part in enumerate(FACE_PARTS)
     }
-    return iou, presence_f1
+    component_metrics = {
+        part: {
+            "precision": round(float(filtered_tp[channel] / max(1, filtered_tp[channel] + filtered_fp[channel])), 4),
+            "recall": round(float(filtered_tp[channel] / max(1, filtered_tp[channel] + filtered_fn[channel])), 4),
+            "f1": round(float(2 * filtered_tp[channel] / max(1, 2 * filtered_tp[channel] + filtered_fp[channel] + filtered_fn[channel])), 4),
+            "false_positive_rate_on_absent": round(float(false_positive_images[channel] / max(1, negative_images[channel])), 4),
+            "detection_rate_on_present": round(float(detected_positive_images[channel] / max(1, positive_images[channel])), 4),
+            "count_mae": round(float(count_absolute_error[channel] / max(1, drawing_count)), 4),
+            "count_exact_rate": round(float(count_exact[channel] / max(1, drawing_count)), 4),
+            "prevalence": round(float(positive_images[channel] / max(1, drawing_count)), 4),
+        }
+        for channel, part in enumerate(FACE_PARTS)
+    }
+    return iou, presence_f1, component_metrics
+
+
+def component_count(mask: np.ndarray, part: str, cap: bool = True) -> int:
+    labels, count = ndimage.label(mask, structure=np.ones((3, 3), dtype=np.uint8))
+    if count == 0:
+        return 0
+    sizes = np.bincount(labels.reshape(-1))[1:]
+    minimum_area = 6
+    maximum_area = mask.size * 0.34
+    valid_count = int(((sizes >= minimum_area) & (sizes <= maximum_area)).sum())
+    if not cap:
+        return valid_count
+    maximum_instances = 3 if part == "mouth" else 6
+    return min(maximum_instances, valid_count)
 
 
 def main() -> None:
@@ -212,7 +270,7 @@ def main() -> None:
     true_histograms, all_histograms, total_truth = validation_histograms(v3, v4, validation_loader)
     weights, thresholds, validation_iou = select_configuration(true_histograms, all_histograms, total_truth)
     print(json.dumps({"selected": {"weights": weights, "thresholds": thresholds, "validation_iou": validation_iou}}), flush=True)
-    test_iou, test_presence = evaluate(v3, v4, test_loader, weights, thresholds)
+    test_iou, test_presence, test_components = evaluate(v3, v4, test_loader, weights, thresholds)
     report = {
         "architecture": "WallAlive validation-calibrated v3+v4 face ensemble",
         "face_parts": FACE_PARTS,
@@ -221,6 +279,7 @@ def main() -> None:
         "validation_face_iou": validation_iou,
         "official_test_face_iou": test_iou,
         "official_test_presence_f1": test_presence,
+        "official_test_browser_component_metrics": test_components,
         "validation_drawings": len(validation),
         "official_test_drawings": len(test),
         "seconds": round(time.perf_counter() - started, 1),

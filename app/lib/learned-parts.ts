@@ -1,4 +1,5 @@
 import { mergeLearnedPartHints, type DrawingExtraction, type LearnedPartHint } from "./drawing";
+import { acceptFaceComponent } from "./face-component-gate";
 import { averageLogitConfidence, sameSemanticInstance, selectDominantInkColor } from "./model-math";
 
 const BODY_MODEL_PATH = "/models/wallalive-parts-v3.onnx";
@@ -316,7 +317,7 @@ function decodeHints<K extends readonly LearnedPartHint["kind"][]>(
   thresholds: Record<K[number], number>,
   imageValues: Float32Array,
   mapPoint: PointMap,
-  options: { skipBody: boolean; faceCrop?: boolean },
+  options: { skipBody: boolean; faceCrop?: boolean; componentGate?: { v3Logits: Float32Array; v4Logits: Float32Array } },
 ) {
   const probabilities = output.data as Float32Array;
   const area = size * size;
@@ -332,7 +333,21 @@ function decodeHints<K extends readonly LearnedPartHint["kind"][]>(
       .filter((component) => component.pixels.length >= minimumArea && component.pixels.length <= area * maximumFraction)
       .sort((a, b) => b.pixels.length - a.pixels.length)
       .slice(0, maximumInstances(kind));
-    for (const component of candidates) {
+    const accepted = options.componentGate
+      ? candidates.filter((component, rank) => acceptFaceComponent(
+        kind as (typeof FACE_PARTS)[number],
+        component,
+        probabilities,
+        options.componentGate!.v3Logits,
+        options.componentGate!.v4Logits,
+        offset,
+        size,
+        thresholds[kind],
+        rank,
+        candidates.length,
+      ))
+      : candidates;
+    for (const component of accepted) {
       const hint = describeComponent(kind, component, probabilities, imageValues, offset, size, mapPoint);
       if (!hints.some((candidate) => sameSemanticInstance(candidate, hint))) hints.push(hint);
     }
@@ -417,7 +432,7 @@ function blendFaceLogits(v3Output: import("onnxruntime-web/wasm").Tensor, v4Outp
       blended[offset + index] = v3[offset + index] * (1 - weight) + v4[offset + index] * weight;
     }
   }
-  return blended;
+  return { blended, v3, v4 };
 }
 
 function supplementHints(primary: LearnedPartHint[], fallback: LearnedPartHint[], onlyMissingKinds: boolean) {
@@ -436,9 +451,7 @@ function supplementHints(primary: LearnedPartHint[], fallback: LearnedPartHint[]
 function supplementFallbackHints(primary: LearnedPartHint[], fallback: LearnedPartHint[]) {
   const minimumInstances: Partial<Record<LearnedPartHint["kind"], number>> = {
     eye: 2,
-    cheek: 2,
     mouth: 1,
-    ear: 2,
     arm: 2,
     hand: 2,
     leg: 2,
@@ -470,19 +483,25 @@ export async function recognizeDrawingParts(extraction: DrawingExtraction): Prom
     faceV3.run({ face_values: new ort.Tensor("float32", preparedFaceV3.values, [1, 3, FACE_V3_SIZE, FACE_V3_SIZE]) }),
     faceV4.run({ face_values: new ort.Tensor("float32", preparedFace.values, [1, 3, FACE_SIZE, FACE_SIZE]) }),
   ]);
-  const faceLogits = new ort.Tensor("float32", blendFaceLogits(
+  const alignedFaceLogits = blendFaceLogits(
     faceV3Results.face_logits ?? Object.values(faceV3Results)[0],
     faceV4Results.face_logits ?? Object.values(faceV4Results)[0],
-  ), [1, FACE_PARTS.length, FACE_SIZE, FACE_SIZE]);
-  const faceHints = decodeHints(faceLogits, FACE_SIZE, FACE_PARTS, FACE_THRESHOLDS, preparedFace.values, preparedFace.mapPoint, { skipBody: false, faceCrop: true });
+  );
+  const faceLogits = new ort.Tensor("float32", alignedFaceLogits.blended, [1, FACE_PARTS.length, FACE_SIZE, FACE_SIZE]);
+  const faceHints = decodeHints(faceLogits, FACE_SIZE, FACE_PARTS, FACE_THRESHOLDS, preparedFace.values, preparedFace.mapPoint, {
+    skipBody: false,
+    faceCrop: true,
+    componentGate: { v3Logits: alignedFaceLogits.v3, v4Logits: alignedFaceLogits.v4 },
+  });
   let hints = [...fullHints.filter((hint) => !FACE_KINDS.has(hint.kind)), ...faceHints];
-  // The enlarged crop has better detail; the full-character pass can still
-  // contribute a separate second eye/ear/cheek that the crop missed.
-  hints = supplementHints(hints, fullHints, false);
+  // The enlarged crop has better detail. Only common eye/mouth anchors may be
+  // supplemented from the whole-character pass; uncalibrated whole-image
+  // cheek/ear masks must not bypass the learned rare-component gate.
+  hints = supplementHints(hints, fullHints.filter((hint) => hint.kind === "eye" || hint.kind === "mouth"), false);
 
   // Keep the legacy ensemble off the mobile critical path. It is downloaded
   // and executed only when v3 cannot find a basic face/limb anchor.
-  const anchorKinds: LearnedPartHint["kind"][] = ["eye", "cheek", "mouth", "arm", "leg"];
+  const anchorKinds: LearnedPartHint["kind"][] = ["eye", "mouth", "arm", "leg"];
   if (anchorKinds.some((kind) => !hints.some((hint) => hint.kind === kind))) {
     const fallbackPrepared = prepareImage(image, FALLBACK_SIZE, undefined, true);
     const fallbackTensor = new ort.Tensor("float32", fallbackPrepared.values, [1, 3, FALLBACK_SIZE, FALLBACK_SIZE]);
