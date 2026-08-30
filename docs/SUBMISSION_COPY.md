@@ -12,6 +12,10 @@ Draw it. Wake it. Play.
 
 https://wallalive-webmcp.mungunshagai-tb.chatgpt.site
 
+## Public repository
+
+https://github.com/mongonsh/wallalive-webmcp
+
 ## One-line description
 
 A child-safe AR playground that turns an approved wall drawing into a 3D character a browser agent can place, animate, and direct through WebMCP.

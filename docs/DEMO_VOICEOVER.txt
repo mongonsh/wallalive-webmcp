@@ -1,0 +1,11 @@
+Children already turn simple marks into stories. WallAlive asks: what if those characters could step off the wall and into the room?
+
+A child explicitly opens the camera and approves one drawing. It is separated locally, then rebuilt as a layered three-dimensional character with eyes, limbs, shadow, and motion.
+
+Eight strict WebMCP tools let a browser agent inspect approved shape and color, create a personality, place the character, animate it, and perform a short story. Human and agent actions change the same visible world, with every author shown in history.
+
+The privacy boundary is the point: the camera is not a tool. An agent cannot open it, capture a frame, or upload a child’s room. The child chooses what enters the shared imagination.
+
+Supported devices get WebXR surface placement. Everywhere else, the camera overlay preserves the full play loop.
+
+WallAlive. Draw it. Wake it. Play.

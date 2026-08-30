@@ -4,6 +4,8 @@
 
 **Live demo:** https://wallalive-webmcp.mungunshagai-tb.chatgpt.site
 
+**Public source:** https://github.com/mongonsh/wallalive-webmcp
+
 WallAlive turns a child’s drawing into a layered 3D character that can live and perform in the real room. A child explicitly opens the camera and approves a drawing; then a compatible browser agent can name it, shape its personality, place it, animate it, recolor its generated depth, and direct a mini story through WebMCP.
 
 The camera is intentionally **not** a WebMCP tool. Drawing extraction happens in browser memory, no image is uploaded, and the agent receives semantic shape/color analysis only after human approval.

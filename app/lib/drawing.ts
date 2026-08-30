@@ -243,9 +243,48 @@ export function createDemoDoodle(): DrawingExtraction {
   context.fill();
   context.stroke();
 
+  const preview = document.createElement("canvas");
+  preview.width = 768;
+  preview.height = 480;
+  const previewContext = preview.getContext("2d");
+  if (!previewContext) throw new Error("Canvas processing is unavailable in this browser.");
+  previewContext.fillStyle = "#ded0b7";
+  previewContext.fillRect(0, 0, preview.width, preview.height);
+  previewContext.fillStyle = "rgba(91, 72, 53, 0.12)";
+  previewContext.fillRect(382, 0, 2, 414);
+  previewContext.fillStyle = "#98785c";
+  previewContext.fillRect(0, 414, preview.width, 66);
+  previewContext.fillStyle = "#6b5440";
+  previewContext.fillRect(0, 406, preview.width, 8);
+  previewContext.fillStyle = "#755944";
+  previewContext.fillRect(545, 316, 165, 13);
+  previewContext.fillStyle = "#ff674d";
+  previewContext.fillRect(574, 275, 28, 41);
+  previewContext.fillStyle = "#5fc7df";
+  previewContext.fillRect(621, 258, 34, 58);
+  previewContext.save();
+  previewContext.translate(208, 234);
+  previewContext.rotate(-0.035);
+  previewContext.fillStyle = "#fffaf0";
+  previewContext.shadowColor = "rgba(24, 49, 46, 0.2)";
+  previewContext.shadowBlur = 13;
+  previewContext.shadowOffsetX = 7;
+  previewContext.shadowOffsetY = 9;
+  previewContext.fillRect(-132, -154, 264, 308);
+  previewContext.shadowColor = "transparent";
+  previewContext.strokeStyle = "#816a52";
+  previewContext.lineWidth = 7;
+  previewContext.strokeRect(-132, -154, 264, 308);
+  previewContext.drawImage(output, -113, -132, 226, 226);
+  previewContext.fillStyle = "#18312e";
+  previewContext.font = "700 13px sans-serif";
+  previewContext.textAlign = "center";
+  previewContext.fillText("PIP · AGE 7", 0, 127);
+  previewContext.restore();
+
   return {
     textureUrl: output.toDataURL("image/png"),
-    previewUrl: output.toDataURL("image/png"),
+    previewUrl: preview.toDataURL("image/jpeg", 0.86),
     analysis: {
       dominantColor: "#ff674d",
       secondaryColor: "#5fc7df",
