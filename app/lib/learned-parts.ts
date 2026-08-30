@@ -1,4 +1,5 @@
 import { mergeLearnedPartHints, type DrawingExtraction, type LearnedPartHint } from "./drawing";
+import { averageLogitConfidence } from "./model-math";
 
 const BODY_MODEL_PATH = "/models/wallalive-parts-v3.onnx";
 const FACE_MODEL_PATH = "/models/wallalive-face-v3.onnx";
@@ -195,13 +196,11 @@ function components(mask: Uint8Array, size: number) {
   return found;
 }
 
-function describeComponent(kind: LearnedPartHint["kind"], component: PixelComponent, probabilities: Float32Array, channelOffset: number, size: number, mapPoint: PointMap): LearnedPartHint {
-  let confidence = 0;
+function describeComponent(kind: LearnedPartHint["kind"], component: PixelComponent, logits: Float32Array, channelOffset: number, size: number, mapPoint: PointMap): LearnedPartHint {
   let xx = 0;
   let yy = 0;
   let xy = 0;
   for (const index of component.pixels) {
-    confidence += probabilities[channelOffset + index];
     const x = index % size - component.centerX;
     const y = Math.floor(index / size) - component.centerY;
     xx += x * x;
@@ -231,7 +230,7 @@ function describeComponent(kind: LearnedPartHint["kind"], component: PixelCompon
       mapPoint(component.centerX + axis.x * maximum, component.centerY + axis.y * maximum),
     ],
     rotation: angle,
-    confidence: confidence / component.pixels.length,
+    confidence: averageLogitConfidence(logits, component.pixels, channelOffset),
   };
 }
 
