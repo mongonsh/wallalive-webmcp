@@ -1403,6 +1403,10 @@ export function mergeLearnedPartHints(extraction: DrawingExtraction, hints: Lear
   };
   const body = extraction.rig.parts.find((part) => part.kind === "body");
   if (!body) return extraction;
+  // Ear masks are especially vulnerable to paper labels above a character.
+  // A predicted ear wider than one fifth of the character is almost always
+  // surrounding clutter, not the small anatomical part used in training.
+  const plausible = accepted.filter((hint) => hint.kind !== "ear" || hint.size.x * 1.4 <= body.size.x * 0.2);
   const toRigPoint = (point: { x: number; y: number }) => ({ x: (point.x - 0.5) * 1.4, y: (0.5 - point.y) * 1.4, z: 0 });
   const toRigHint = (hint: LearnedPartHint) => ({
     ...hint,
@@ -1411,7 +1415,7 @@ export function mergeLearnedPartHints(extraction: DrawingExtraction, hints: Lear
     endpoints: hint.endpoints?.map(toRigPoint) as [{ x: number; y: number; z: number }, { x: number; y: number; z: number }] | undefined,
     outline: hint.outline?.map(toRigPoint),
   });
-  const learned = accepted.map(toRigHint);
+  const learned = plausible.map(toRigHint);
   const predictedKinds = new Set(learned.map((hint) => hint.kind));
   const replaceableFaceKinds = new Set<SemanticPartKind>(["eye", "cheek", "mouth", "ear"]);
   const parts = extraction.rig.parts.filter((part) => !(
@@ -1555,6 +1559,26 @@ export function mergeLearnedPartHints(extraction: DrawingExtraction, hints: Lear
       color: extraction.rig.bodyColor,
       confidence: hint.confidence,
       source: "learned-model",
+    });
+  }
+
+  const learnedEarParts = parts.filter((part) => part.kind === "ear" && part.source === "learned-model");
+  if (learnedEarParts.length === 1 && learnedEyes.length === 2) {
+    const source = learnedEarParts[0];
+    const eyeCenterX = learnedEyes.reduce((total, eye) => total + eye.center.x, 0) / learnedEyes.length;
+    const mirroredX = clamp(eyeCenterX * 2 - source.center.x, body.center.x - body.size.x * 0.48, body.center.x + body.size.x * 0.48);
+    const center = { x: mirroredX, y: source.center.y, z: 0 };
+    const side = sideFor(mirroredX);
+    const dx = center.x - body.center.x;
+    const dy = center.y - body.center.y;
+    parts.push({
+      ...source,
+      id: nextId("ear", side),
+      side,
+      center,
+      anchor: { x: body.center.x + dx * 0.62, y: body.center.y + dy * 0.62, z: 0 },
+      rotation: -source.rotation,
+      confidence: source.confidence * 0.78,
     });
   }
 
