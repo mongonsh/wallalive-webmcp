@@ -46,7 +46,7 @@ export type TopologyEdge = {
   path: Array<{ x: number; y: number }>;
 };
 export type LearnedTopology = {
-  model: "wallalive-topology-v7";
+  model: "wallalive-topology-v10";
   latencyMs: number;
   kind: TopologyClass;
   kindConfidence: number;
@@ -140,7 +140,7 @@ export type DrawingExtraction = {
   analysis: DrawingAnalysis;
   semanticRegions?: SemanticRegionCandidate[];
   learnedRecognition?: {
-    model: "wallalive-v3-v4-gate-v5-pose-v6-topology-v7";
+    model: "wallalive-v3-v4-gate-v5-pose-v6-topology-v10";
     latencyMs: number;
     detectedKinds: SemanticPartKind[];
   };
@@ -1471,7 +1471,7 @@ export function mergeLearnedPartHints(
   if (!accepted.length) return {
     ...extraction,
     rig: { ...extraction.rig, ...withoutHeuristicFace() },
-    learnedRecognition: { model: "wallalive-v3-v4-gate-v5-pose-v6-topology-v7", latencyMs, detectedKinds: [] },
+    learnedRecognition: { model: "wallalive-v3-v4-gate-v5-pose-v6-topology-v10", latencyMs, detectedKinds: [] },
     poseRecognition: pose,
     topologyRecognition: topology,
   };
@@ -1785,7 +1785,7 @@ export function mergeLearnedPartHints(
   return {
     ...extraction,
     rig: { ...extraction.rig, parts, joints, detectedKinds },
-    learnedRecognition: { model: "wallalive-v3-v4-gate-v5-pose-v6-topology-v7", latencyMs, detectedKinds: [...predictedKinds] },
+    learnedRecognition: { model: "wallalive-v3-v4-gate-v5-pose-v6-topology-v10", latencyMs, detectedKinds: [...predictedKinds] },
     poseRecognition: pose,
     topologyRecognition: topology,
   };

@@ -1,0 +1,110 @@
+{
+  "name": "WallAlive varied human-drawing benchmark v1",
+  "purpose": "End-to-end drawing-to-rigged-3D evaluation, not training data",
+  "source": "Google Quick, Draw! simplified drawings",
+  "source_repository": "https://github.com/googlecreativelab/quickdraw-dataset",
+  "license": "CC BY 4.0",
+  "license_url": "https://creativecommons.org/licenses/by/4.0/",
+  "transformation": "Geometry-preserving stroke rasterization, bounded invisible endpoint caps, small-gap closure, enclosed-region fill, and a fixed per-category palette",
+  "selection_policy": "Every source line is >= 2400, beyond topology-v10's Quick, Draw! training/validation/test window ending before line 1960",
+  "cases": [
+    {
+      "id": "cat",
+      "input": "cat.png",
+      "source_category": "cat",
+      "source_key_id": "6311191834001408",
+      "source_line_index": 2464,
+      "source_url": "https://storage.googleapis.com/quickdraw_dataset/full/simplified/cat.ndjson",
+      "expected_topology": "quadruped",
+      "expected_visible_parts": [
+        "head",
+        "body",
+        "eye",
+        "ear",
+        "leg",
+        "tail"
+      ],
+      "render_palette": {
+        "body": "#e8a1aa",
+        "line": "#6d2530"
+      }
+    },
+    {
+      "id": "bird",
+      "input": "bird.png",
+      "source_category": "bird",
+      "source_key_id": "6031164919775232",
+      "source_line_index": 2446,
+      "source_url": "https://storage.googleapis.com/quickdraw_dataset/full/simplified/bird.ndjson",
+      "expected_topology": "winged",
+      "expected_visible_parts": [
+        "head",
+        "body",
+        "eye",
+        "beak",
+        "wing",
+        "leg"
+      ],
+      "render_palette": {
+        "body": "#8fc8ef",
+        "line": "#173d65"
+      }
+    },
+    {
+      "id": "fish",
+      "input": "fish.png",
+      "source_category": "fish",
+      "source_key_id": "4816885604417536",
+      "source_line_index": 2495,
+      "source_url": "https://storage.googleapis.com/quickdraw_dataset/full/simplified/fish.ndjson",
+      "expected_topology": "aquatic",
+      "expected_visible_parts": [
+        "body",
+        "eye",
+        "mouth",
+        "fin",
+        "tail"
+      ],
+      "render_palette": {
+        "body": "#78d7cf",
+        "line": "#174f55"
+      }
+    },
+    {
+      "id": "octopus",
+      "input": "octopus.png",
+      "source_category": "octopus",
+      "source_key_id": "5973746168889344",
+      "source_line_index": 2481,
+      "source_url": "https://storage.googleapis.com/quickdraw_dataset/full/simplified/octopus.ndjson",
+      "expected_topology": "radial",
+      "expected_visible_parts": [
+        "head",
+        "eye",
+        "tentacle"
+      ],
+      "render_palette": {
+        "body": "#c5a2e8",
+        "line": "#4b2867"
+      }
+    },
+    {
+      "id": "tree",
+      "input": "tree.png",
+      "source_category": "tree",
+      "source_key_id": "5835180709249024",
+      "source_line_index": 2422,
+      "source_url": "https://storage.googleapis.com/quickdraw_dataset/full/simplified/tree.ndjson",
+      "expected_topology": "branched",
+      "expected_visible_parts": [
+        "trunk",
+        "branch",
+        "canopy"
+      ],
+      "render_palette": {
+        "body": "#9dce82",
+        "line": "#31572c"
+      }
+    }
+  ]
+}

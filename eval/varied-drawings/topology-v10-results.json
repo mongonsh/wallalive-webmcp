@@ -1,0 +1,147 @@
+{
+  "model": "wallalive-topology-v10",
+  "training_split_ends_before_line": 1960,
+  "passed": true,
+  "cases": [
+    {
+      "id": "cat",
+      "source_line_index": 2464,
+      "expected": "quadruped",
+      "predicted": "quadruped",
+      "confidence": 0.9253,
+      "passed": true,
+      "top3": [
+        [
+          "quadruped",
+          0.9253
+        ],
+        [
+          "winged",
+          0.0747
+        ],
+        [
+          "radial",
+          0.0
+        ]
+      ],
+      "positive_field_pixels": {
+        "foreground": 370,
+        "centerline": 291,
+        "endpoint": 202,
+        "junction": 102
+      }
+    },
+    {
+      "id": "bird",
+      "source_line_index": 2446,
+      "expected": "winged",
+      "predicted": "winged",
+      "confidence": 0.9699,
+      "passed": true,
+      "top3": [
+        [
+          "winged",
+          0.9699
+        ],
+        [
+          "radial",
+          0.0177
+        ],
+        [
+          "branched",
+          0.0081
+        ]
+      ],
+      "positive_field_pixels": {
+        "foreground": 761,
+        "centerline": 671,
+        "endpoint": 649,
+        "junction": 607
+      }
+    },
+    {
+      "id": "fish",
+      "source_line_index": 2495,
+      "expected": "aquatic",
+      "predicted": "aquatic",
+      "confidence": 0.9999,
+      "passed": true,
+      "top3": [
+        [
+          "aquatic",
+          0.9999
+        ],
+        [
+          "quadruped",
+          0.0001
+        ],
+        [
+          "winged",
+          0.0
+        ]
+      ],
+      "positive_field_pixels": {
+        "foreground": 1011,
+        "centerline": 760,
+        "endpoint": 656,
+        "junction": 691
+      }
+    },
+    {
+      "id": "octopus",
+      "source_line_index": 2481,
+      "expected": "radial",
+      "predicted": "radial",
+      "confidence": 0.9985,
+      "passed": true,
+      "top3": [
+        [
+          "radial",
+          0.9985
+        ],
+        [
+          "machine",
+          0.0013
+        ],
+        [
+          "winged",
+          0.0001
+        ]
+      ],
+      "positive_field_pixels": {
+        "foreground": 1524,
+        "centerline": 1346,
+        "endpoint": 1234,
+        "junction": 1109
+      }
+    },
+    {
+      "id": "tree",
+      "source_line_index": 2422,
+      "expected": "branched",
+      "predicted": "branched",
+      "confidence": 0.9999,
+      "passed": true,
+      "top3": [
+        [
+          "branched",
+          0.9999
+        ],
+        [
+          "winged",
+          0.0001
+        ],
+        [
+          "quadruped",
+          0.0
+        ]
+      ],
+      "positive_field_pixels": {
+        "foreground": 848,
+        "centerline": 653,
+        "endpoint": 598,
+        "junction": 555
+      }
+    }
+  ]
+}

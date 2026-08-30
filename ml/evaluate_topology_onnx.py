@@ -12,7 +12,7 @@ import onnx
 import onnxruntime as ort
 from torch.utils.data import DataLoader
 
-from train_topology_v7 import FIELD_NAMES, QuickDrawTopologyDataset, TopologyDataset
+from train_topology_v10 import FIELD_NAMES, QuickDrawTopologyDataset, TopologyDataset
 
 
 def _dilate(values: np.ndarray) -> np.ndarray:
@@ -63,9 +63,9 @@ def evaluate_classes(session: ort.InferenceSession, loader: DataLoader):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model", type=Path, default=Path("public/models/wallalive-topology-v7.onnx"))
+    parser.add_argument("--model", type=Path, default=Path("public/models/wallalive-topology-v10.onnx"))
     parser.add_argument("--quickdraw-dir", type=Path, required=True)
-    parser.add_argument("--quickdraw-per-class", type=int, default=700)
+    parser.add_argument("--quickdraw-per-class", type=int, default=1400)
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--update-report", action="store_true")
     args = parser.parse_args()

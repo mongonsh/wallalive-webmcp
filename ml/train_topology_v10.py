@@ -25,6 +25,7 @@ from pathlib import Path
 
 import numpy as np
 from PIL import Image, ImageDraw, ImageFilter
+from scipy import ndimage
 import torch
 from torch import nn
 from torch.utils.data import ConcatDataset, DataLoader, Dataset
@@ -102,7 +103,7 @@ def _palette(rng: random.Random):
     ink = tuple(rng.randint(20, 155) for _ in range(3))
     channel = rng.randrange(3)
     ink = tuple(rng.randint(125, 230) if index == channel else value for index, value in enumerate(ink))
-    fill = tuple(round(paper[index] * rng.uniform(.55, .82) + ink[index] * rng.uniform(.18, .45)) for index in range(3))
+    fill = tuple(min(255, round(paper[index] * rng.uniform(.55, .82) + ink[index] * rng.uniform(.18, .45))) for index in range(3))
     return paper, ink, fill
 
 
@@ -257,9 +258,11 @@ class QuickDrawTopologyDataset(Dataset):
     def __getitem__(self, index: int):
         category, strokes = self.records[index]
         rng = random.Random(index * 104729 + sum(map(ord, category)))
-        paper, ink, _ = _palette(rng)
+        paper, ink, fill = _palette(rng)
         canvas = Image.new("RGB", (self.size, self.size), paper)
         draw = ImageDraw.Draw(canvas)
+        ink_mask_image = Image.new("L", (self.size, self.size), 0)
+        ink_mask_draw = ImageDraw.Draw(ink_mask_image)
         all_x = [x for stroke in strokes for x in stroke[0]]
         all_y = [y for stroke in strokes for y in stroke[1]]
         min_x, max_x = min(all_x), max(all_x)
@@ -272,9 +275,26 @@ class QuickDrawTopologyDataset(Dataset):
             points = [(round(x * scale + offset_x), round(y * scale + offset_y)) for x, y in zip(x_values, y_values)]
             if len(points) >= 2:
                 draw.line(points, fill=ink, width=width, joint="curve")
+                ink_mask_draw.line(points, fill=255, width=width, joint="curve")
             elif points:
                 x, y = points[0]
                 draw.ellipse((x - width, y - width, x + width, y + width), fill=ink)
+                ink_mask_draw.ellipse((x - width, y - width, x + width, y + width), fill=255)
+        # The deployed extractor sends a filled transparent cutout, not only a
+        # one-pixel vector trace.  Train the real-data branch on both domains so
+        # a correctly filled fish does not suddenly resemble a machine.
+        if rng.random() < .62:
+            ink_mask = np.asarray(ink_mask_image) > 0
+            close_radius = rng.randint(max(2, self.size // 48), max(3, self.size // 18))
+            grid_y, grid_x = np.ogrid[-close_radius : close_radius + 1, -close_radius : close_radius + 1]
+            disk = grid_x * grid_x + grid_y * grid_y <= close_radius * close_radius
+            barrier = ndimage.binary_closing(ink_mask, structure=disk)
+            enclosed = ndimage.binary_fill_holes(barrier)
+            if enclosed.mean() < .82:
+                values = np.asarray(canvas).copy()
+                values[enclosed] = fill
+                values[ink_mask] = ink
+                canvas = Image.fromarray(values, mode="RGB")
         if rng.random() < .55:
             canvas = canvas.filter(ImageFilter.GaussianBlur(rng.uniform(.15, .65)))
         values = np.moveaxis(np.asarray(canvas, dtype=np.uint8), -1, 0).copy()
@@ -296,14 +316,24 @@ class ConvBlock(nn.Module):
 class TopologyNet(nn.Module):
     def __init__(self):
         super().__init__()
-        self.stem = nn.Sequential(nn.Conv2d(3, 16, 5, stride=2, padding=2, bias=False), nn.BatchNorm2d(16), nn.SiLU())
-        self.encoder2 = ConvBlock(16, 24, 2)
-        self.encoder3 = ConvBlock(24, 40, 2)
-        self.bridge = ConvBlock(40, 56)
-        self.decoder3 = ConvBlock(56 + 24, 40)
-        self.decoder2 = ConvBlock(40 + 16, 28)
-        self.fields = nn.Conv2d(28, len(FIELD_NAMES), 1)
-        self.classes = nn.Sequential(nn.AdaptiveAvgPool2d(1), nn.Flatten(), nn.Linear(56, len(TOPOLOGY_CLASSES)))
+        self.stem = nn.Sequential(nn.Conv2d(3, 24, 5, stride=2, padding=2, bias=False), nn.BatchNorm2d(24), nn.SiLU())
+        self.encoder2 = ConvBlock(24, 36, 2)
+        self.encoder3 = ConvBlock(36, 56, 2)
+        self.bridge = ConvBlock(56, 72)
+        self.decoder3 = ConvBlock(72 + 36, 56)
+        self.decoder2 = ConvBlock(56 + 24, 36)
+        self.fields = nn.Conv2d(36, len(FIELD_NAMES), 1)
+        # Family labels depend on arrangement, not only feature presence.  A
+        # 4x4 pooled map retains "legs below body" and "tail beside body"
+        # evidence that the former global-average head destroyed.
+        self.classes = nn.Sequential(
+            nn.AdaptiveAvgPool2d((4, 4)),
+            nn.Flatten(),
+            nn.Linear(72 * 4 * 4, 112),
+            nn.SiLU(),
+            nn.Dropout(.08),
+            nn.Linear(112, len(TOPOLOGY_CLASSES)),
+        )
 
     def forward(self, value):
         one = self.stem(value)
@@ -325,7 +355,7 @@ def loss_fn(field_logits, class_logits, fields, classes, field_validity):
     valid = field_validity.to(field_logits.device)
     field_bce = (bce * weights * valid).sum() / (valid.sum() * field_logits.shape[-1] * field_logits.shape[-2]).clamp_min(1)
     field_dice = (dice * weights.flatten() * valid.flatten(1)).sum() / valid.sum().clamp_min(1)
-    return field_bce + field_dice * .7 + nn.functional.cross_entropy(class_logits, classes) * .55
+    return field_bce + field_dice * .7 + nn.functional.cross_entropy(class_logits, classes) * .7
 
 
 def dilate(values: torch.Tensor, radius: int = 1):
@@ -375,17 +405,17 @@ def classification_accuracy(model, loader, device):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--output", type=Path, default=Path("public/models/wallalive-topology-v7.onnx"))
+    parser.add_argument("--output", type=Path, default=Path("public/models/wallalive-topology-v10.onnx"))
     parser.add_argument("--input-size", type=int, default=96)
     parser.add_argument("--field-size", type=int, default=48)
-    parser.add_argument("--training", type=int, default=12000)
-    parser.add_argument("--validation", type=int, default=1600)
-    parser.add_argument("--test", type=int, default=1600)
-    parser.add_argument("--epochs", type=int, default=12)
+    parser.add_argument("--training", type=int, default=4500)
+    parser.add_argument("--validation", type=int, default=800)
+    parser.add_argument("--test", type=int, default=800)
+    parser.add_argument("--epochs", type=int, default=6)
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--workers", type=int, default=0)
     parser.add_argument("--quickdraw-dir", type=Path)
-    parser.add_argument("--quickdraw-per-class", type=int, default=900)
+    parser.add_argument("--quickdraw-per-class", type=int, default=1400)
     parser.add_argument("--device", choices=("auto", "cpu", "mps", "cuda"), default="auto")
     args = parser.parse_args()
     if args.device == "auto":
@@ -428,7 +458,7 @@ def main():
         # useful but receives less selection weight than endpoints/junctions.
         score = (current["centerline_f1_tolerance_1px"] + current["field_iou"]["foreground"]
                  + current["field_iou"]["endpoint"] + current["field_iou"]["junction"]
-                 + current["topology_accuracy"] + (real_validation_accuracy or 0) * .5)
+                 + current["topology_accuracy"] + (real_validation_accuracy or 0) * .7)
         print(json.dumps({"epoch": epoch, "loss": round(running / len(training), 4), **current, "quickdraw_validation_accuracy": real_validation_accuracy}), flush=True)
         if score > best_score:
             best_score = score
@@ -450,7 +480,7 @@ def main():
                       dynamic_axes={"topology_values": {0: "batch"}, "topology_fields": {0: "batch"}, "topology_logits": {0: "batch"}},
                       opset_version=17, dynamo=False)
     report = {
-        "architecture": "WallAlive TopologyNet v7",
+        "architecture": "WallAlive TopologyNet v10",
         "contract": "variable foreground-centerline-endpoint-junction graph; fixed human pose is optional only",
         "input": [1, 3, args.input_size, args.input_size],
         "outputs": {"topology_fields": [1, len(FIELD_NAMES), args.field_size, args.field_size], "topology_logits": [1, len(TOPOLOGY_CLASSES)]},
@@ -462,7 +492,8 @@ def main():
         "epochs": args.epochs, "best_epoch": best_epoch, "validation": best_validation, "official_test": official_test,
         "quickdraw_test_accuracy": real_test_accuracy,
         "test_split_used_for_selection": False,
-        "training_domains": ["procedural graph-supervised drawings", "Google Quick, Draw! real vectors (classification only)", "paper-grid", "camera blur", "compression", "color and affine perturbations"],
+        "training_domains": ["procedural graph-supervised drawings", "Google Quick, Draw! real vectors (classification only)", "filled isolated drawing cutouts", "paper-grid", "camera blur", "compression", "color and affine perturbations"],
+        "filled_quickdraw_augmentation_probability": 0.62,
         "quickdraw_categories": QUICKDRAW_CLASSES,
         "real_data_claim": "Quick, Draw! training/validation/test records are disjoint. Real strokes supervise only topology class; they never provide pseudo endpoint or junction labels.",
         "seconds": round(time.perf_counter() - started, 1),

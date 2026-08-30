@@ -1,0 +1,103 @@
+{
+  "architecture": "WallAlive TopologyNet v10",
+  "contract": "variable foreground-centerline-endpoint-junction graph; fixed human pose is optional only",
+  "input": [
+    1,
+    3,
+    96,
+    96
+  ],
+  "outputs": {
+    "topology_fields": [
+      1,
+      4,
+      48,
+      48
+    ],
+    "topology_logits": [
+      1,
+      8
+    ]
+  },
+  "field_names": [
+    "foreground",
+    "centerline",
+    "endpoint",
+    "junction"
+  ],
+  "topology_classes": [
+    "biped",
+    "quadruped",
+    "winged",
+    "aquatic",
+    "radial",
+    "branched",
+    "machine",
+    "chain"
+  ],
+  "parameters": 402052,
+  "training_samples": 14741,
+  "synthetic_training_samples": 4500,
+  "real_training_samples": 10241,
+  "validation_samples": 800,
+  "test_samples": 800,
+  "epochs": 6,
+  "best_epoch": 6,
+  "validation": {
+    "field_iou": {
+      "foreground": 0.7997,
+      "centerline": 0.5643,
+      "endpoint": 0.5537,
+      "junction": 0.6354
+    },
+    "centerline_f1_tolerance_1px": 0.9916,
+    "topology_accuracy": 1.0,
+    "quickdraw_accuracy": 0.9569
+  },
+  "official_test": {
+    "field_iou": {
+      "foreground": 0.8021,
+      "centerline": 0.5675,
+      "endpoint": 0.56,
+      "junction": 0.6436
+    },
+    "centerline_f1_tolerance_1px": 0.9915,
+    "topology_accuracy": 0.9988
+  },
+  "quickdraw_test_accuracy": 0.9587,
+  "test_split_used_for_selection": false,
+  "training_domains": [
+    "procedural graph-supervised drawings",
+    "Google Quick, Draw! real vectors (classification only)",
+    "filled isolated drawing cutouts",
+    "paper-grid",
+    "camera blur",
+    "compression",
+    "color and affine perturbations"
+  ],
+  "filled_quickdraw_augmentation_probability": 0.62,
+  "quickdraw_categories": {
+    "snowman": "biped",
+    "cat": "quadruped",
+    "bird": "winged",
+    "fish": "aquatic",
+    "octopus": "radial",
+    "tree": "branched",
+    "car": "machine",
+    "snake": "chain"
+  },
+  "real_data_claim": "Quick, Draw! training/validation/test records are disjoint. Real strokes supervise only topology class; they never provide pseudo endpoint or junction labels.",
+  "seconds": 579.0,
+  "onnx_official_test": {
+    "field_iou": {
+      "foreground": 0.8021,
+      "centerline": 0.5675,
+      "endpoint": 0.56,
+      "junction": 0.6436
+    },
+    "centerline_f1_tolerance_1px": 0.9915,
+    "topology_accuracy": 0.9988
+  },
+  "onnx_quickdraw_test_accuracy": 0.9587,
+  "onnx_export_verified": true
+}

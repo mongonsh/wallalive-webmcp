@@ -15,7 +15,7 @@ const BODY_MODEL_PATH = "/models/wallalive-parts-v3.onnx";
 const FACE_V3_MODEL_PATH = "/models/wallalive-face-v3.onnx";
 const FACE_V4_MODEL_PATH = "/models/wallalive-face-v4.onnx";
 const POSE_MODEL_PATH = "/models/wallalive-amateur-pose-v6.onnx";
-const TOPOLOGY_MODEL_PATH = "/models/wallalive-topology-v7.onnx";
+const TOPOLOGY_MODEL_PATH = "/models/wallalive-topology-v10.onnx";
 const FALLBACK_MODEL_PATHS = ["/models/wallalive-parts-v2.onnx", "/models/wallalive-parts-v1.onnx"] as const;
 const BODY_SIZE = 96;
 const FACE_V3_SIZE = 96;
@@ -551,7 +551,7 @@ export function decodeTopology(
     ? centerlinePixels.reduce((total, index) => total + probability(1, index), 0) / centerlinePixels.length
     : 0;
   return {
-    model: "wallalive-topology-v7",
+    model: "wallalive-topology-v10",
     latencyMs,
     kind: TOPOLOGY_CLASSES[Math.max(0, kindIndex)],
     kindConfidence: classProbabilities[Math.max(0, kindIndex)] ?? 0,
