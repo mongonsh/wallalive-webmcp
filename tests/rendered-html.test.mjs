@@ -35,7 +35,7 @@ test("registers eight strict WebMCP tools without camera authority", async () =>
   const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
   const expectedTools = [
     "inspect_wall_scene",
-    "create_character_from_drawing",
+    "reconstruct_volumetric_character",
     "set_character_personality",
     "place_character",
     "animate_character",
@@ -55,6 +55,8 @@ test("registers eight strict WebMCP tools without camera authority", async () =>
   assert.match(page, /readOnlyHint/);
   assert.match(page, /Camera capture is human-only/);
   assert.match(page, /cameraFeedExposed: false/);
+  assert.match(page, /neuralModelUsed: false/);
+  assert.match(page, /volumeResolution: 64/);
 });
 
 test("implements local drawing extraction and real WebXR hit testing", async () => {
@@ -66,10 +68,15 @@ test("implements local drawing extraction and real WebXR hit testing", async () 
   assert.match(drawing, /connectedComponents/);
   assert.match(drawing, /recoverSilhouette/);
   assert.match(drawing, /ramerDouglasPeucker/);
+  assert.match(drawing, /Float32Array/);
+  assert.match(drawing, /Math\.SQRT2/);
   assert.doesNotMatch(drawing, /fetch\(|XMLHttpRequest|WebSocket/);
-  assert.match(stage, /ExtrudeGeometry/);
-  assert.match(stage, /displacementMap/);
-  assert.doesNotMatch(stage, /SphereGeometry|CapsuleGeometry|TorusGeometry/);
+  assert.match(stage, /MarchingCubes/);
+  assert.match(stage, /signedDistanceToContour/);
+  assert.match(stage, /pointInPolygon/);
+  assert.match(stage, /computeVertexNormals/);
+  assert.match(stage, /positions\.setZ/);
+  assert.doesNotMatch(stage, /ExtrudeGeometry|SphereGeometry|CapsuleGeometry|TorusGeometry/);
   assert.match(stage, /isSessionSupported\("immersive-ar"\)/);
   assert.match(stage, /requestSession\("immersive-ar"/);
   assert.match(stage, /requiredFeatures: \["hit-test"\]/);

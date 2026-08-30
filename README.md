@@ -6,7 +6,7 @@
 
 **Public source:** https://github.com/mongonsh/wallalive-webmcp
 
-WallAlive turns a child’s drawing into a contour-extruded 3D solid that can live and perform in the real room. A child explicitly opens the camera and approves a drawing; then a compatible browser agent can name it, shape its personality, place it, animate it, recolor its generated edge, and direct a mini story through WebMCP.
+WallAlive turns a child’s drawing into a closed, rounded 3D character that can live and perform in the real room. A child explicitly opens the camera and approves a drawing; then a compatible browser agent can reconstruct its volume, name it, shape its personality, place it, animate it, recolor its generated surface, and direct a mini story through WebMCP.
 
 The camera is intentionally **not** a WebMCP tool. Drawing extraction happens in browser memory, no image is uploaded, and the agent receives semantic shape/color analysis only after human approval.
 
@@ -24,7 +24,7 @@ WallAlive is a shared imagination surface, not a chat box attached to an AR demo
 ## The magic loop
 
 1. **Scan:** the child presses **Start camera** and centers a bold drawing.
-2. **Wake:** WallAlive isolates the centered ink component, closes small gaps, flood-fills its silhouette, traces and simplifies its contour, then builds a beveled `ExtrudeGeometry` solid with real thickness, relief, lighting, and shadow.
+2. **Sculpt:** WallAlive isolates the centered ink component, closes small gaps, flood-fills its silhouette, traces and simplifies its contour, computes an interior distance field, and polygonizes a closed implicit surface with Marching Cubes. Wide regions inflate more than narrow ones, creating a rounded front, sides, and back.
 3. **Play:** a browser agent places the character and directs movements or a four-beat story.
 4. **Enter AR:** supported Android/WebXR devices use surface hit testing; every other modern browser gets the camera-overlay experience.
 
@@ -35,7 +35,7 @@ Press **Play Judge Demo** for a deterministic, camera-free version of the comple
 | Tool | Mode | Purpose |
 | --- | --- | --- |
 | `inspect_wall_scene` | Read | Returns approved drawing semantics, character state, AR capability, and the privacy boundary. |
-| `create_character_from_drawing` | Write | Extrudes the human-approved drawing’s traced contour with a name, personality, and generated edge accent. |
+| `reconstruct_volumetric_character` | Write | Inflates the human-approved silhouette into a closed 64³ signed-distance volume with a name, personality, accent, and bounded inflation strength. |
 | `set_character_personality` | Write | Changes performance intent without altering the child’s original pixels. |
 | `place_character` | Write | Places and scales the character at a normalized position in the visible scene. |
 | `animate_character` | Write | Plays one of seven safe visible actions. |
@@ -58,7 +58,7 @@ All tools have strict JSON schemas, `additionalProperties: false`, cancellation 
 | iPhone/iPad and non-WebXR browsers | Full camera-overlay fallback; immersive hit testing is not claimed |
 | No-camera judging | Built-in demo doodle and one-click judge sequence |
 
-WallAlive constructs a genuine polygonal 3D solid from the captured silhouette; it does not claim photogrammetry or hallucinate anatomy that was not drawn. High-contrast closed line art produces the cleanest extraction.
+WallAlive constructs a genuine closed polygonal 3D surface from the captured silhouette; it does not claim photogrammetry, neural 360° inference, or anatomy that was not drawn. This is a browser-native implementation of the silhouette-inflation family introduced by Teddy. High-contrast closed line art produces the cleanest extraction. See [RESEARCH.md](./docs/RESEARCH.md) for the algorithm decision and neural upgrade boundary.
 
 ## Architecture
 
@@ -66,18 +66,19 @@ WallAlive constructs a genuine polygonal 3D solid from the captured silhouette; 
 human camera gesture
         │ local ink scoring + connected components
         ▼
-flood-filled silhouette + simplified contour + relief map
+flood-filled silhouette + simplified contour + interior-distance radius map
         │                     │
         │                     └── WebMCP reads semantic state only
         ▼
-Three.js beveled extrusion ◄──── WebMCP personality / place / animate / story
+64³ signed-distance field + Marching Cubes ◄── WebMCP reconstruct / place / animate / story
         │
+        ├── curved original-art front + generated rounded back
         ├── WebXR hit-test placement when supported
         └── transparent camera overlay everywhere else
 ```
 
 - React 19 + TypeScript, built with vinext for Cloudflare/Sites
-- Three.js `ExtrudeGeometry` solid plus displaced original-art surface
+- Three.js Marching Cubes mesh plus CPU-curved original-art surface with recomputed normals
 - WebXR `immersive-ar` session with real-world hit testing
 - `document.modelContext.registerTool()` imperative WebMCP integration
 - One canonical action layer shared by UI controls and tool executors

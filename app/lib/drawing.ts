@@ -295,14 +295,49 @@ function depthFromTexture(canvas: HTMLCanvasElement) {
   if (!context) throw new Error("Canvas processing is unavailable in this browser.");
   context.drawImage(canvas, 0, 0);
   const image = context.getImageData(0, 0, depth.width, depth.height);
-  for (let index = 0; index < image.data.length; index += 4) {
-    const alpha = image.data[index + 3];
-    const luminance = image.data[index] * 0.2126 + image.data[index + 1] * 0.7152 + image.data[index + 2] * 0.0722;
-    const relief = alpha ? clamp(142 + Math.abs(150 - luminance) * 0.42, 142, 228) : 0;
-    image.data[index] = relief;
-    image.data[index + 1] = relief;
-    image.data[index + 2] = relief;
-    image.data[index + 3] = alpha;
+  const width = depth.width;
+  const height = depth.height;
+  const distance = new Float32Array(width * height);
+  const diagonal = Math.SQRT2;
+  const far = width + height;
+
+  // Two-pass chamfer distance transform. The center of a wide silhouette becomes
+  // deeper than a narrow limb or ear: the same visual rule used by Teddy-style
+  // sketch inflation, rather than luminance pretending to be geometry.
+  for (let index = 0; index < distance.length; index += 1) {
+    distance[index] = image.data[index * 4 + 3] > 38 ? far : 0;
+  }
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const index = y * width + x;
+      if (!distance[index]) continue;
+      if (x > 0) distance[index] = Math.min(distance[index], distance[index - 1] + 1);
+      if (y > 0) distance[index] = Math.min(distance[index], distance[index - width] + 1);
+      if (x > 0 && y > 0) distance[index] = Math.min(distance[index], distance[index - width - 1] + diagonal);
+      if (x + 1 < width && y > 0) distance[index] = Math.min(distance[index], distance[index - width + 1] + diagonal);
+    }
+  }
+  let maxDistance = 1;
+  for (let y = height - 1; y >= 0; y -= 1) {
+    for (let x = width - 1; x >= 0; x -= 1) {
+      const index = y * width + x;
+      if (!distance[index]) continue;
+      if (x + 1 < width) distance[index] = Math.min(distance[index], distance[index + 1] + 1);
+      if (y + 1 < height) distance[index] = Math.min(distance[index], distance[index + width] + 1);
+      if (x + 1 < width && y + 1 < height) distance[index] = Math.min(distance[index], distance[index + width + 1] + diagonal);
+      if (x > 0 && y + 1 < height) distance[index] = Math.min(distance[index], distance[index + width - 1] + diagonal);
+      maxDistance = Math.max(maxDistance, distance[index]);
+    }
+  }
+
+  for (let index = 0; index < distance.length; index += 1) {
+    const rgba = index * 4;
+    const alpha = image.data[rgba + 3];
+    const volumeRadius = alpha ? Math.round(Math.pow(distance[index] / maxDistance, 0.58) * 255) : 0;
+    image.data[rgba] = volumeRadius;
+    image.data[rgba + 1] = volumeRadius;
+    image.data[rgba + 2] = volumeRadius;
+    image.data[rgba + 3] = alpha;
   }
   context.putImageData(image, 0, 0);
   return depth.toDataURL("image/png");

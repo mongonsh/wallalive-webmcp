@@ -1,8 +1,8 @@
 Children already turn simple marks into stories. WallAlive asks: what if those characters could step off the wall and into the room?
 
-A child explicitly opens the camera and approves one drawing. Local math isolates the centered ink, closes small gaps, flood-fills the silhouette, traces its boundary, and simplifies the contour. Three.js bevel-extrudes that exact shape into a real solid with surface relief, shadow, and motion. Nothing is uploaded, and no eyes or limbs are invented.
+A child explicitly opens the camera and approves one drawing. Local math isolates the centered ink, closes small gaps, flood-fills the silhouette, and traces its boundary. An interior distance field inflates wide regions more than narrow ones. Three.js Marching Cubes turns that 64-cubed field into one closed rounded mesh with a curved artwork front, real sides, and a generated back. Watch the full turn: this is volume, not a thick cutout. Nothing is uploaded, and no eyes or limbs are invented.
 
-Eight strict WebMCP tools let a browser agent inspect approved shape and color, create a personality, place the character, animate it, and perform a short story. Human and agent actions change the same visible world, with every author shown in history.
+Eight strict WebMCP tools let a browser agent inspect approved shape and color, reconstruct the volume, create a personality, place the character, animate it, and perform a short story. Human and agent actions change the same visible world, with every author shown in history.
 
 The privacy boundary is the point: the camera is not a tool. An agent cannot open it, capture a frame, or upload a child’s room. The child chooses what enters the shared imagination.
 

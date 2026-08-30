@@ -15,6 +15,7 @@ type CharacterState = {
   name: string;
   personality: string;
   accent: string;
+  inflation: number;
   action: CharacterAction;
   surface: "screen" | "wall" | "floor";
   scale: number;
@@ -52,6 +53,7 @@ const initialCharacter: CharacterState = {
   name: "",
   personality: "curious and kind",
   accent: "#5fc7df",
+  inflation: 1,
   action: "idle",
   surface: "screen",
   scale: 1,
@@ -60,7 +62,7 @@ const initialCharacter: CharacterState = {
 
 const toolNames = [
   ["inspect_wall_scene", "READ"],
-  ["create_character_from_drawing", "WRITE"],
+  ["reconstruct_volumetric_character", "WRITE"],
   ["set_character_personality", "WRITE"],
   ["place_character", "WRITE"],
   ["animate_character", "WRITE"],
@@ -183,7 +185,7 @@ export default function Home() {
     captureRef.current = next;
     setCapture(next);
     setStep("captured");
-    setNotice(source === "camera" ? "Drawing isolated, flood-filled, and contour-traced locally. Press Wake it up to extrude the real shape." : "Demo drawing traced. Press Wake it up—or run the full magic demo.");
+    setNotice(source === "camera" ? "Drawing isolated and contour-traced locally. Press Sculpt in 3D to inflate a closed volume." : "Demo drawing traced. Press Sculpt in 3D—or run the full magic demo.");
     setAgentLine(`I found a ${next.analysis.shapeHint}, ${next.analysis.edgeEnergy} drawing. Its strongest color is ${next.analysis.dominantColor}.`);
     record("WALLALIVE", "Isolated a drawing", `${next.analysis.coveragePercent}% foreground · ${next.analysis.shapeHint} silhouette · no upload.`);
   }, [record]);
@@ -215,14 +217,15 @@ export default function Home() {
       name: stringValue(input.name, "Pip", 40),
       personality: stringValue(input.personality, "curious and kind", 120),
       accent: stringValue(input.accent, drawing.analysis.secondaryColor, 20),
+      inflation: Math.min(1.35, Math.max(0.7, numberValue(input.inflation, 1))),
       action: "idle",
       storyTitle: "",
     };
-    commitCharacter(next, `${next.name} is now a contour-extruded 3D solid.`);
+    commitCharacter(next, `${next.name} is now a closed, rounded 3D volume.`);
     setStep("alive");
     setAgentLine(`${next.name} feels ${next.personality}. I’ll protect the original colors while we play.`);
     setStoryCaption(`${next.name} lifts away from the wall for the first time.`);
-    record(actor, "Extruded the drawing", `${next.name} · ${drawing.contour.length} contour points · ${next.personality}.`, toolName);
+    record(actor, "Inflated a closed 3D volume", `${next.name} · 64³ signed-distance field · ${drawing.contour.length} contour points · inflation ${next.inflation.toFixed(2)}.`, toolName);
     return next;
   }, [commitCharacter, record]);
 
@@ -291,10 +294,15 @@ export default function Home() {
     drawingApproved: Boolean(captureRef.current),
     drawingAnalysis: captureRef.current?.analysis ?? null,
     reconstruction: captureRef.current ? {
-      method: "connected-component silhouette + Ramer-Douglas-Peucker contour + beveled extrusion",
+      method: "Teddy-style silhouette inflation",
+      field: "signed-distance implicit surface",
+      polygonizer: "Marching Cubes",
+      volumeResolution: 64,
+      topology: "closed rounded front, sides, and back",
       contourPoints: captureRef.current.contour.length,
-      depthSource: "local luminance relief",
-      geometry: "true Three.js ExtrudeGeometry solid",
+      inflation: characterRef.current.inflation,
+      neuralModelUsed: false,
+      neuralUpgradePath: "Stable Fast 3D or Hunyuan3D requires a configured GPU inference service",
     } : null,
     character: { ...characterRef.current, textureUrl: undefined },
     cameraFeedExposed: false,
@@ -321,20 +329,21 @@ export default function Home() {
         execute: async (_input, { signal }) => { guard(signal); return ok({ scene: inspectScene() }); },
       },
       {
-        name: "create_character_from_drawing",
-        title: "Wake approved drawing",
-        description: "Extrude the mathematically traced silhouette of the current human-approved drawing into a real 3D solid. This cannot open the camera or capture a new image.",
+        name: "reconstruct_volumetric_character",
+        title: "Reconstruct approved drawing as a volume",
+        description: "Build a closed Teddy-style signed-distance volume from the current human-approved silhouette, with a rounded front, sides, and back. This local deterministic tool is not a neural inference service and cannot open or capture the camera.",
         inputSchema: {
           ...base,
           properties: {
             name: { type: "string", minLength: 1, maxLength: 40 },
             personality: { type: "string", minLength: 1, maxLength: 120 },
             accent: { type: "string", pattern: "^#[0-9a-fA-F]{6}$" },
+            inflation: { type: "number", minimum: 0.7, maximum: 1.35 },
           },
           required: ["name", "personality", "accent"],
         },
         annotations: { readOnlyHint: false, untrustedContentHint: true },
-        execute: async (input, { signal }) => { try { guard(signal); return ok({ character: createCharacter(input, "BROWSER AGENT", "create_character_from_drawing") }); } catch (error) { return fail(error); } },
+        execute: async (input, { signal }) => { try { guard(signal); return ok({ character: createCharacter(input, "BROWSER AGENT", "reconstruct_volumetric_character") }); } catch (error) { return fail(error); } },
       },
       {
         name: "set_character_personality",
@@ -431,8 +440,8 @@ export default function Home() {
       setDrawing(demo, "demo");
       setAgentLine("1 / 4 · I can see the approved shape and colors—but not a live camera feed.");
       await wait(550);
-      createCharacter({ name: "Pip", personality: "brave on the outside, shy on the inside", accent: "#5fc7df" }, "BROWSER AGENT", "create_character_from_drawing");
-      setAgentLine("2 / 4 · Pip keeps every mark from the child’s drawing and gains real depth.");
+      createCharacter({ name: "Pip", personality: "brave on the outside, shy on the inside", accent: "#5fc7df", inflation: 1.12 }, "BROWSER AGENT", "reconstruct_volumetric_character");
+      setAgentLine("2 / 4 · A signed-distance field inflates Pip into a closed volume—not a cutout.");
       await wait(700);
       placeCharacter(.68, .53, "wall", 1, "BROWSER AGENT", "place_character");
       setAgentLine("3 / 4 · The agent places Pip without controlling the camera.");
@@ -441,8 +450,9 @@ export default function Home() {
         { action: "hide", caption: "Pip hides at the edge of the wall.", durationMs: 800 },
         { action: "hop", caption: "One brave hop into the room.", durationMs: 800 },
         { action: "wave", caption: "Pip peeks out and waves hello.", durationMs: 1000 },
+        { action: "spin", caption: "A full turn reveals Pip’s rounded back.", durationMs: 1400 },
       ], "BROWSER AGENT", "tell_character_story");
-      setAgentLine("4 / 4 · A drawing became a character, and the child stayed in control.");
+      setAgentLine("4 / 4 · The full turn proves rounded front, sides, and back—with the child in control.");
     } finally {
       setDemoRunning(false);
     }
@@ -482,7 +492,7 @@ export default function Home() {
   }, []);
 
   const latestAgentActivity = useMemo(() => activity.find((item) => item.actor === "BROWSER AGENT"), [activity]);
-  const primaryButton = cameraState === "active" ? { label: "CAPTURE DRAWING", action: captureDrawing } : step === "captured" ? { label: "WAKE IT UP", action: () => createCharacter({}, "CHILD") } : { label: "START CAMERA", action: startCamera };
+  const primaryButton = cameraState === "active" ? { label: "CAPTURE DRAWING", action: captureDrawing } : step === "captured" ? { label: "SCULPT IN 3D", action: () => createCharacter({}, "CHILD") } : { label: "START CAMERA", action: startCamera };
   const stepIndex = step === "ready" ? 0 : step === "camera" ? 1 : step === "captured" ? 2 : 3;
 
   return (
@@ -501,7 +511,7 @@ export default function Home() {
           <p className="kicker">THE MAGIC LOOP</p>
           <ol>
             <li className={stepIndex >= 1 ? "done" : "active"}><span>1</span><div><strong>Scan</strong><small>Human opens camera</small></div></li>
-            <li className={stepIndex >= 3 ? "done" : stepIndex === 2 ? "active" : ""}><span>2</span><div><strong>Wake</strong><small>Drawing gains depth</small></div></li>
+            <li className={stepIndex >= 3 ? "done" : stepIndex === 2 ? "active" : ""}><span>2</span><div><strong>Sculpt</strong><small>Closed volume forms</small></div></li>
             <li className={stepIndex === 3 ? "active" : ""}><span>3</span><div><strong>Play</strong><small>Agent directs movement</small></div></li>
           </ol>
 
@@ -534,8 +544,8 @@ export default function Home() {
             {cameraState !== "active" ? <div className="demo-room"><span className="frame-a" /><span className="frame-b" /><span className="shelf" /><span className="plant" /><span className="baseboard" /></div> : null}
             {capture && cameraState !== "active" ? <img className="captured-room" src={capture.previewUrl} alt="Approved drawing preview" /> : null}
             {step === "camera" ? <div className="capture-guide"><span /><b>KEEP ONE DRAWING INSIDE</b></div> : null}
-            <ARStage ref={stageRef} textureUrl={capture?.textureUrl ?? null} depthUrl={capture?.depthUrl ?? null} contour={capture?.contour ?? null} action={character.action} accent={character.accent} visible={character.created} onCapability={handleARCapability} onPlaced={handleARPlaced} />
-            <div className="camera-hud"><span><i /> {cameraState === "active" ? "LIVE CAMERA · LOCAL" : character.created ? "TRUE 3D SOLID LIVE" : "SAFE DEMO ROOM"}</span><strong>{immersiveAR ? "WEBXR READY" : "CAMERA AR FALLBACK"}</strong></div>
+            <ARStage ref={stageRef} textureUrl={capture?.textureUrl ?? null} depthUrl={capture?.depthUrl ?? null} contour={capture?.contour ?? null} action={character.action} accent={character.accent} inflation={character.inflation} visible={character.created} onCapability={handleARCapability} onPlaced={handleARPlaced} />
+            <div className="camera-hud"><span><i /> {cameraState === "active" ? "LIVE CAMERA · LOCAL" : character.created ? "CLOSED 3D VOLUME LIVE" : "SAFE DEMO ROOM"}</span><strong>{immersiveAR ? "WEBXR READY" : "CAMERA AR FALLBACK"}</strong></div>
             {character.created ? <div className="story-caption"><span>{character.storyTitle || "LIVE MOMENT"}</span><p>{storyCaption}</p></div> : null}
             {cameraState === "denied" || cameraState === "unavailable" ? <div className="camera-message"><b>CAMERA OPTIONAL</b><p>The demo doodle still proves the complete WebMCP and 3D workflow.</p></div> : null}
           </div>
@@ -544,7 +554,7 @@ export default function Home() {
             <div><span>CHARACTER ACTIONS</span><small>{character.created ? `${character.name.toUpperCase()} · ${character.personality.toUpperCase()}` : "WAKE A DRAWING TO PLAY"}</small></div>
             {actions.map((item) => <button key={item.action} disabled={!character.created} className={character.action === item.action ? "active" : ""} onClick={() => animateCharacter(item.action, "CHILD")}><i>{item.glyph}</i>{item.label}</button>)}
           </div>
-          <p className="placement-tip">{character.created ? "Tap anywhere in the room to move the contour-extruded solid · Drag-free, camera-safe AR" : "Center one closed, bold drawing—the math removes the paper and extrudes only its silhouette"}</p>
+          <p className="placement-tip">{character.created ? "Tap to place · Spin reveals the rounded front, sides & generated back" : "Center one closed, bold drawing—the math inflates its silhouette into a closed surface"}</p>
         </section>
 
         <aside className="agent-panel">

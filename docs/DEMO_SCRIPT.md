@@ -14,7 +14,7 @@ Open the **Privacy** panel while the local preview is visible.
 
 **Voiceover:** “The camera belongs to the child. It is not a WebMCP tool, cannot be opened by an agent, and its frames are never uploaded. The browser extracts the approved silhouette locally and exposes only shape and color metadata.”
 
-Show the Drawing DNA card, then press **Wake it up**. Pause while the paper disappears and the exact drawing contour becomes a beveled solid. Turn or wave it long enough to show the real side thickness. Point out that the app adds no eyes or limbs—the marks remain exactly the child’s.
+Show the Drawing DNA card, then press **Sculpt in 3D**. Pause while the paper disappears and the silhouette inflates into a rounded volume. Press **Spin** and hold on the generated back: it must be visibly different from the curved artwork front. Point out that this is a closed 64³ implicit mesh, not a thick cutout, and that the app adds no eyes or limbs—the marks remain the child’s.
 
 ## 0:38–1:02 — Explain WebMCP
 
@@ -26,7 +26,7 @@ Prompt the browser agent:
 
 > Inspect the approved drawing. Name it Pip and make it brave on the outside but shy on the inside.
 
-Show `inspect_wall_scene` and `create_character_from_drawing` in activity history.
+Show `inspect_wall_scene` and `reconstruct_volumetric_character` in activity history. Let inspection expose the exact method: Teddy-style signed-distance inflation, Marching Cubes, 64³ resolution, and `neuralModelUsed: false`.
 
 ## 1:02–1:27 — Move through the shared world
 

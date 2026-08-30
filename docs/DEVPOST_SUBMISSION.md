@@ -43,7 +43,7 @@ WallAlive is a shared AR play space for a child and their browser agent:
 1. The child explicitly opens the camera and approves one drawing.
 2. Local Canvas processing separates the drawing from its background without an upload.
 3. Local math finds the centered connected ink, seals small line gaps, flood-fills the silhouette, traces its boundary, and simplifies the contour with Ramer–Douglas–Peucker.
-4. Three.js turns that exact contour into a beveled `ExtrudeGeometry` solid with real thickness, drawing-derived relief, lighting, shadow, and seven whole-body animations. No eyes, limbs, or other anatomy are invented.
+4. A two-pass interior distance transform gives every silhouette point a local radius. A 64³ signed-distance field inflates wide regions more than narrow ones; Three.js Marching Cubes polygonizes it as one closed rounded surface with a distinct front, sides, and generated back. The original art is curved across the front with recomputed normals, lighting, shadow, and seven whole-body animations. No eyes, limbs, or other anatomy are invented.
 5. Eight WebMCP tools let the browser agent inspect approved shape/color metadata, name the character, define its personality, place and scale it, animate it, recolor generated depth, and perform a cancellable mini story.
 6. WebXR hit testing places the character on a real surface when supported; every other browser receives the complete camera-overlay fallback.
 
@@ -68,7 +68,7 @@ That combination—human sensor authority, agent-directed spatial performance, s
 WallAlive registers eight imperative tools with `document.modelContext.registerTool()`:
 
 - `inspect_wall_scene`
-- `create_character_from_drawing`
+- `reconstruct_volumetric_character`
 - `set_character_personality`
 - `place_character`
 - `animate_character`
@@ -87,7 +87,8 @@ The scene-inspection tool returns approved drawing semantics, AR capability, cha
 - Three.js transparent WebGL rendering
 - WebXR `immersive-ar` sessions with `hit-test`
 - Local Canvas ink scoring, connected components, morphology, flood fill, contour tracing, and Ramer–Douglas–Peucker simplification
-- Beveled Three.js `ExtrudeGeometry` plus a luminance-derived displaced front surface
+- 64³ signed-distance implicit surface polygonized with Three.js Marching Cubes
+- CPU-curved original-art front with recomputed normals and a generated rounded back
 - Imperative WebMCP registration through `document.modelContext`
 - Responsive camera-overlay fallback
 - Permissions Policy for WebMCP tools, camera, and spatial tracking
@@ -97,7 +98,7 @@ The scene-inspection tool returns approved drawing semantics, AR capability, cha
 
 The hardest product decision was not technical—it was deciding what the agent must never control. Exposing the camera would have made the demo superficially more autonomous, but it would weaken the experience for the people whose trust matters most. Designing the tool boundary first led to a clearer product.
 
-The largest technical challenge was recovering one real shape from a noisy camera frame without a backend reconstruction service. Paper edges, graph lines, wall texture, and nearby drawings initially produced a rectangular photo crop. We replaced that shortcut with adaptive ink scoring, centered connected-component selection, morphological gap closing, background flood fill, boundary tracing, contour simplification, and a beveled polygon extrusion. The original pixels become a displaced front surface while generated material appears only on the new depth. We also had to reconcile WebXR’s real-world coordinate system with a universal normalized overlay placement model.
+The largest technical challenge was recovering one real shape from a noisy camera frame without a backend reconstruction service. Paper edges, graph lines, wall texture, and nearby drawings initially produced a rectangular photo crop. We replaced that shortcut with adaptive ink scoring, centered connected-component selection, morphological gap closing, background flood fill, boundary tracing, and contour simplification. We then replaced a visually insufficient flat extrusion with Teddy-style silhouette inflation: an interior distance transform drives a closed signed-distance field, and Marching Cubes creates different front, side, and back geometry. The original pixels curve over the front while generated material reveals the new volume. We also had to reconcile WebXR’s real-world coordinate system with a universal normalized overlay placement model.
 
 ## Accomplishments we are proud of
 
