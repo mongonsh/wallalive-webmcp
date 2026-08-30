@@ -467,10 +467,11 @@ export const ARStage = forwardRef<ARStageHandle, ARStageProps>(function ARStage(
         const rightArm = articulated?.getObjectByName("rig-arm-right");
         if (leftArm) leftArm.rotation.z = Number(leftArm.userData.baseRotationZ ?? 0) + Math.sin(elapsed * 5.2) * 0.55;
         if (rightArm) rightArm.rotation.z = Number(rightArm.userData.baseRotationZ ?? 0) - Math.sin(elapsed * 5.2) * 0.55;
-        neuralRig?.armLeft?.rotateZ(0.52 + Math.sin(elapsed * 5.2) * 0.45);
-        neuralRig?.armRight?.rotateZ(-0.52 - Math.sin(elapsed * 5.2) * 0.45);
-        neuralRig?.legLeft?.rotateX(Math.sin(elapsed * 5.2) * 0.22);
-        neuralRig?.legRight?.rotateX(-Math.sin(elapsed * 5.2) * 0.22);
+        neuralRig?.arms.forEach((arm, index) => {
+          const direction = index % 2 ? -1 : 1;
+          arm.rotateZ(direction * (0.52 + Math.sin(elapsed * 5.2 + index * 0.6) * 0.45));
+        });
+        neuralRig?.legs.forEach((leg, index) => leg.rotateX((index % 2 ? -1 : 1) * Math.sin(elapsed * 5.2 + index * 0.4) * 0.22));
         root.rotation.z = Math.sin(elapsed * 5.2) * 0.18;
         root.rotation.y = rotationRef.current.yaw + Math.sin(elapsed * 2.6) * 0.18;
         root.position.x = placement.x + Math.sin(elapsed * 3.4) * 0.15;
@@ -484,10 +485,8 @@ export const ARStage = forwardRef<ARStageHandle, ARStageProps>(function ARStage(
         const rightLeg = articulated?.getObjectByName("rig-leg-right");
         if (leftLeg) leftLeg.rotation.x = Math.sin(elapsed * 7) * 0.5;
         if (rightLeg) rightLeg.rotation.x = -Math.sin(elapsed * 7) * 0.5;
-        neuralRig?.legLeft?.rotateX(Math.sin(elapsed * 7) * 0.48);
-        neuralRig?.legRight?.rotateX(-Math.sin(elapsed * 7) * 0.48);
-        neuralRig?.armLeft?.rotateX(-Math.sin(elapsed * 7) * 0.24);
-        neuralRig?.armRight?.rotateX(Math.sin(elapsed * 7) * 0.24);
+        neuralRig?.legs.forEach((leg, index) => leg.rotateX((index % 2 ? -1 : 1) * Math.sin(elapsed * 7 + index * 0.25) * 0.48));
+        neuralRig?.arms.forEach((arm, index) => arm.rotateX((index % 2 ? 1 : -1) * Math.sin(elapsed * 7 + index * 0.25) * 0.24));
         root.position.x = placement.x + Math.sin(elapsed * 1.5) * 0.85;
         root.rotation.z = Math.sin(elapsed * 6) * 0.055;
         root.rotation.y = rotationRef.current.yaw + Math.sin(elapsed * 3) * 0.12;

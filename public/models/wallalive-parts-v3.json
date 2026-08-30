@@ -1,0 +1,117 @@
+{
+  "architecture": "WallAlive ChildlikeSHAPES PartUNet v3",
+  "parts": [
+    "body",
+    "eye",
+    "cheek",
+    "mouth",
+    "ear",
+    "arm",
+    "hand",
+    "leg",
+    "foot"
+  ],
+  "coarse_channels": [
+    "foreground",
+    "head",
+    "torso",
+    "upper_appendage",
+    "lower_appendage"
+  ],
+  "face_parts": [
+    "eye",
+    "cheek",
+    "mouth",
+    "ear"
+  ],
+  "input": [
+    1,
+    3,
+    96,
+    96
+  ],
+  "face_input": [
+    1,
+    3,
+    96,
+    96
+  ],
+  "official_training_drawings": 12992,
+  "validation_drawings": 1000,
+  "official_test_drawings": 1986,
+  "synthetic_training_drawings": 3000,
+  "validation_part_iou": {
+    "body": 0.9053,
+    "eye": 0.6091,
+    "cheek": 0.0741,
+    "mouth": 0.4925,
+    "ear": 0.4125,
+    "arm": 0.6004,
+    "hand": 0.5343,
+    "leg": 0.6822,
+    "foot": 0.681
+  },
+  "validation_face_iou": {
+    "eye": 0.6316,
+    "cheek": 0.1723,
+    "mouth": 0.5414,
+    "ear": 0.4249
+  },
+  "calibrated_validation_part_iou": {
+    "body": 0.9053,
+    "eye": 0.6139,
+    "cheek": 0.0877,
+    "mouth": 0.4964,
+    "ear": 0.4173,
+    "arm": 0.6121,
+    "hand": 0.5353,
+    "leg": 0.6958,
+    "foot": 0.687
+  },
+  "calibrated_validation_face_iou": {
+    "eye": 0.6393,
+    "cheek": 0.1937,
+    "mouth": 0.5597,
+    "ear": 0.4274
+  },
+  "part_thresholds": {
+    "body": 0.54,
+    "eye": 0.72,
+    "cheek": 0.24,
+    "mouth": 0.7,
+    "ear": 0.72,
+    "arm": 0.72,
+    "hand": 0.6,
+    "leg": 0.72,
+    "foot": 0.72
+  },
+  "face_thresholds": {
+    "eye": 0.72,
+    "cheek": 0.24,
+    "mouth": 0.72,
+    "ear": 0.64
+  },
+  "official_test_part_iou": {
+    "body": 0.9008,
+    "eye": 0.5995,
+    "cheek": 0.0785,
+    "mouth": 0.5011,
+    "ear": 0.4443,
+    "arm": 0.6033,
+    "hand": 0.5398,
+    "leg": 0.6957,
+    "foot": 0.6564
+  },
+  "official_test_face_iou": {
+    "eye": 0.6419,
+    "cheek": 0.1652,
+    "mouth": 0.5688,
+    "ear": 0.4494
+  },
+  "best_epoch": 7,
+  "epochs": 8,
+  "parameters": 288109,
+  "face_parameters": 109832,
+  "seconds": 788.6,
+  "dataset_license": "ChildlikeSHAPES CC-BY-4.0"
+}

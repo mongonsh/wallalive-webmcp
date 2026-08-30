@@ -13,6 +13,8 @@ export type RiggedAssetInfo = {
 
 export type NeuralRigMap = {
   all: THREE.Bone[];
+  arms: THREE.Bone[];
+  legs: THREE.Bone[];
   armLeft?: THREE.Bone;
   armRight?: THREE.Bone;
   legLeft?: THREE.Bone;
@@ -274,7 +276,14 @@ function projectSemanticRig(source: THREE.Group, bounds: THREE.Box3, rig?: Chara
   const raycaster = new THREE.Raycaster();
   const front = new THREE.Vector3(0, 0, 1);
 
-  rig.parts.filter((part) => part.source === "image-region" && PROJECTED_KINDS.has(part.kind)).forEach((part) => {
+  // A learned label still carries exact high-resolution outline/color whenever
+  // mergeLearnedPartHints snapped it to an image region. Keep those authored
+  // marks on the generated surface instead of discarding them merely because
+  // the semantic name came from the neural recognizer.
+  rig.parts.filter((part) => (
+    (part.source === "image-region" || part.source === "learned-model")
+      && PROJECTED_KINDS.has(part.kind)
+  )).forEach((part) => {
     const normalizedX = (part.center.x - body.center.x) / Math.max(0.001, body.size.x);
     const normalizedY = (part.center.y - body.center.y) / Math.max(0.001, body.size.y);
     const origin = new THREE.Vector3(
@@ -355,7 +364,7 @@ export function prepareNeuralCharacter(source: THREE.Group, rig?: CharacterRig) 
   if (colorTransfer) info.colorTransfer = colorTransfer;
 
   const root = bones.find((bone) => !(bone.parent instanceof THREE.Bone)) ?? bones[0];
-  const rigMap: NeuralRigMap = { all: bones };
+  const rigMap: NeuralRigMap = { all: bones, arms: [], legs: [] };
   if (root) {
     const rootPosition = root.getWorldPosition(new THREE.Vector3());
     const boneBounds = new THREE.Box3();
@@ -372,11 +381,13 @@ export function prepareNeuralCharacter(source: THREE.Group, rig?: CharacterRig) 
       const dx = endpoint.x - rootPosition.x;
       const dy = endpoint.y - rootPosition.y;
       if (dy < -boneSize.y * 0.13) {
-        if (dx < 0) rigMap.legLeft = branch;
-        else rigMap.legRight = branch;
+        rigMap.legs.push(branch);
+        if (dx < 0) rigMap.legLeft ??= branch;
+        else rigMap.legRight ??= branch;
       } else if (Math.abs(dx) > boneSize.x * 0.2) {
-        if (dx < 0) rigMap.armLeft = branch;
-        else rigMap.armRight = branch;
+        rigMap.arms.push(branch);
+        if (dx < 0) rigMap.armLeft ??= branch;
+        else rigMap.armRight ??= branch;
       }
     }
   }

@@ -48,7 +48,7 @@ All tools use strict schemas, `additionalProperties: false`, cancellation signal
 
 - Camera start and capture are human-only UI gestures.
 - Segmentation, semantic-part recognition, and the first preview happen locally.
-- The 976 KB ONNX model is served from WallAlive’s own origin and runs with WebAssembly; it does not send the image to an inference API.
+- The 1.54 MiB dual-resolution ONNX pair is served from WallAlive’s own origin and runs with WebAssembly; it does not send the image to an inference API. The older fallback checkpoints load only when v3 misses a basic facial or limb anchor.
 - The agent never receives live frames or raw image pixels.
 - Neural generation requires a separate visible human approval.
 - Only the isolated drawing is sent to the selected AniGen Space.
@@ -75,7 +75,9 @@ human camera gesture + tap
 local target-aware drawing isolation
         │
         ▼
-WallAlive Hierarchical PartUNet (local ONNX/WASM, 9 classes)
+WallAlive ChildlikeSHAPES PartUNet v3 (local ONNX/WASM)
+        ├── 96² full character: body + head/torso + limbs
+        └── 96² enlarged head crop: eyes + cheeks + mouth + ears
         │
         ├── exact pixel snap: position + outline + color
         └─────────────────────────────────────────────► rough private preview
@@ -93,7 +95,8 @@ rigged GLB → local Blob URL → Three.js GLTFLoader / SkinnedMesh
 
 - React 19 + TypeScript, built with vinext for Cloudflare/Sites
 - Three.js `GLTFLoader`, `SkinnedMesh`, procedural bone actions, and WebXR hit testing
-- WallAlive Hierarchical PartUNet v2: 246,508 parameters, 64×64 input, four coarse context channels plus nine semantic channels, lazy-loaded through `onnxruntime-web`
+- WallAlive ChildlikeSHAPES PartUNet v3: a 288,109-parameter whole-character network plus a 109,832-parameter enlarged-face network, both at 96×96, lazy-loaded through `onnxruntime-web`
+- Instance-aware decoding preserves multiple same-side arms/legs and separate facial features; every detected region snaps back to high-resolution pixel geometry before rendering
 - Raised face meshes and detected contour tubes add real eye/cheek/mouth parallax to the private preview instead of leaving the features flat
 - Lazy-loaded `@gradio/client` connection to AniGen
 - `document.modelContext.registerTool()` imperative WebMCP integration
@@ -102,9 +105,9 @@ rigged GLB → local Blob URL → Three.js GLTFLoader / SkinnedMesh
 
 ## Local model training
 
-`ml/train_part_detector.py` reproducibly generates varied labeled characters and trains the compact hierarchical U-Net. The checked-in model was trained on 6,000 generated examples plus three augmentations of 392 genuine public Amateur Drawings. Its generated distribution includes upright, horizontal, quadruped, side-faced, tall, and multi-arm characters as well as colors, paper grids, rotations, compression artifacts, shadows, missing/asymmetric parts, and distractor strokes.
+`ml/train_childlike_detector.py` trains the checked-in v3 models from the official pixel-labeled ChildlikeSHAPES release. The reproducible split uses 12,992 official training drawings, 1,000 disjoint validation drawings for checkpoint/threshold selection, all 1,986 official test drawings only after selection, and 3,000 synthetic upright, horizontal, quadruped, side-faced, tall, and multi-arm characters. Training augments color, paper grids, rotation, compression damage, shadows, missing/asymmetric parts, and distractor strokes.
 
-Evaluation uses 700 separately generated examples and 98 untouched real Amateur Drawings. Generated held-out IoU ranges from 0.657 for arms to 0.927 for foreground; real foreground IoU is 0.738. A second six-example Meta Animated Drawings check improved from 0.637 with v1 to 0.675 with v2 at the browser threshold. At runtime v2 is primary, while the earlier compact model supplies only missing, non-overlapping part hints; exact contour evidence still decides geometry. These sets are regression evidence, not a claim of universal recognition.
+On the untouched official test set, IoU is 0.901 body, 0.600 full-frame eye / 0.642 enlarged-face eye, 0.501 / 0.569 mouth, 0.444 / 0.449 ear, 0.603 arm, 0.540 hand, 0.696 leg, and 0.656 foot. The heterogeneous cheek/facial-accessory label is the weak class at 0.079 full-frame / 0.165 face-crop, so v3 uses a validation-calibrated 0.24 threshold plus the earlier synthetic cheek specialist when a bilateral mate is absent. On six separate public Meta Animated Drawings characters, the new browser preprocessing and v3 body model score 0.803–0.952 body IoU, mean 0.883. Exact contour evidence still decides final position, outline, shape, and sampled color; these numbers are regression evidence, not a claim that single-view recognition or an inferred unseen back can be perfect.
 
 ## Local development
 
@@ -125,4 +128,4 @@ npm audit --omit=dev
 
 ## Attribution and license
 
-WallAlive is MIT licensed. Real-data adaptation uses a 490-image slice of Meta’s public [Amateur Drawings Dataset](https://github.com/facebookresearch/AnimatedDrawings#amateur-drawings-dataset), which Meta releases under MIT; no dataset images are redistributed in this repository. The neural reconstruction path uses [AniGen](https://github.com/VAST-AI-Research/AniGen), whose project and model card are MIT licensed; AniGen’s repository separately notes research/non-commercial restrictions on a bundled CUBVH-derived component, which must be reviewed before commercial self-hosting. The bundled judge fixture was generated by the official AniGen Space from its `brickbob.png` reference input and is included for reproducible, quota-free evaluation. See [docs/RESEARCH.md](./docs/RESEARCH.md) for the evaluated alternatives and exact capability boundary.
+WallAlive is MIT licensed. V3 is trained on the official [ChildlikeSHAPES](https://arxiv.org/abs/2504.08022) release under CC-BY-4.0; dataset images are not redistributed in this repository. The retained fallback models use a 490-image slice of Meta’s public [Amateur Drawings Dataset](https://github.com/facebookresearch/AnimatedDrawings#amateur-drawings-dataset), released under MIT. The neural reconstruction path uses [AniGen](https://github.com/VAST-AI-Research/AniGen), whose project and model card are MIT licensed; AniGen’s repository separately notes research/non-commercial restrictions on a bundled CUBVH-derived component, which must be reviewed before commercial self-hosting. The bundled judge fixture was generated by the official AniGen Space from its `brickbob.png` reference input and is included for reproducible, quota-free evaluation. See [docs/RESEARCH.md](./docs/RESEARCH.md) for the evaluated alternatives and exact capability boundary.

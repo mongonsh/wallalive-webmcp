@@ -85,7 +85,7 @@ export type DrawingExtraction = {
   analysis: DrawingAnalysis;
   semanticRegions?: SemanticRegionCandidate[];
   learnedRecognition?: {
-    model: "wallalive-parts-v2-ensemble";
+    model: "wallalive-parts-v3-childlikeshapes";
     latencyMs: number;
     detectedKinds: SemanticPartKind[];
   };
@@ -1395,7 +1395,7 @@ export function mergeLearnedPartHints(extraction: DrawingExtraction, hints: Lear
   const accepted = hints.filter((hint) => hint.confidence >= (hint.kind === "cheek" || hint.kind === "mouth" ? 0.42 : 0.48));
   if (!accepted.length) return {
     ...extraction,
-    learnedRecognition: { model: "wallalive-parts-v2-ensemble", latencyMs, detectedKinds: [] },
+    learnedRecognition: { model: "wallalive-parts-v3-childlikeshapes", latencyMs, detectedKinds: [] },
   };
   const body = extraction.rig.parts.find((part) => part.kind === "body");
   if (!body) return extraction;
@@ -1431,6 +1431,15 @@ export function mergeLearnedPartHints(extraction: DrawingExtraction, hints: Lear
   const sideFor = (x: number): SemanticSide => x < body.center.x - body.size.x * 0.065
     ? "left"
     : x > body.center.x + body.size.x * 0.065 ? "right" : "center";
+  const distanceToPart = (part: SemanticPart, hint: (typeof learned)[number]) => {
+    const centerDistance = Math.hypot(part.center.x - hint.center.x, part.center.y - hint.center.y);
+    if (!part.anchor) return centerDistance;
+    const midpointDistance = Math.hypot(
+      (part.center.x + part.anchor.x) / 2 - hint.center.x,
+      (part.center.y + part.anchor.y) / 2 - hint.center.y,
+    );
+    return Math.min(centerDistance, midpointDistance);
+  };
   const nearestRegion = (hint: (typeof learned)[number]) => {
     const candidates = regions.filter((region) => !usedRegions.has(region.id));
     let best: SemanticRegionCandidate | null = null;
@@ -1481,9 +1490,9 @@ export function mergeLearnedPartHints(extraction: DrawingExtraction, hints: Lear
   for (const hint of learned.filter((candidate) => candidate.kind === "ear" || candidate.kind === "arm" || candidate.kind === "leg")) {
     const side = sideFor(hint.center.x);
     const existing = parts.filter((part) => part.kind === hint.kind && part.side === side)
-      .sort((a, b) => Math.hypot(a.center.x - hint.center.x, a.center.y - hint.center.y)
-        - Math.hypot(b.center.x - hint.center.x, b.center.y - hint.center.y))[0];
-    if (existing) {
+      .sort((a, b) => distanceToPart(a, hint) - distanceToPart(b, hint))[0];
+    const mergeReach = body.size.x * (hint.kind === "ear" ? 0.12 : 0.18);
+    if (existing && distanceToPart(existing, hint) <= mergeReach) {
       existing.confidence = Math.max(existing.confidence, hint.confidence);
       existing.source = "learned-model";
       continue;
@@ -1533,9 +1542,8 @@ export function mergeLearnedPartHints(extraction: DrawingExtraction, hints: Lear
   for (const hint of learned.filter((candidate) => candidate.kind === "hand" || candidate.kind === "foot")) {
     const side = sideFor(hint.center.x);
     const existing = parts.filter((part) => part.kind === hint.kind && part.side === side)
-      .sort((a, b) => Math.hypot(a.center.x - hint.center.x, a.center.y - hint.center.y)
-        - Math.hypot(b.center.x - hint.center.x, b.center.y - hint.center.y))[0];
-    if (existing) {
+      .sort((a, b) => distanceToPart(a, hint) - distanceToPart(b, hint))[0];
+    if (existing && distanceToPart(existing, hint) <= body.size.x * 0.12) {
       existing.confidence = Math.max(existing.confidence, hint.confidence);
       existing.source = "learned-model";
       continue;
@@ -1570,7 +1578,7 @@ export function mergeLearnedPartHints(extraction: DrawingExtraction, hints: Lear
   return {
     ...extraction,
     rig: { ...extraction.rig, parts, joints, detectedKinds },
-    learnedRecognition: { model: "wallalive-parts-v2-ensemble", latencyMs, detectedKinds: [...predictedKinds] },
+    learnedRecognition: { model: "wallalive-parts-v3-childlikeshapes", latencyMs, detectedKinds: [...predictedKinds] },
   };
 }
 

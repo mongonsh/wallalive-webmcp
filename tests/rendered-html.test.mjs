@@ -113,28 +113,46 @@ test("implements local drawing extraction and real WebXR hit testing", async () 
   assert.match(stage, /TubeGeometry/);
 });
 
-test("ships a compact same-origin learned drawing-part model", async () => {
-  const modelUrl = new URL("../public/models/wallalive-parts-v2.onnx", import.meta.url);
-  const report = JSON.parse(await readFile(new URL("../public/models/wallalive-parts-v2.json", import.meta.url), "utf8"));
+test("ships dual-resolution same-origin ChildlikeSHAPES drawing models", async () => {
+  const modelUrl = new URL("../public/models/wallalive-parts-v3.onnx", import.meta.url);
+  const faceModelUrl = new URL("../public/models/wallalive-face-v3.onnx", import.meta.url);
+  const report = JSON.parse(await readFile(new URL("../public/models/wallalive-parts-v3.json", import.meta.url), "utf8"));
   const model = await stat(modelUrl);
+  const faceModel = await stat(faceModelUrl);
   const recognizer = await readFile(new URL("../app/lib/learned-parts.ts", import.meta.url), "utf8");
 
-  assert.ok(model.size > 950_000 && model.size < 1_100_000, `expected a compact substantive ONNX model, got ${model.size} bytes`);
-  assert.equal(report.architecture, "WallAlive Hierarchical PartUNet v2");
-  assert.deepEqual(report.coarse_channels, ["foreground", "face", "upper_appendage", "lower_appendage"]);
-  assert.equal(report.parameters, 246_508);
-  assert.equal(report.training_samples, 6_000);
-  assert.equal(report.validation_samples, 700);
-  assert.equal(report.real_training_drawings, 392);
-  assert.equal(report.real_validation_drawings, 98);
+  assert.ok(model.size > 1_100_000 && model.size < 1_250_000, `expected a compact substantive body ONNX model, got ${model.size} bytes`);
+  assert.ok(faceModel.size > 400_000 && faceModel.size < 500_000, `expected a compact substantive face ONNX model, got ${faceModel.size} bytes`);
+  assert.equal(report.architecture, "WallAlive ChildlikeSHAPES PartUNet v3");
+  assert.deepEqual(report.coarse_channels, ["foreground", "head", "torso", "upper_appendage", "lower_appendage"]);
+  assert.deepEqual(report.face_parts, ["eye", "cheek", "mouth", "ear"]);
+  assert.deepEqual(report.input, [1, 3, 96, 96]);
+  assert.deepEqual(report.face_input, [1, 3, 96, 96]);
+  assert.equal(report.parameters, 288_109);
+  assert.equal(report.face_parameters, 109_832);
+  assert.equal(report.official_training_drawings, 12_992);
+  assert.equal(report.validation_drawings, 1_000);
+  assert.equal(report.official_test_drawings, 1_986);
+  assert.equal(report.synthetic_training_drawings, 3_000);
+  assert.equal(report.best_epoch, 7);
   assert.deepEqual(report.parts, ["body", "eye", "cheek", "mouth", "ear", "arm", "hand", "leg", "foot"]);
-  for (const [kind, iou] of Object.entries(report.validation_iou)) {
-    assert.ok(iou >= 0.55, `${kind} held-out IoU should stay above the regression floor, got ${iou}`);
+  const officialFloors = { body: 0.88, eye: 0.55, cheek: 0.05, mouth: 0.45, ear: 0.38, arm: 0.55, hand: 0.48, leg: 0.63, foot: 0.60 };
+  for (const [kind, floor] of Object.entries(officialFloors)) {
+    assert.ok(report.official_test_part_iou[kind] >= floor, `${kind} official-test IoU should stay above ${floor}, got ${report.official_test_part_iou[kind]}`);
   }
-  assert.ok(report.real_validation_iou.body >= 0.7, `real drawing foreground IoU should stay above 0.7, got ${report.real_validation_iou.body}`);
-  assert.match(recognizer, /const MODEL_PATH = ["']\/models\/wallalive-parts-v2\.onnx["']/);
-  assert.match(recognizer, /const FALLBACK_MODEL_PATH = ["']\/models\/wallalive-parts-v1\.onnx["']/);
-  assert.match(recognizer, /supplementMissingHints/);
+  const faceFloors = { eye: 0.60, cheek: 0.12, mouth: 0.52, ear: 0.40 };
+  for (const [kind, floor] of Object.entries(faceFloors)) {
+    assert.ok(report.official_test_face_iou[kind] >= floor, `${kind} face-crop official-test IoU should stay above ${floor}, got ${report.official_test_face_iou[kind]}`);
+  }
+  assert.deepEqual(report.face_thresholds, { eye: 0.72, cheek: 0.24, mouth: 0.72, ear: 0.64 });
+  assert.match(recognizer, /const BODY_MODEL_PATH = ["']\/models\/wallalive-parts-v3\.onnx["']/);
+  assert.match(recognizer, /const FACE_MODEL_PATH = ["']\/models\/wallalive-face-v3\.onnx["']/);
+  assert.match(recognizer, /FALLBACK_MODEL_PATHS = \[["']\/models\/wallalive-parts-v2\.onnx/);
+  assert.match(recognizer, /const BODY_SIZE = 96/);
+  assert.match(recognizer, /const FACE_SIZE = 96/);
+  assert.match(recognizer, /locateHead/);
+  assert.match(recognizer, /supplementFallbackHints/);
+  assert.match(recognizer, /loadFallbackSessions/);
   assert.match(recognizer, /import\(["']onnxruntime-web\/wasm["']\)/);
   assert.doesNotMatch(recognizer, /https?:\/\//);
 });
@@ -202,7 +220,7 @@ test("ships a verified colored AniGen SkinnedMesh instead of a 2D extrusion", as
     detectedKinds: ["body", "eye", "cheek", "mouth"],
     parts: [
       { id: "body", kind: "body", side: "center", parentId: null, center: { x: 0, y: 0, z: 0 }, size: { x: 1.1, y: 1.3, z: 0.6 }, rotation: 0, color: "#f4eee2", confidence: 1, source: "silhouette-branch" },
-      { id: "eye-left", kind: "eye", side: "left", parentId: "body", center: { x: -0.14, y: 0.18, z: 0 }, size: { x: 0.1, y: 0.12, z: 0.02 }, rotation: 0, color: "#9c3450", confidence: 0.9, source: "image-region" },
+      { id: "eye-left", kind: "eye", side: "left", parentId: "body", center: { x: -0.14, y: 0.18, z: 0 }, size: { x: 0.1, y: 0.12, z: 0.02 }, rotation: 0, color: "#9c3450", confidence: 0.9, source: "learned-model" },
       { id: "eye-right", kind: "eye", side: "right", parentId: "body", center: { x: 0.14, y: 0.18, z: 0 }, size: { x: 0.1, y: 0.12, z: 0.02 }, rotation: 0, color: "#9c3450", confidence: 0.9, source: "image-region" },
       { id: "cheek-left", kind: "cheek", side: "left", parentId: "body", center: { x: -0.19, y: -0.01, z: 0 }, size: { x: 0.08, y: 0.05, z: 0.02 }, rotation: 0, color: "#dd6f87", confidence: 0.8, source: "image-region" },
       { id: "cheek-right", kind: "cheek", side: "right", parentId: "body", center: { x: 0.19, y: -0.01, z: 0 }, size: { x: 0.08, y: 0.05, z: 0.02 }, rotation: 0, color: "#dd6f87", confidence: 0.8, source: "image-region" },
@@ -222,6 +240,8 @@ test("ships a verified colored AniGen SkinnedMesh instead of a 2D extrusion", as
   assert.ok(prepared.rigMap.armRight, "expected a generated right-arm bone branch");
   assert.ok(prepared.rigMap.legLeft, "expected a generated left-leg bone branch");
   assert.ok(prepared.rigMap.legRight, "expected a generated right-leg bone branch");
+  assert.ok(prepared.rigMap.arms.length >= 2, "expected all generated arm branches to remain animatable");
+  assert.ok(prepared.rigMap.legs.length >= 2, "expected all generated leg branches to remain animatable");
   assert.ok(prepared.semanticMap.eyeLeft, "expected the detected left eye projected onto the neural mesh");
   assert.ok(prepared.semanticMap.eyeRight, "expected the detected right eye projected onto the neural mesh");
   assert.ok(prepared.semanticMap.cheekLeft, "expected the detected left cheek projected onto the neural mesh");
