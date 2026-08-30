@@ -249,6 +249,8 @@ test("ships validation-calibrated same-origin drawing, pose, and variable-topolo
   assert.match(recognizer, /locateHead/);
   assert.match(recognizer, /supplementFallbackHints/);
   assert.match(recognizer, /loadFallbackSessions/);
+  assert.match(recognizer, /hints\.filter\(\(hint\) => hint\.kind === ["']eye["']\)\.length < 2/);
+  assert.doesNotMatch(recognizer, /fullHints\.filter\(\(hint\) => hint\.kind === ["']eye["'] \|\| hint\.kind === ["']mouth["']\)/);
   assert.match(recognizer, /import\(["']onnxruntime-web\/wasm["']\)/);
   assert.doesNotMatch(recognizer, /https?:\/\//);
 });

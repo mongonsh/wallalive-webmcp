@@ -730,10 +730,16 @@ export async function recognizeDrawingParts(extraction: DrawingExtraction): Prom
     componentGate: { v3Logits: alignedFaceLogits.v3, v4Logits: alignedFaceLogits.v4 },
   });
   let hints = [...fullHints.filter((hint) => !FACE_KINDS.has(hint.kind)), ...faceHints];
-  // The enlarged crop has better detail. Only common eye/mouth anchors may be
-  // supplemented from the whole-character pass; uncalibrated whole-image
-  // cheek/ear masks must not bypass the learned rare-component gate.
-  hints = supplementHints(hints, fullHints.filter((hint) => hint.kind === "eye" || hint.kind === "mouth"), false);
+  // The enlarged crop has better detail. The whole-character pass may restore
+  // a missing bilateral eye or missing mouth, but must not append a third eye
+  // after the face crop already found a pair (striped cheeks can look eye-like
+  // at 96 px). Uncalibrated whole-image cheek/ear masks never bypass the gate.
+  if (hints.filter((hint) => hint.kind === "eye").length < 2) {
+    hints = supplementHints(hints, fullHints.filter((hint) => hint.kind === "eye"), false);
+  }
+  if (!hints.some((hint) => hint.kind === "mouth")) {
+    hints = supplementHints(hints, fullHints.filter((hint) => hint.kind === "mouth"), false);
+  }
 
   // Keep the legacy ensemble off the mobile critical path. It is downloaded
   // and executed only when v3 cannot find a basic face/limb anchor.
