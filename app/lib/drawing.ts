@@ -4,7 +4,7 @@ export type ContourPoint = { x: number; y: number };
 export type SkeletonPoint = { x: number; y: number; radius: number };
 export type CaptureTarget = { x: number; y: number };
 
-export type SemanticPartKind = "body" | "eye" | "pupil" | "mouth" | "ear" | "arm" | "hand" | "leg" | "foot" | "marking";
+export type SemanticPartKind = "body" | "eye" | "pupil" | "cheek" | "mouth" | "ear" | "arm" | "hand" | "leg" | "foot" | "marking";
 export type SemanticSide = "left" | "right" | "center";
 export type SemanticPartSource = "image-region" | "silhouette-branch" | "structural-inference";
 
@@ -17,6 +17,8 @@ export type SemanticRegionCandidate = {
   color: string;
   pixelCount: number;
   density: number;
+  rotation?: number;
+  outline?: ContourPoint[];
 };
 
 export type SemanticPart = {
@@ -31,10 +33,11 @@ export type SemanticPart = {
   color: string;
   confidence: number;
   source: SemanticPartSource;
+  outline?: ContourPoint[];
 };
 
 export type CharacterRig = {
-  version: "wallalive-semantic-rig-v1";
+  version: "wallalive-semantic-rig-v2";
   bodyColor: string;
   lineColor: string;
   parts: SemanticPart[];
@@ -79,6 +82,36 @@ type Component = { pixels: number[]; minX: number; minY: number; maxX: number; m
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 const colorDistance = (a: RGB, b: RGB) => Math.sqrt((a.r - b.r) ** 2 + (a.g - b.g) ** 2 + (a.b - b.b) ** 2);
 const toHex = ({ r, g, b }: RGB) => `#${[r, g, b].map((value) => clamp(Math.round(value), 0, 255).toString(16).padStart(2, "0")).join("")}`;
+const mixColor = (a: RGB, b: RGB, amount: number): RGB => ({
+  r: a.r + (b.r - a.r) * amount,
+  g: a.g + (b.g - a.g) * amount,
+  b: a.b + (b.b - a.b) * amount,
+});
+const boostInkColor = (color: RGB): RGB => {
+  const average = (color.r + color.g + color.b) / 3;
+  return {
+    r: clamp(average + (color.r - average) * 2.35, 0, 255),
+    g: clamp(average + (color.g - average) * 2.35, 0, 255),
+    b: clamp(average + (color.b - average) * 2.35, 0, 255),
+  };
+};
+
+function hueOf(color: RGB) {
+  const r = color.r / 255;
+  const g = color.g / 255;
+  const b = color.b / 255;
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const delta = max - min;
+  if (delta < 0.001) return 0;
+  const sector = max === r ? ((g - b) / delta) % 6 : max === g ? (b - r) / delta + 2 : (r - g) / delta + 4;
+  return (sector * 60 + 360) % 360;
+}
+
+function hueDistance(a: RGB, b: RGB) {
+  const distance = Math.abs(hueOf(a) - hueOf(b));
+  return Math.min(distance, 360 - distance);
+}
 
 function averageBorder(data: Uint8ClampedArray, width: number, height: number): RGB {
   let r = 0;
@@ -250,6 +283,39 @@ function candidateFeatures(component: Component, pixels: Uint8ClampedArray, widt
   };
 }
 
+function componentColor(component: Component, pixels: Uint8ClampedArray): RGB {
+  let r = 0;
+  let g = 0;
+  let b = 0;
+  for (const index of component.pixels) {
+    const rgba = index * 4;
+    r += pixels[rgba];
+    g += pixels[rgba + 1];
+    b += pixels[rgba + 2];
+  }
+  return { r: r / component.pixels.length, g: g / component.pixels.length, b: b / component.pixels.length };
+}
+
+function componentRotation(component: Component, width: number) {
+  let xx = 0;
+  let yy = 0;
+  let xy = 0;
+  for (const index of component.pixels) {
+    const x = index % width - component.centerX;
+    const y = Math.floor(index / width) - component.centerY;
+    xx += x * x;
+    yy += y * y;
+    xy += x * y;
+  }
+  return Number((0.5 * Math.atan2(2 * xy, xx - yy)).toFixed(4));
+}
+
+function componentOutline(component: Component, width: number, height: number) {
+  const mask = new Uint8Array(width * height);
+  for (const index of component.pixels) mask[index] = 1;
+  return traceContour(mask, width, height);
+}
+
 function chooseDrawing(components: Component[], pixels: Uint8ClampedArray, width: number, height: number, target: CaptureTarget) {
   const viable = components.filter((component) => {
     const boxWidth = component.maxX - component.minX + 1;
@@ -293,6 +359,67 @@ function recoverSilhouette(mask: Uint8Array, width: number, height: number) {
   const silhouette = new Uint8Array(mask.length);
   for (let index = 0; index < silhouette.length; index += 1) silhouette[index] = outside[index] ? 0 : 1;
   return silhouette;
+}
+
+export function recoverTargetSilhouette(mask: Uint8Array, width: number, height: number, target: CaptureTarget) {
+  const centerX = target.x * width;
+  const centerY = target.y * height;
+  const binCount = 96;
+  const radii = new Float32Array(binCount);
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      if (!mask[y * width + x]) continue;
+      const dx = x - centerX;
+      const dy = y - centerY;
+      const angle = (Math.atan2(dy, dx) + Math.PI * 2) % (Math.PI * 2);
+      const bin = Math.round(angle / (Math.PI * 2) * binCount) % binCount;
+      radii[bin] = Math.max(radii[bin], Math.hypot(dx, dy));
+    }
+  }
+  const present = [...radii].filter((radius) => radius > 2).sort((a, b) => a - b);
+  if (present.length < binCount * 0.24) return recoverSilhouette(mask, width, height);
+  const medianRadius = present[Math.floor(present.length / 2)];
+  for (let index = 0; index < binCount; index += 1) {
+    if (radii[index] > 2) continue;
+    for (let offset = 1; offset < binCount / 2; offset += 1) {
+      const before = radii[(index - offset + binCount) % binCount];
+      const after = radii[(index + offset) % binCount];
+      if (before > 2 || after > 2) {
+        radii[index] = before > 2 && after > 2 ? (before + after) / 2 : Math.max(before, after);
+        break;
+      }
+    }
+  }
+  for (let pass = 0; pass < 3; pass += 1) {
+    const next = new Float32Array(binCount);
+    for (let index = 0; index < binCount; index += 1) {
+      const window = [-2, -1, 0, 1, 2].map((offset) => radii[(index + offset + binCount) % binCount]).sort((a, b) => a - b);
+      const localMedian = window[2];
+      next[index] = clamp(radii[index] * 0.45 + localMedian * 0.55, medianRadius * 0.62, medianRadius * 1.28);
+    }
+    radii.set(next);
+  }
+  const polygon = [...radii].map((radius, index) => {
+    const angle = index / binCount * Math.PI * 2;
+    return { x: centerX + Math.cos(angle) * radius, y: centerY + Math.sin(angle) * radius };
+  });
+  const bounds = polygon.reduce((value, point) => ({
+    minX: Math.min(value.minX, point.x), minY: Math.min(value.minY, point.y),
+    maxX: Math.max(value.maxX, point.x), maxY: Math.max(value.maxY, point.y),
+  }), { minX: width, minY: height, maxX: 0, maxY: 0 });
+  const result = new Uint8Array(width * height);
+  for (let y = Math.max(0, Math.floor(bounds.minY)); y <= Math.min(height - 1, Math.ceil(bounds.maxY)); y += 1) {
+    for (let x = Math.max(0, Math.floor(bounds.minX)); x <= Math.min(width - 1, Math.ceil(bounds.maxX)); x += 1) {
+      let inside = false;
+      for (let current = 0, previous = polygon.length - 1; current < polygon.length; previous = current, current += 1) {
+        const a = polygon[current];
+        const b = polygon[previous];
+        if ((a.y > y) !== (b.y > y) && x < ((b.x - a.x) * (y - a.y)) / (b.y - a.y) + a.x) inside = !inside;
+      }
+      if (inside) result[y * width + x] = 1;
+    }
+  }
+  return result;
 }
 
 function pointLineDistance(point: ContourPoint, start: ContourPoint, end: ContourPoint) {
@@ -469,7 +596,7 @@ function skeletonFromTexture(canvas: HTMLCanvasElement): SkeletonPoint[] {
   }));
 }
 
-function analyzeSemanticCanvas(canvas: HTMLCanvasElement) {
+function analyzeSemanticCanvas(canvas: HTMLCanvasElement, preferredLine: RGB) {
   const width = canvas.width;
   const height = canvas.height;
   const context = canvas.getContext("2d", { willReadFrequently: true });
@@ -499,22 +626,30 @@ function analyzeSemanticCanvas(canvas: HTMLCanvasElement) {
   })).sort((a, b) => b.count - a.count);
   const body = colors[0] ?? { r: 247, g: 240, b: 223, count: 1 };
   const bodyRgb = { r: body.r, g: body.g, b: body.b };
-  const line = colors.slice(1).filter((color) => colorDistance(color, bodyRgb) > 34).sort((a, b) => {
+  const paletteLine = colors.slice(1).filter((color) => colorDistance(color, bodyRgb) > 34).sort((a, b) => {
     const score = (color: typeof a) => color.count * (1 + colorDistance(color, bodyRgb) / 180) * (1 + (255 - (color.r + color.g + color.b) / 3) / 255);
     return score(b) - score(a);
   })[0] ?? { r: 24, g: 49, b: 46, count: 1 };
+  const line = colorDistance(preferredLine, bodyRgb) > 18 ? preferredLine : paletteLine;
+  const surface = mixColor(bodyRgb, line, 0.14);
 
   // Removing a narrow alpha-border band prevents the outside contour from
   // swallowing the smaller eye, mouth, and marking regions inside it.
   const interior = erode(opaque, width, height, Math.max(2, Math.round(width / 128)));
+  const { distance: bodyInteriorDistance } = distanceTransform(opaque, width, height);
+  const featureInset = Math.max(7, Math.round(width * 0.026));
   const featureMask = new Uint8Array(opaque.length);
+  const lineChroma = Math.max(line.r, line.g, line.b) - Math.min(line.r, line.g, line.b);
   for (let index = 0; index < featureMask.length; index += 1) {
-    if (!interior[index]) continue;
+    if (!interior[index] || bodyInteriorDistance[index] < featureInset) continue;
     const rgba = index * 4;
     const pixel = { r: pixels[rgba], g: pixels[rgba + 1], b: pixels[rgba + 2] };
-    if (colorDistance(pixel, bodyRgb) > 38) featureMask[index] = 1;
+    const pixelChroma = Math.max(pixel.r, pixel.g, pixel.b) - Math.min(pixel.r, pixel.g, pixel.b);
+    const inkMatches = lineChroma < 12 || (pixelChroma > 9 && hueDistance(pixel, line) < 48);
+    if (colorDistance(pixel, bodyRgb) > 30 && inkMatches) featureMask[index] = 1;
   }
-  const components = connectedComponents(featureMask, width, height)
+  const connectedFeatures = erode(dilate(featureMask, width, height, 1), width, height, 1);
+  const components = connectedComponents(connectedFeatures, width, height)
     .filter((component) => component.pixels.length >= 8 && component.pixels.length <= Math.max(24, opaqueCount * 0.16));
   const regions: SemanticRegionCandidate[] = components.map((component, index) => {
     let r = 0;
@@ -534,12 +669,14 @@ function analyzeSemanticCanvas(canvas: HTMLCanvasElement) {
       y: Number(((0.5 - (component.centerY + 0.5) / height) * 1.4).toFixed(4)),
       width: Number(((boxWidth / width) * 1.4).toFixed(4)),
       height: Number(((boxHeight / height) * 1.4).toFixed(4)),
+      rotation: componentRotation(component, width),
+      outline: componentOutline(component, width, height),
       color: toHex({ r: r / component.pixels.length, g: g / component.pixels.length, b: b / component.pixels.length }),
       pixelCount: component.pixels.length,
       density: Number((component.pixels.length / (boxWidth * boxHeight)).toFixed(3)),
     };
   });
-  return { bodyColor: toHex(bodyRgb), lineColor: toHex(line), regions };
+  return { bodyColor: toHex(surface), lineColor: toHex(line), regions };
 }
 
 export function inferSemanticRig(
@@ -576,66 +713,77 @@ export function inferSemanticRig(
   const faceCandidates = regions.filter((region) => {
     const y = relativeY(region);
     const area = region.width * region.height / Math.max(0.01, bodyWidth * bodyHeight);
-    return y > 0.36 && y < 0.84 && area > 0.0004 && area < 0.09 && region.width < bodyWidth * 0.34;
+    return y > 0.26 && y < 0.86 && area > 0.00035 && area < 0.09 && region.width < bodyWidth * 0.34;
   });
-  let eyePair: [SemanticRegionCandidate, SemanticRegionCandidate] | null = null;
-  let bestPairScore = -Infinity;
-  for (let leftIndex = 0; leftIndex < faceCandidates.length; leftIndex += 1) {
-    for (let rightIndex = leftIndex + 1; rightIndex < faceCandidates.length; rightIndex += 1) {
-      const pair = [faceCandidates[leftIndex], faceCandidates[rightIndex]].sort((a, b) => a.x - b.x) as [SemanticRegionCandidate, SemanticRegionCandidate];
-      const separation = pair[1].x - pair[0].x;
-      if (separation < bodyWidth * 0.09 || separation > bodyWidth * 0.68) continue;
-      const yError = Math.abs(pair[0].y - pair[1].y) / bodyHeight;
-      const symmetryError = Math.abs((pair[0].x + pair[1].x) / 2 - root.x) / bodyWidth;
-      const sizeError = Math.abs(pair[0].width * pair[0].height - pair[1].width * pair[1].height) / Math.max(0.001, pair[0].width * pair[0].height + pair[1].width * pair[1].height);
-      const score = (relativeY(pair[0]) + relativeY(pair[1])) - yError * 7 - symmetryError * 5 - sizeError * 1.8;
-      if (score > bestPairScore) {
-        bestPairScore = score;
-        eyePair = pair;
+  const findPair = (candidates: SemanticRegionCandidate[], targetY?: number) => {
+    let best: [SemanticRegionCandidate, SemanticRegionCandidate] | null = null;
+    let bestScore = -Infinity;
+    for (let leftIndex = 0; leftIndex < candidates.length; leftIndex += 1) {
+      for (let rightIndex = leftIndex + 1; rightIndex < candidates.length; rightIndex += 1) {
+        const pair = [candidates[leftIndex], candidates[rightIndex]].sort((a, b) => a.x - b.x) as [SemanticRegionCandidate, SemanticRegionCandidate];
+        const separation = pair[1].x - pair[0].x;
+        if (separation < bodyWidth * 0.09 || separation > bodyWidth * 0.68) continue;
+        const averageY = (pair[0].y + pair[1].y) / 2;
+        const yError = Math.abs(pair[0].y - pair[1].y) / bodyHeight;
+        const symmetryError = Math.abs((pair[0].x + pair[1].x) / 2 - root.x) / bodyWidth;
+        const sizeError = Math.abs(pair[0].width * pair[0].height - pair[1].width * pair[1].height)
+          / Math.max(0.001, pair[0].width * pair[0].height + pair[1].width * pair[1].height);
+        if (yError > 0.105 || symmetryError > 0.2 || sizeError > 0.68) continue;
+        const verticalScore = targetY === undefined
+          ? (relativeY(pair[0]) + relativeY(pair[1]))
+          : -Math.abs(averageY - targetY) / bodyHeight * 3;
+        const score = verticalScore - yError * 7 - symmetryError * 5 - sizeError * 1.8;
+        if (score > bestScore) {
+          best = pair;
+          bestScore = score;
+        }
       }
     }
-  }
+    return { pair: best, score: bestScore };
+  };
   const usedRegions = new Set<string>();
-  if (eyePair) {
-    eyePair.forEach((region, index) => {
+  const addPairedRegion = (kind: "eye" | "cheek", pair: [SemanticRegionCandidate, SemanticRegionCandidate], confidence: number) => {
+    pair.forEach((region, index) => {
       const side: SemanticSide = index === 0 ? "left" : "right";
-      const eyeWidth = clamp(region.width, bodyWidth * 0.045, bodyWidth * 0.2);
-      const eyeHeight = clamp(region.height, bodyHeight * 0.035, bodyHeight * 0.18);
-      const eyeId = `eye-${side}`;
+      const partWidth = clamp(region.width, bodyWidth * 0.035, bodyWidth * 0.2);
+      const partHeight = clamp(region.height, bodyHeight * 0.025, bodyHeight * 0.18);
       parts.push({
-        id: eyeId,
-        kind: "eye",
+        id: `${kind}-${side}`,
+        kind,
         side,
         parentId: "body",
         center: { x: region.x, y: region.y, z: 0 },
-        size: { x: eyeWidth, y: eyeHeight, z: Math.min(eyeWidth, eyeHeight) * 0.55 },
-        rotation: 0,
+        size: { x: partWidth, y: partHeight, z: Math.min(partWidth, partHeight) * 0.18 },
+        rotation: region.rotation ?? 0,
         color: region.color,
-        confidence: clamp(0.72 + bestPairScore * 0.08, 0.68, 0.96),
+        confidence,
         source: "image-region",
-      });
-      parts.push({
-        id: `pupil-${side}`,
-        kind: "pupil",
-        side,
-        parentId: eyeId,
-        center: { x: region.x, y: region.y, z: 0 },
-        size: { x: eyeWidth * 0.25, y: eyeHeight * 0.25, z: Math.min(eyeWidth, eyeHeight) * 0.14 },
-        rotation: 0,
-        color: lineColor,
-        confidence: 0.66,
-        source: "structural-inference",
+        outline: region.outline,
       });
       usedRegions.add(region.id);
     });
-  }
+  };
+
+  const eyeResult = findPair(faceCandidates);
+  const eyePair = eyeResult.pair;
+  if (eyePair) addPairedRegion("eye", eyePair, clamp(0.72 + eyeResult.score * 0.08, 0.68, 0.96));
 
   const eyeY = eyePair ? (eyePair[0].y + eyePair[1].y) / 2 : contourBounds.minY + bodyHeight * 0.64;
+  const cheekResult = findPair(faceCandidates.filter((region) => !usedRegions.has(region.id)
+    && region.y < eyeY - bodyHeight * 0.055
+    && region.y > contourBounds.minY + bodyHeight * 0.25), eyeY - bodyHeight * 0.16);
+  if (cheekResult.pair) addPairedRegion("cheek", cheekResult.pair, clamp(0.68 + cheekResult.score * 0.04, 0.6, 0.9));
+
   const mouth = regions.filter((region) => !usedRegions.has(region.id)
     && region.y < eyeY - bodyHeight * 0.035
     && region.y > contourBounds.minY + bodyHeight * 0.18
     && Math.abs(region.x - root.x) < bodyWidth * 0.25)
-    .sort((a, b) => (b.width / Math.max(0.01, b.height)) - (a.width / Math.max(0.01, a.height)))[0];
+    .sort((a, b) => {
+      const centerScore = (region: SemanticRegionCandidate) => Math.abs(region.x - root.x) / bodyWidth
+        + Math.abs(region.y - (eyeY - bodyHeight * 0.19)) / bodyHeight
+        - region.width / Math.max(0.01, region.height) * 0.04;
+      return centerScore(a) - centerScore(b);
+    })[0];
   if (mouth) {
     parts.push({
       id: "mouth",
@@ -643,26 +791,32 @@ export function inferSemanticRig(
       side: "center",
       parentId: "body",
       center: { x: mouth.x, y: mouth.y, z: 0 },
-      size: { x: clamp(mouth.width, bodyWidth * 0.06, bodyWidth * 0.3), y: clamp(mouth.height, bodyHeight * 0.025, bodyHeight * 0.12), z: 0.025 },
-      rotation: 0,
+      size: { x: clamp(mouth.width, bodyWidth * 0.05, bodyWidth * 0.3), y: clamp(mouth.height, bodyHeight * 0.02, bodyHeight * 0.12), z: 0.018 },
+      rotation: mouth.rotation ?? 0,
       color: mouth.color,
-      confidence: 0.78,
+      confidence: 0.82,
       source: "image-region",
+      outline: mouth.outline,
     });
     usedRegions.add(mouth.id);
   }
-  regions.filter((region) => !usedRegions.has(region.id)).slice(0, 4).forEach((region, index) => {
+  regions.filter((region) => !usedRegions.has(region.id)
+    && region.x > contourBounds.minX + bodyWidth * 0.09
+    && region.x < contourBounds.maxX - bodyWidth * 0.09
+    && region.y > contourBounds.minY + bodyHeight * 0.09
+    && region.y < contourBounds.maxY - bodyHeight * 0.09).slice(0, 6).forEach((region, index) => {
     parts.push({
       id: `marking-${index + 1}`,
       kind: "marking",
       side: region.x < root.x - 0.02 ? "left" : region.x > root.x + 0.02 ? "right" : "center",
       parentId: "body",
       center: { x: region.x, y: region.y, z: 0 },
-      size: { x: clamp(region.width, 0.025, bodyWidth * 0.18), y: clamp(region.height, 0.02, bodyHeight * 0.14), z: 0.018 },
-      rotation: 0,
+      size: { x: clamp(region.width, 0.018, bodyWidth * 0.2), y: clamp(region.height, 0.014, bodyHeight * 0.16), z: 0.015 },
+      rotation: region.rotation ?? 0,
       color: region.color,
-      confidence: 0.58,
+      confidence: 0.62,
       source: "image-region",
+      outline: region.outline,
     });
   });
 
@@ -752,7 +906,7 @@ export function inferSemanticRig(
     y: part.anchor?.y ?? part.center.y,
   }));
   return {
-    version: "wallalive-semantic-rig-v1",
+    version: "wallalive-semantic-rig-v2",
     bodyColor,
     lineColor,
     parts,
@@ -783,12 +937,18 @@ function extractDrawingFromSource(sourceImage: CanvasImageSource, sourceWidth: n
   const backgroundChroma = Math.max(background.r, background.g, background.b) - Math.min(background.r, background.g, background.b);
   const backgroundLightness = (Math.max(background.r, background.g, background.b) + Math.min(background.r, background.g, background.b)) / 2;
   const rawInk = new Uint8Array(width * height);
+  const chromaticInk = new Uint8Array(width * height);
   const scanInsetX = Math.round(width * 0.08);
   const scanInsetTop = Math.round(height * 0.09);
   const scanInsetBottom = Math.round(height * 0.16);
+  const focusX = target.x * width;
+  const focusY = target.y * height;
+  const focusRadiusX = width * 0.27;
+  const focusRadiusY = height * 0.33;
 
   for (let y = scanInsetTop; y < height - scanInsetBottom; y += 1) {
     for (let x = scanInsetX; x < width - scanInsetX; x += 1) {
+      if (((x - focusX) / focusRadiusX) ** 2 + ((y - focusY) / focusRadiusY) ** 2 > 1) continue;
       const pixelIndex = (y * width + x) * 4;
       const pixel = { r: frame.data[pixelIndex], g: frame.data[pixelIndex + 1], b: frame.data[pixelIndex + 2] };
       const maxChannel = Math.max(pixel.r, pixel.g, pixel.b);
@@ -808,25 +968,38 @@ function extractDrawingFromSource(sourceImage: CanvasImageSource, sourceWidth: n
       const vividInk = chroma >= Math.max(58, backgroundChroma + 28);
       const darkInk = lightness <= Math.min(112, backgroundLightness - 30);
       const contrastedStroke = localContrast >= 20 && inkScore(pixel, background) > 43;
+      const coloredLine = chroma >= Math.max(16, backgroundChroma + 7)
+        && colorDistance(pixel, background) > 19
+        && lightness < 248;
+      if (coloredLine) chromaticInk[y * width + x] = 1;
       if (inkScore(pixel, background) > 54 && (vividInk || darkInk || contrastedStroke)) rawInk[y * width + x] = 1;
     }
   }
 
+  const colorCloseRadius = clamp(Math.round(Math.min(width, height) * 0.014), 5, 9);
+  const colorConnectedInk = erode(dilate(chromaticInk, width, height, colorCloseRadius), width, height, Math.max(2, colorCloseRadius - 3));
+  const colorSolidComponents = connectedComponents(recoverTargetSilhouette(colorConnectedInk, width, height, target), width, height);
+  const colorAnchor = chooseDrawing(colorSolidComponents, frame.data, width, height, target);
   const connectedInk = erode(dilate(rawInk, width, height, 2), width, height, 1);
-  const components = connectedComponents(connectedInk, width, height);
-  const anchor = chooseDrawing(components, frame.data, width, height, target);
+  const fallbackComponents = connectedComponents(connectedInk, width, height);
+  const colorInkCount = colorAnchor?.pixels.reduce((count, index) => count + chromaticInk[index], 0) ?? 0;
+  const useColorInk = Boolean(colorAnchor && colorInkCount >= Math.max(24, colorAnchor.pixels.length * 0.002));
+  const components = useColorInk ? colorSolidComponents : fallbackComponents;
+  const anchor = useColorInk ? colorAnchor : chooseDrawing(fallbackComponents, frame.data, width, height, target);
   if (!anchor) throw new Error("I couldn't find one clear character outline. Tap the drawing, move closer, and capture again.");
 
   const span = Math.max(anchor.maxX - anchor.minX, anchor.maxY - anchor.minY);
   const anchorArea = Math.max(1, (anchor.maxX - anchor.minX + 1) * (anchor.maxY - anchor.minY + 1));
-  const selected = components.filter((component) => {
+  const anchorColor = componentColor(anchor, frame.data);
+  const selected = useColorInk ? [anchor] : components.filter((component) => {
     if (component === anchor) return true;
     const componentArea = (component.maxX - component.minX + 1) * (component.maxY - component.minY + 1);
-    const withinCharacterBounds = component.centerX >= anchor.minX - span * 0.06
-      && component.centerX <= anchor.maxX + span * 0.06
-      && component.centerY >= anchor.minY - span * 0.06
-      && component.centerY <= anchor.maxY + span * 0.06;
-    return withinCharacterBounds && componentArea <= anchorArea * 0.24 && component.pixels.length >= 8;
+    const withinCharacterBounds = component.centerX >= anchor.minX - span * 0.035
+      && component.centerX <= anchor.maxX + span * 0.035
+      && component.centerY >= anchor.minY - span * 0.035
+      && component.centerY <= anchor.maxY + span * 0.035;
+    const colorMatches = !useColorInk || hueDistance(componentColor(component, frame.data), anchorColor) < 42;
+    return withinCharacterBounds && colorMatches && componentArea <= anchorArea * 0.22 && component.pixels.length >= 8;
   });
   let minX = Math.min(...selected.map((component) => component.minX));
   let minY = Math.min(...selected.map((component) => component.minY));
@@ -846,7 +1019,8 @@ function extractDrawingFromSource(sourceImage: CanvasImageSource, sourceWidth: n
       if (selectedIndices.has((y + minY) * width + x + minX)) selectedMask[y * cropWidth + x] = 1;
     }
   }
-  const sealed = erode(dilate(selectedMask, cropWidth, cropHeight, 3), cropWidth, cropHeight, 1);
+  const closureRadius = clamp(Math.round(Math.max(cropWidth, cropHeight) * 0.018), 3, 7);
+  const sealed = erode(dilate(selectedMask, cropWidth, cropHeight, closureRadius), cropWidth, cropHeight, Math.max(1, closureRadius - 2));
   const silhouette = recoverSilhouette(sealed, cropWidth, cropHeight);
   const silhouettePixels = silhouette.reduce((sum, value) => sum + value, 0);
   if (silhouettePixels < cropWidth * cropHeight * 0.03) throw new Error("The outline is too open to become a solid. Move closer or use a bolder drawing.");
@@ -862,6 +1036,7 @@ function extractDrawingFromSource(sourceImage: CanvasImageSource, sourceWidth: n
   let colorR = 0;
   let colorG = 0;
   let colorB = 0;
+  let colorWeight = 0;
   for (let index = 0; index < silhouette.length; index += 1) {
     if (!silhouette[index]) continue;
     const rgba = index * 4;
@@ -869,11 +1044,18 @@ function extractDrawingFromSource(sourceImage: CanvasImageSource, sourceWidth: n
     transparent.data[rgba + 1] = cropped.data[rgba + 1];
     transparent.data[rgba + 2] = cropped.data[rgba + 2];
     transparent.data[rgba + 3] = 255;
-    if (selectedMask[index]) {
+    const localX = index % cropWidth;
+    const localY = Math.floor(index / cropWidth);
+    const sourceIndex = (localY + minY) * width + localX + minX;
+    if (useColorInk ? chromaticInk[sourceIndex] : rawInk[sourceIndex]) {
       inkPixels += 1;
-      colorR += cropped.data[rgba];
-      colorG += cropped.data[rgba + 1];
-      colorB += cropped.data[rgba + 2];
+      const chroma = Math.max(cropped.data[rgba], cropped.data[rgba + 1], cropped.data[rgba + 2])
+        - Math.min(cropped.data[rgba], cropped.data[rgba + 1], cropped.data[rgba + 2]);
+      const weight = useColorInk ? Math.max(1, (chroma - backgroundChroma) ** 1.55) : 1;
+      colorR += cropped.data[rgba] * weight;
+      colorG += cropped.data[rgba + 1] * weight;
+      colorB += cropped.data[rgba + 2] * weight;
+      colorWeight += weight;
     }
   }
   cutoutContext.putImageData(transparent, 0, 0);
@@ -890,7 +1072,7 @@ function extractDrawingFromSource(sourceImage: CanvasImageSource, sourceWidth: n
   outputContext.imageSmoothingQuality = "high";
   outputContext.drawImage(cutout, (512 - drawWidth) / 2, (512 - drawHeight) / 2, drawWidth, drawHeight);
 
-  const dominant = inkPixels ? { r: colorR / inkPixels, g: colorG / inkPixels, b: colorB / inkPixels } : background;
+  const dominant = colorWeight ? boostInkColor({ r: colorR / colorWeight, g: colorG / colorWeight, b: colorB / colorWeight }) : background;
   const coverage = inkPixels / (width * height);
   const contour = contourFromCanvas(output);
   if (contour.length < 6) {
@@ -899,7 +1081,7 @@ function extractDrawingFromSource(sourceImage: CanvasImageSource, sourceWidth: n
   }
   const skeleton = skeletonFromTexture(output);
   if (!skeleton.length) throw new Error("The drawing body could not be skeletonized. Use one closed, bold character outline.");
-  const semantic = analyzeSemanticCanvas(output);
+  const semantic = analyzeSemanticCanvas(output, dominant);
   const rig = inferSemanticRig(skeleton, contour, semantic.regions, semantic.bodyColor, semantic.lineColor);
 
   return {

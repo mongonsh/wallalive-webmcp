@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
-import { extractMedialSkeleton, inferSemanticRig, scoreDrawingCandidate } from "../app/lib/drawing.ts";
+import { extractMedialSkeleton, inferSemanticRig, recoverTargetSilhouette, scoreDrawingCandidate } from "../app/lib/drawing.ts";
 
 async function render() {
   const workerUrl = new URL("../dist/server/index.js", import.meta.url);
@@ -79,8 +79,11 @@ test("implements local drawing extraction and real WebXR hit testing", async () 
   assert.match(drawing, /Math\.SQRT2/);
   assert.doesNotMatch(drawing, /fetch\(|XMLHttpRequest|WebSocket/);
   assert.match(stage, /MarchingCubes/);
-  assert.match(stage, /medial-skeleton-sphere-union/);
-  assert.match(stage, /point\.radius - Math\.hypot/);
+  assert.match(stage, /silhouette-distance-lens/);
+  assert.match(stage, /pointInsideContour/);
+  assert.match(stage, /distanceToContour/);
+  assert.match(stage, /DecalGeometry/);
+  assert.match(stage, /curved-artwork-skin/);
   assert.match(stage, /volume\.field\.fill/);
   assert.match(stage, /wallalive-semantic-character/);
   assert.match(stage, /SphereGeometry/);
@@ -88,7 +91,7 @@ test("implements local drawing extraction and real WebXR hit testing", async () 
   assert.match(stage, /TubeGeometry/);
   assert.match(stage, /texturePlane: false/);
   assert.match(stage, /viewableDegrees: 360/);
-  assert.doesNotMatch(stage, /PlaneGeometry|drawing-curved-over-inflated-front|TextureLoader/);
+  assert.doesNotMatch(stage, /PlaneGeometry|drawing-curved-over-inflated-front/);
   assert.match(stage, /isSessionSupported\("immersive-ar"\)/);
   assert.match(stage, /requestSession\("immersive-ar"/);
   assert.match(stage, /requiredFeatures: \["hit-test"\]/);
@@ -153,6 +156,37 @@ test("extracts a radius-bearing medial skeleton from a filled character body", (
   assert.ok(skeleton.every((point) => mask[point.y * size + point.x] === 1));
 });
 
+test("recovers one upright target silhouette from fragmented colored line art", () => {
+  const width = 121;
+  const height = 121;
+  const mask = new Uint8Array(width * height);
+  const center = { x: 60, y: 61 };
+  for (let angleIndex = 0; angleIndex < 360; angleIndex += 1) {
+    if ((angleIndex > 82 && angleIndex < 96) || (angleIndex > 248 && angleIndex < 264)) continue;
+    const angle = angleIndex / 180 * Math.PI;
+    const radiusX = 35 + (angleIndex > 55 && angleIndex < 78 ? 7 : 0);
+    const radiusY = 43;
+    const x = Math.round(center.x + Math.cos(angle) * radiusX);
+    const y = Math.round(center.y + Math.sin(angle) * radiusY);
+    mask[y * width + x] = 1;
+  }
+  for (const offset of [-13, 13]) {
+    for (let angleIndex = 0; angleIndex < 360; angleIndex += 12) {
+      const angle = angleIndex / 180 * Math.PI;
+      const x = Math.round(center.x + offset + Math.cos(angle) * 5);
+      const y = Math.round(center.y - 10 + Math.sin(angle) * 7);
+      mask[y * width + x] = 1;
+    }
+  }
+  const recovered = recoverTargetSilhouette(mask, width, height, { x: center.x / width, y: center.y / height });
+  assert.equal(recovered[center.y * width + center.x], 1);
+  const pixels = [...recovered.keys()].filter((index) => recovered[index]);
+  const xs = pixels.map((index) => index % width);
+  const ys = pixels.map((index) => Math.floor(index / width));
+  const aspect = (Math.max(...xs) - Math.min(...xs)) / (Math.max(...ys) - Math.min(...ys));
+  assert.ok(aspect > 0.72 && aspect < 1.08, `expected an upright body, got aspect ${aspect}`);
+});
+
 test("builds a semantic joint rig from facial regions and silhouette branches", () => {
   const skeleton = [
     { x: 0, y: 0, radius: 0.3 },
@@ -170,12 +204,15 @@ test("builds a semantic joint rig from facial regions and silhouette branches", 
   const regions = [
     { id: "left-eye", x: -0.13, y: 0.17, width: 0.1, height: 0.12, color: "#9c3450", pixelCount: 80, density: 0.42 },
     { id: "right-eye", x: 0.13, y: 0.17, width: 0.1, height: 0.12, color: "#9c3450", pixelCount: 82, density: 0.43 },
+    { id: "left-cheek", x: -0.18, y: -0.01, width: 0.09, height: 0.06, color: "#9c3450", pixelCount: 48, density: 0.38 },
+    { id: "right-cheek", x: 0.18, y: -0.01, width: 0.09, height: 0.06, color: "#9c3450", pixelCount: 46, density: 0.36 },
     { id: "mouth-line", x: 0, y: -0.08, width: 0.18, height: 0.05, color: "#9c3450", pixelCount: 60, density: 0.35 },
   ];
   const rig = inferSemanticRig(skeleton, contour, regions, "#f4eee2", "#9c3450");
-  for (const kind of ["body", "eye", "pupil", "mouth", "ear", "arm", "hand", "leg", "foot"]) {
+  for (const kind of ["body", "eye", "cheek", "mouth", "ear", "arm", "hand", "leg", "foot"]) {
     assert.ok(rig.detectedKinds.includes(kind), `expected semantic ${kind}`);
   }
+  assert.equal(rig.detectedKinds.includes("pupil"), false, "must not fabricate pupils absent from the drawing");
   assert.ok(rig.parts.length >= 15);
   assert.ok(rig.joints.some((joint) => joint.childId === "arm-right"));
   assert.ok(rig.parts.some((part) => part.kind === "eye" && part.source === "image-region"));

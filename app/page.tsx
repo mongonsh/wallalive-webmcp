@@ -298,10 +298,10 @@ export default function Home() {
     drawingApproved: Boolean(captureRef.current),
     drawingAnalysis: captureRef.current?.analysis ?? null,
     reconstruction: captureRef.current ? {
-      segmentation: "target-aware line-art scoring with dense-clutter and border rejection",
-      semanticParser: "hierarchical image regions plus silhouette-branch anatomy inference",
-      method: "articulated volumetric parts over a closed medial-skeleton body",
-      field: "semantic skeleton-driven implicit surface",
+      segmentation: "target-aware color-isolated ink with grayscale clutter rejection",
+      semanticParser: "paired eye and cheek regions plus silhouette-branch anatomy inference",
+      method: "articulated ink features over a closed silhouette-preserving 3D body",
+      field: "signed 2D contour distance combined with symmetric front/back depth",
       polygonizer: "Marching Cubes",
       volumeResolution: 64,
       topology: "closed front, sides, and generated back",
@@ -596,7 +596,7 @@ export default function Home() {
             {cameraState !== "active" ? <div className="demo-room"><span className="frame-a" /><span className="frame-b" /><span className="shelf" /><span className="plant" /><span className="baseboard" /></div> : null}
             {capture && cameraState !== "active" ? <img className="captured-room" src={capture.previewUrl} alt="Approved drawing preview" /> : null}
             {step === "camera" ? <><div className="capture-guide"><span /><b>TAP CHARACTER · THEN CAPTURE</b></div><div className="capture-target" style={{ left: `${captureTarget.x * 100}%`, top: `${captureTarget.y * 100}%` }}><i /></div></> : null}
-            <ARStage ref={stageRef} skeleton={capture?.skeleton ?? null} rig={capture?.rig ?? null} action={character.action} accent={character.accent} inflation={character.inflation} visible={character.created} onCapability={handleARCapability} onPlaced={handleARPlaced} />
+            <ARStage ref={stageRef} contour={capture?.contour ?? null} skeleton={capture?.skeleton ?? null} textureUrl={capture?.textureUrl ?? null} rig={capture?.rig ?? null} action={character.action} accent={character.accent} inflation={character.inflation} visible={character.created} onCapability={handleARCapability} onPlaced={handleARPlaced} />
             <div className="camera-hud"><span><i /> {cameraState === "active" ? "LIVE CAMERA · LOCAL" : character.created ? "SEMANTIC 3D RIG LIVE" : "SAFE DEMO ROOM"}</span><strong>{immersiveAR ? "WEBXR READY" : "CAMERA AR FALLBACK"}</strong></div>
             {character.created ? <div className="story-caption"><span>{character.storyTitle || "LIVE MOMENT"}</span><p>{storyCaption}</p></div> : null}
             {cameraState === "denied" || cameraState === "unavailable" ? <div className="camera-message"><b>CAMERA OPTIONAL</b><p>The demo doodle still proves the complete WebMCP and 3D workflow.</p></div> : null}

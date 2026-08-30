@@ -2,8 +2,9 @@
 
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import * as THREE from "three";
+import { DecalGeometry } from "three/addons/geometries/DecalGeometry.js";
 import { MarchingCubes } from "three/addons/objects/MarchingCubes.js";
-import type { CharacterRig, SemanticPart, SkeletonPoint } from "../lib/drawing";
+import type { CharacterRig, ContourPoint, SemanticPart, SkeletonPoint } from "../lib/drawing";
 
 export type CharacterAction = "idle" | "wave" | "dance" | "hop" | "walk" | "hide" | "spin";
 
@@ -14,7 +15,9 @@ export type ARStageHandle = {
 };
 
 type ARStageProps = {
+  contour: ContourPoint[] | null;
   skeleton: SkeletonPoint[] | null;
+  textureUrl: string | null;
   rig: CharacterRig | null;
   action: CharacterAction;
   accent: string;
@@ -35,6 +38,32 @@ type SceneHandles = {
 
 const VOLUME_RESOLUTION = 64;
 
+function pointInsideContour(x: number, y: number, contour: ContourPoint[]) {
+  let inside = false;
+  for (let current = 0, previous = contour.length - 1; current < contour.length; previous = current, current += 1) {
+    const a = contour[current];
+    const b = contour[previous];
+    if ((a.y > y) !== (b.y > y) && x < ((b.x - a.x) * (y - a.y)) / (b.y - a.y) + a.x) inside = !inside;
+  }
+  return inside;
+}
+
+function distanceToSegment(x: number, y: number, start: ContourPoint, end: ContourPoint) {
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  const lengthSquared = dx * dx + dy * dy;
+  const amount = lengthSquared ? Math.min(1, Math.max(0, ((x - start.x) * dx + (y - start.y) * dy) / lengthSquared)) : 0;
+  return Math.hypot(x - (start.x + dx * amount), y - (start.y + dy * amount));
+}
+
+function distanceToContour(x: number, y: number, contour: ContourPoint[]) {
+  let distance = Infinity;
+  for (let index = 0; index < contour.length; index += 1) {
+    distance = Math.min(distance, distanceToSegment(x, y, contour[index], contour[(index + 1) % contour.length]));
+  }
+  return distance;
+}
+
 function meshMaterial(color: string, roughness = 0.62) {
   return new THREE.MeshPhysicalMaterial({
     color,
@@ -45,7 +74,17 @@ function meshMaterial(color: string, roughness = 0.62) {
   });
 }
 
-function buildCharacter(skeleton: SkeletonPoint[], rig: CharacterRig, accent: string, inflation: number) {
+function inkMaterial(color: string) {
+  return new THREE.MeshStandardMaterial({
+    color,
+    roughness: 0.48,
+    metalness: 0,
+    emissive: new THREE.Color(color),
+    emissiveIntensity: 0.16,
+  });
+}
+
+export function buildCharacter(contour: ContourPoint[], skeleton: SkeletonPoint[], rig: CharacterRig, textureUrl: string | null, accent: string, inflation: number) {
   const character = new THREE.Group();
   character.name = "wallalive-semantic-character";
 
@@ -58,74 +97,90 @@ function buildCharacter(skeleton: SkeletonPoint[], rig: CharacterRig, accent: st
     side: THREE.DoubleSide,
   });
   const volume = new MarchingCubes(VOLUME_RESOLUTION, volumeMaterial, false, false, 200_000);
-  volume.name = "medial-skeleton-sphere-union";
+  volume.name = "silhouette-distance-lens";
   volume.isolation = 0;
-  volume.field.fill(-0.12);
+  volume.field.fill(-1);
   const half = VOLUME_RESOLUTION / 2;
   const cell = 1 / half;
   const bodyPart = rig.parts.find((part) => part.kind === "body");
-  const appendages = rig.parts.filter((part) => part.kind === "ear" || part.kind === "arm" || part.kind === "leg");
-  const bodySkeleton = skeleton.filter((point) => !appendages.some((part) => {
-    const reach = Math.max(part.size.x, part.size.y) * (part.kind === "ear" ? 0.58 : 0.42);
-    const awayFromCore = bodyPart ? Math.hypot(point.x - bodyPart.center.x, point.y - bodyPart.center.y) > Math.min(bodyPart.size.x, bodyPart.size.y) * 0.16 : true;
-    return awayFromCore && Math.hypot(point.x - part.center.x, point.y - part.center.y) < reach;
-  }));
-  const volumeSkeleton = bodySkeleton.length >= 3 ? bodySkeleton : skeleton;
-  const inflatedSkeleton = volumeSkeleton.map((point) => ({ ...point, radius: Math.min(0.5, Math.max(0.032, point.radius * inflation)) }));
-  for (const point of inflatedSkeleton) {
-    const reach = point.radius + cell * 1.5;
-    const minX = Math.max(1, Math.floor((point.x - reach) * half + half));
-    const maxX = Math.min(VOLUME_RESOLUTION - 2, Math.ceil((point.x + reach) * half + half));
-    const minY = Math.max(1, Math.floor((point.y - reach) * half + half));
-    const maxY = Math.min(VOLUME_RESOLUTION - 2, Math.ceil((point.y + reach) * half + half));
-    const minZ = Math.max(1, Math.floor(-reach * half + half));
-    const maxZ = Math.min(VOLUME_RESOLUTION - 2, Math.ceil(reach * half + half));
-    for (let z = minZ; z <= maxZ; z += 1) {
-      const fieldZ = (z - half) / half;
-      for (let y = minY; y <= maxY; y += 1) {
-        const fieldY = (y - half) / half;
-        for (let x = minX; x <= maxX; x += 1) {
-          const fieldX = (x - half) / half;
-          const value = point.radius - Math.hypot(fieldX - point.x, fieldY - point.y, fieldZ);
-          if (value > volume.getCell(x, y, z)) volume.setCell(x, y, z, value);
-        }
+  const insideField = new Uint8Array(VOLUME_RESOLUTION * VOLUME_RESOLUTION);
+  const edgeDistanceField = new Float32Array(VOLUME_RESOLUTION * VOLUME_RESOLUTION);
+  let maximumInteriorDistance = cell;
+  for (let y = 1; y < VOLUME_RESOLUTION - 1; y += 1) {
+    const fieldY = (y - half) / half;
+    for (let x = 1; x < VOLUME_RESOLUTION - 1; x += 1) {
+      const fieldX = (x - half) / half;
+      const index = y * VOLUME_RESOLUTION + x;
+      const inside = pointInsideContour(fieldX, fieldY, contour);
+      const edgeDistance = distanceToContour(fieldX, fieldY, contour);
+      insideField[index] = inside ? 1 : 0;
+      edgeDistanceField[index] = edgeDistance;
+      if (inside) maximumInteriorDistance = Math.max(maximumInteriorDistance, edgeDistance);
+    }
+  }
+  const bodyHalfDepth = Math.min(0.48, Math.max(0.12, (bodyPart?.size.z ?? 0.34) * 0.58 * inflation));
+  const depthAt = (x: number, y: number) => {
+    if (!pointInsideContour(x, y, contour)) return 0;
+    const normalizedDistance = Math.min(1, distanceToContour(x, y, contour) / maximumInteriorDistance);
+    return Math.max(cell * 0.7, bodyHalfDepth * Math.sqrt(normalizedDistance));
+  };
+  for (let z = 1; z < VOLUME_RESOLUTION - 1; z += 1) {
+    const fieldZ = (z - half) / half;
+    for (let y = 1; y < VOLUME_RESOLUTION - 1; y += 1) {
+      for (let x = 1; x < VOLUME_RESOLUTION - 1; x += 1) {
+        const planeIndex = y * VOLUME_RESOLUTION + x;
+        const edgeDistance = edgeDistanceField[planeIndex];
+        const signedEdge = insideField[planeIndex] ? edgeDistance : -edgeDistance;
+        const localDepth = insideField[planeIndex]
+          ? Math.max(cell * 0.7, bodyHalfDepth * Math.sqrt(Math.min(1, edgeDistance / maximumInteriorDistance)))
+          : 0;
+        volume.setCell(x, y, z, Math.min(signedEdge, localDepth - Math.abs(fieldZ)));
       }
     }
   }
-  volume.blur(0.12);
+  volume.blur(0.08);
   volume.update();
   volume.castShadow = true;
   volume.receiveShadow = true;
   volume.userData.reconstruction = {
-    method: "semantic medial-skeleton sphere union",
+    method: "silhouette-preserving signed-distance lens",
     polygonizer: "Marching Cubes",
     resolution: VOLUME_RESOLUTION,
     topology: "closed",
-    skeletonPoints: volumeSkeleton.length,
+    contourPoints: contour.length,
+    skeletonPoints: skeleton.length,
     semanticRig: rig.version,
   };
   character.add(volume);
 
-  const frontDepthAt = (x: number, y: number) => {
-    let depth = 0;
-    for (const point of inflatedSkeleton) {
-      const distanceSquared = (x - point.x) ** 2 + (y - point.y) ** 2;
-      if (distanceSquared < point.radius ** 2) depth = Math.max(depth, Math.sqrt(point.radius ** 2 - distanceSquared));
-    }
-    return depth;
-  };
-  const addEllipsoid = (part: SemanticPart, materialColor = part.color) => {
-    const group = new THREE.Group();
-    group.name = `rig-${part.id}`;
-    group.position.set(part.center.x, part.center.y, part.center.z);
-    const mesh = new THREE.Mesh(new THREE.SphereGeometry(0.5, 28, 18), meshMaterial(materialColor));
-    mesh.scale.set(part.size.x, part.size.y, part.size.z);
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
-    group.add(mesh);
-    character.add(group);
-    return group;
-  };
+  if (textureUrl) {
+    volume.updateMatrixWorld(true);
+    const artworkTexture = new THREE.TextureLoader().load(textureUrl);
+    artworkTexture.colorSpace = THREE.SRGBColorSpace;
+    artworkTexture.anisotropy = 8;
+    const decal = new THREE.Mesh(
+      new DecalGeometry(
+        volume,
+        new THREE.Vector3(0, 0, bodyHalfDepth * 0.82),
+        new THREE.Euler(0, 0, 0),
+        new THREE.Vector3(1.4, 1.4, bodyHalfDepth * 2.6),
+      ),
+      new THREE.MeshStandardMaterial({
+        map: artworkTexture,
+        transparent: true,
+        alphaTest: 0.04,
+        roughness: 0.7,
+        metalness: 0,
+        polygonOffset: true,
+        polygonOffsetFactor: -4,
+        polygonOffsetUnits: -4,
+      }),
+    );
+    decal.name = "curved-artwork-skin";
+    character.add(decal);
+  }
+
+  const frontDepthAt = depthAt;
 
   rig.parts.filter((part) => part.kind === "ear").forEach((part) => {
     const anchor = part.anchor ?? part.center;
@@ -169,38 +224,52 @@ function buildCharacter(skeleton: SkeletonPoint[], rig: CharacterRig, accent: st
     character.add(pivot);
   });
 
-  rig.parts.filter((part) => part.kind === "eye").forEach((part) => {
-    const group = addEllipsoid({ ...part, center: { ...part.center, z: frontDepthAt(part.center.x, part.center.y) + part.size.z * 0.24 } }, "#fffaf0");
-    const pupil = rig.parts.find((candidate) => candidate.parentId === part.id && candidate.kind === "pupil");
-    if (pupil) {
-      const mesh = new THREE.Mesh(new THREE.SphereGeometry(0.5, 22, 14), meshMaterial(pupil.color, 0.48));
-      mesh.name = `rig-${pupil.id}`;
-      mesh.position.z = part.size.z * 0.56;
-      mesh.scale.set(pupil.size.x, pupil.size.y, pupil.size.z);
-      group.add(mesh);
-    }
-  });
-
-  rig.parts.filter((part) => part.kind === "mouth").forEach((part) => {
-    const curve = new THREE.QuadraticBezierCurve3(
-      new THREE.Vector3(-part.size.x * 0.5, part.size.y * 0.28, 0),
-      new THREE.Vector3(0, -part.size.y * 0.62, part.size.z * 0.2),
-      new THREE.Vector3(part.size.x * 0.5, part.size.y * 0.28, 0),
-    );
-    const mesh = new THREE.Mesh(new THREE.TubeGeometry(curve, 24, Math.max(0.008, part.size.y * 0.16), 8, false), meshMaterial(part.color, 0.52));
-    mesh.name = `rig-${part.id}`;
-    mesh.position.set(part.center.x, part.center.y, frontDepthAt(part.center.x, part.center.y) + 0.02);
+  const addInkFeature = (part: SemanticPart) => {
+    const group = new THREE.Group();
+    group.name = `rig-${part.id}`;
+    group.position.set(part.center.x, part.center.y, 0);
+    const outline = part.outline?.length && part.outline.length >= 4
+      ? part.outline
+      : Array.from({ length: 32 }, (_, index) => {
+        const angle = index / 32 * Math.PI * 2;
+        const cos = Math.cos(part.rotation);
+        const sin = Math.sin(part.rotation);
+        const localX = Math.cos(angle) * part.size.x * 0.5;
+        const localY = Math.sin(angle) * part.size.y * 0.5;
+        return { x: part.center.x + localX * cos - localY * sin, y: part.center.y + localX * sin + localY * cos };
+      });
+    const points = outline.map((point) => new THREE.Vector3(
+      point.x - part.center.x,
+      point.y - part.center.y,
+      frontDepthAt(point.x, point.y) + 0.012,
+    ));
+    const curve = new THREE.CatmullRomCurve3(points, true, "centripetal", 0.3);
+    const radius = Math.min(0.014, Math.max(0.0055, Math.min(part.size.x, part.size.y) * 0.075));
+    const mesh = new THREE.Mesh(new THREE.TubeGeometry(curve, Math.max(24, points.length * 2), radius, 8, true), inkMaterial(rig.lineColor));
     mesh.castShadow = true;
-    character.add(mesh);
-  });
-
-  rig.parts.filter((part) => part.kind === "marking").forEach((part) => {
-    const raised = { ...part, center: { ...part.center, z: frontDepthAt(part.center.x, part.center.y) + part.size.z * 0.6 } };
-    addEllipsoid(raised);
-  });
+    group.add(mesh);
+    character.add(group);
+  };
+  if (!textureUrl) {
+    addInkFeature({
+      id: "body-ink-outline",
+      kind: "marking",
+      side: "center",
+      parentId: "body",
+      center: { x: 0, y: 0, z: 0 },
+      size: bodyPart?.size ?? { x: 1, y: 1, z: 0.3 },
+      rotation: 0,
+      color: rig.lineColor,
+      confidence: 1,
+      source: "image-region",
+      outline: contour,
+    });
+    rig.parts.filter((part) => part.kind === "eye" || part.kind === "cheek" || part.kind === "mouth" || part.kind === "marking")
+      .forEach(addInkFeature);
+  }
 
   character.userData.reconstruction = {
-    method: "hierarchical semantic regions plus articulated volumetric parts",
+    method: "color-isolated semantic ink over a silhouette-preserving distance-field body",
     texturePlane: false,
     viewableDegrees: 360,
     bodyTopology: "closed",
@@ -213,7 +282,7 @@ function buildCharacter(skeleton: SkeletonPoint[], rig: CharacterRig, accent: st
 }
 
 export const ARStage = forwardRef<ARStageHandle, ARStageProps>(function ARStage(
-  { skeleton, rig, action, accent, inflation, visible, onCapability, onPlaced },
+  { contour, skeleton, textureUrl, rig, action, accent, inflation, visible, onCapability, onPlaced },
   ref,
 ) {
   const mountRef = useRef<HTMLDivElement>(null);
@@ -276,7 +345,7 @@ export const ARStage = forwardRef<ARStageHandle, ARStageProps>(function ARStage(
 
     const characterRoot = new THREE.Group();
     scene.add(characterRoot);
-    if (skeleton?.length && rig) characterRoot.add(buildCharacter(skeleton, rig, accent, inflation));
+    if (contour?.length && skeleton?.length && rig) characterRoot.add(buildCharacter(contour, skeleton, rig, textureUrl, accent, inflation));
 
     const shadowMaterial = new THREE.MeshBasicMaterial({ color: 0x102927, transparent: true, opacity: 0.2, depthWrite: false });
     const shadow = new THREE.Mesh(new THREE.CircleGeometry(0.64, 64), shadowMaterial);
@@ -303,7 +372,7 @@ export const ARStage = forwardRef<ARStageHandle, ARStageProps>(function ARStage(
       root.position.y = placement.y + Math.sin(elapsed * 1.65) * 0.018;
       root.scale.setScalar(placement.scale);
       root.rotation.x = rotationRef.current.pitch + Math.sin(elapsed * 1.1) * 0.018;
-      root.rotation.y = rotationRef.current.yaw - 0.24 + Math.sin(elapsed * 0.72) * 0.11;
+      root.rotation.y = rotationRef.current.yaw - 0.07 + Math.sin(elapsed * 0.72) * 0.035;
       root.rotation.z = Math.sin(elapsed * 0.9) * 0.012;
 
       const articulated = root.getObjectByName("wallalive-semantic-character");
@@ -414,7 +483,7 @@ export const ARStage = forwardRef<ARStageHandle, ARStageProps>(function ARStage(
       handlesRef.current = null;
       dispose();
     };
-  }, [accent, inflation, onCapability, rig, skeleton, visible]);
+  }, [accent, contour, inflation, onCapability, rig, skeleton, textureUrl, visible]);
 
   useImperativeHandle(ref, () => ({
     placeNormalized(x: number, y: number, scale = placementRef.current.scale) {
