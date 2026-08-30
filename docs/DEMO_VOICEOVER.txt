@@ -1,6 +1,6 @@
 Children already turn simple marks into stories. WallAlive asks: what if those characters could step off the wall and into the room?
 
-A child explicitly opens the camera and approves one drawing. It is separated locally, then rebuilt as a layered three-dimensional character with eyes, limbs, shadow, and motion.
+A child explicitly opens the camera and approves one drawing. Local math isolates the centered ink, closes small gaps, flood-fills the silhouette, traces its boundary, and simplifies the contour. Three.js bevel-extrudes that exact shape into a real solid with surface relief, shadow, and motion. Nothing is uploaded, and no eyes or limbs are invented.
 
 Eight strict WebMCP tools let a browser agent inspect approved shape and color, create a personality, place the character, animate it, and perform a short story. Human and agent actions change the same visible world, with every author shown in history.
 

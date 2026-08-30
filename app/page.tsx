@@ -2,7 +2,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ARStage, type ARStageHandle, type BodyShape, type CharacterAction } from "./components/ARStage";
+import { ARStage, type ARStageHandle, type CharacterAction } from "./components/ARStage";
 import { createDemoDoodle, extractDrawingFromVideo, type DrawingExtraction } from "./lib/drawing";
 
 type Actor = "CHILD" | "BROWSER AGENT" | "WALLALIVE";
@@ -14,8 +14,6 @@ type CharacterState = {
   created: boolean;
   name: string;
   personality: string;
-  bodyShape: BodyShape;
-  eyeStyle: "curious" | "sleepy" | "sparkly";
   accent: string;
   action: CharacterAction;
   surface: "screen" | "wall" | "floor";
@@ -53,8 +51,6 @@ const initialCharacter: CharacterState = {
   created: false,
   name: "",
   personality: "curious and kind",
-  bodyShape: "round",
-  eyeStyle: "curious",
   accent: "#5fc7df",
   action: "idle",
   surface: "screen",
@@ -187,7 +183,7 @@ export default function Home() {
     captureRef.current = next;
     setCapture(next);
     setStep("captured");
-    setNotice(source === "camera" ? "Drawing isolated locally. Press Wake it up to add depth and personality." : "Demo drawing ready. Press Wake it up—or run the full magic demo.");
+    setNotice(source === "camera" ? "Drawing isolated, flood-filled, and contour-traced locally. Press Wake it up to extrude the real shape." : "Demo drawing traced. Press Wake it up—or run the full magic demo.");
     setAgentLine(`I found a ${next.analysis.shapeHint}, ${next.analysis.edgeEnergy} drawing. Its strongest color is ${next.analysis.dominantColor}.`);
     record("WALLALIVE", "Isolated a drawing", `${next.analysis.coveragePercent}% foreground · ${next.analysis.shapeHint} silhouette · no upload.`);
   }, [record]);
@@ -213,26 +209,20 @@ export default function Home() {
   const createCharacter = useCallback((input: Record<string, unknown>, actor: Actor, toolName?: string) => {
     const drawing = captureRef.current;
     if (!drawing) throw new Error("No drawing is approved. The child must capture or choose a drawing first.");
-    const requestedShape = stringValue(input.bodyShape, drawing.analysis.shapeHint, 20);
-    const bodyShape: BodyShape = ["round", "tall", "wide", "spiky"].includes(requestedShape) ? requestedShape as BodyShape : drawing.analysis.shapeHint;
-    const eyeStyleInput = stringValue(input.eyeStyle, "curious", 20);
-    const eyeStyle = ["curious", "sleepy", "sparkly"].includes(eyeStyleInput) ? eyeStyleInput as CharacterState["eyeStyle"] : "curious";
     const next: CharacterState = {
       ...characterRef.current,
       created: true,
       name: stringValue(input.name, "Pip", 40),
       personality: stringValue(input.personality, "curious and kind", 120),
-      bodyShape,
-      eyeStyle,
       accent: stringValue(input.accent, drawing.analysis.secondaryColor, 20),
       action: "idle",
       storyTitle: "",
     };
-    commitCharacter(next, `${next.name} is alive in 3D.`);
+    commitCharacter(next, `${next.name} is now a contour-extruded 3D solid.`);
     setStep("alive");
     setAgentLine(`${next.name} feels ${next.personality}. I’ll protect the original colors while we play.`);
-    setStoryCaption(`${next.name} blinks for the very first time.`);
-    record(actor, "Woke the drawing", `${next.name} · ${next.bodyShape} body · ${next.personality}.`, toolName);
+    setStoryCaption(`${next.name} lifts away from the wall for the first time.`);
+    record(actor, "Extruded the drawing", `${next.name} · ${drawing.contour.length} contour points · ${next.personality}.`, toolName);
     return next;
   }, [commitCharacter, record]);
 
@@ -262,7 +252,7 @@ export default function Home() {
     const safeAccent = /^#[0-9a-fA-F]{6}$/.test(accent) ? accent : current.accent;
     const next = { ...current, accent: safeAccent };
     commitCharacter(next, `3D edges changed to ${safeAccent}; original drawing colors preserved.`);
-    record(actor, "Changed the 3D accent", `Applied ${safeAccent} only to generated depth and limbs.`, toolName);
+    record(actor, "Changed the 3D accent", `Applied ${safeAccent} only to the generated solid edge.`, toolName);
     return next;
   }, [commitCharacter, record]);
 
@@ -300,6 +290,12 @@ export default function Home() {
   const inspectScene = useCallback(() => ({
     drawingApproved: Boolean(captureRef.current),
     drawingAnalysis: captureRef.current?.analysis ?? null,
+    reconstruction: captureRef.current ? {
+      method: "connected-component silhouette + Ramer-Douglas-Peucker contour + beveled extrusion",
+      contourPoints: captureRef.current.contour.length,
+      depthSource: "local luminance relief",
+      geometry: "true Three.js ExtrudeGeometry solid",
+    } : null,
     character: { ...characterRef.current, textureUrl: undefined },
     cameraFeedExposed: false,
     privacyBoundary: "Camera capture is human-only. WebMCP tools receive semantic drawing analysis, never live frames or image data.",
@@ -327,17 +323,15 @@ export default function Home() {
       {
         name: "create_character_from_drawing",
         title: "Wake approved drawing",
-        description: "Turn the current human-approved drawing into a local 2.5D character. This cannot open the camera or capture a new image.",
+        description: "Extrude the mathematically traced silhouette of the current human-approved drawing into a real 3D solid. This cannot open the camera or capture a new image.",
         inputSchema: {
           ...base,
           properties: {
             name: { type: "string", minLength: 1, maxLength: 40 },
             personality: { type: "string", minLength: 1, maxLength: 120 },
-            bodyShape: { type: "string", enum: ["round", "tall", "wide", "spiky"] },
-            eyeStyle: { type: "string", enum: ["curious", "sleepy", "sparkly"] },
             accent: { type: "string", pattern: "^#[0-9a-fA-F]{6}$" },
           },
-          required: ["name", "personality", "bodyShape", "eyeStyle", "accent"],
+          required: ["name", "personality", "accent"],
         },
         annotations: { readOnlyHint: false, untrustedContentHint: true },
         execute: async (input, { signal }) => { try { guard(signal); return ok({ character: createCharacter(input, "BROWSER AGENT", "create_character_from_drawing") }); } catch (error) { return fail(error); } },
@@ -378,7 +372,7 @@ export default function Home() {
       {
         name: "recolor_character",
         title: "Recolor generated depth",
-        description: "Change only the generated 3D edge and limb accent. The child's original drawing pixels remain unchanged.",
+        description: "Change only the generated 3D solid edge accent. The child's original drawing pixels remain unchanged.",
         inputSchema: { ...base, properties: { accent: { type: "string", pattern: "^#[0-9a-fA-F]{6}$" } }, required: ["accent"] },
         annotations: { readOnlyHint: false, untrustedContentHint: true },
         execute: async (input, { signal }) => { try { guard(signal); return ok({ character: recolorCharacter(stringValue(input.accent), "BROWSER AGENT", "recolor_character") }); } catch (error) { return fail(error); } },
@@ -437,7 +431,7 @@ export default function Home() {
       setDrawing(demo, "demo");
       setAgentLine("1 / 4 · I can see the approved shape and colors—but not a live camera feed.");
       await wait(550);
-      createCharacter({ name: "Pip", personality: "brave on the outside, shy on the inside", bodyShape: "round", eyeStyle: "curious", accent: "#5fc7df" }, "BROWSER AGENT", "create_character_from_drawing");
+      createCharacter({ name: "Pip", personality: "brave on the outside, shy on the inside", accent: "#5fc7df" }, "BROWSER AGENT", "create_character_from_drawing");
       setAgentLine("2 / 4 · Pip keeps every mark from the child’s drawing and gains real depth.");
       await wait(700);
       placeCharacter(.68, .53, "wall", 1, "BROWSER AGENT", "place_character");
@@ -540,8 +534,8 @@ export default function Home() {
             {cameraState !== "active" ? <div className="demo-room"><span className="frame-a" /><span className="frame-b" /><span className="shelf" /><span className="plant" /><span className="baseboard" /></div> : null}
             {capture && cameraState !== "active" ? <img className="captured-room" src={capture.previewUrl} alt="Approved drawing preview" /> : null}
             {step === "camera" ? <div className="capture-guide"><span /><b>KEEP ONE DRAWING INSIDE</b></div> : null}
-            <ARStage ref={stageRef} textureUrl={capture?.textureUrl ?? null} action={character.action} accent={character.accent} bodyShape={character.bodyShape} visible={character.created} onCapability={handleARCapability} onPlaced={handleARPlaced} />
-            <div className="camera-hud"><span><i /> {cameraState === "active" ? "LIVE CAMERA · LOCAL" : character.created ? "3D CHARACTER LIVE" : "SAFE DEMO ROOM"}</span><strong>{immersiveAR ? "WEBXR READY" : "CAMERA AR FALLBACK"}</strong></div>
+            <ARStage ref={stageRef} textureUrl={capture?.textureUrl ?? null} depthUrl={capture?.depthUrl ?? null} contour={capture?.contour ?? null} action={character.action} accent={character.accent} visible={character.created} onCapability={handleARCapability} onPlaced={handleARPlaced} />
+            <div className="camera-hud"><span><i /> {cameraState === "active" ? "LIVE CAMERA · LOCAL" : character.created ? "TRUE 3D SOLID LIVE" : "SAFE DEMO ROOM"}</span><strong>{immersiveAR ? "WEBXR READY" : "CAMERA AR FALLBACK"}</strong></div>
             {character.created ? <div className="story-caption"><span>{character.storyTitle || "LIVE MOMENT"}</span><p>{storyCaption}</p></div> : null}
             {cameraState === "denied" || cameraState === "unavailable" ? <div className="camera-message"><b>CAMERA OPTIONAL</b><p>The demo doodle still proves the complete WebMCP and 3D workflow.</p></div> : null}
           </div>
@@ -550,7 +544,7 @@ export default function Home() {
             <div><span>CHARACTER ACTIONS</span><small>{character.created ? `${character.name.toUpperCase()} · ${character.personality.toUpperCase()}` : "WAKE A DRAWING TO PLAY"}</small></div>
             {actions.map((item) => <button key={item.action} disabled={!character.created} className={character.action === item.action ? "active" : ""} onClick={() => animateCharacter(item.action, "CHILD")}><i>{item.glyph}</i>{item.label}</button>)}
           </div>
-          <p className="placement-tip">{character.created ? "Tap anywhere in the room to move the character · Try the action buttons or ask your browser agent" : "Use a bold, colorful drawing on a plain wall or sheet of paper for the cleanest capture"}</p>
+          <p className="placement-tip">{character.created ? "Tap anywhere in the room to move the contour-extruded solid · Drag-free, camera-safe AR" : "Center one closed, bold drawing—the math removes the paper and extrudes only its silhouette"}</p>
         </section>
 
         <aside className="agent-panel">

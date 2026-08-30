@@ -14,7 +14,7 @@ Open the **Privacy** panel while the local preview is visible.
 
 **Voiceover:** “The camera belongs to the child. It is not a WebMCP tool, cannot be opened by an agent, and its frames are never uploaded. The browser extracts the approved silhouette locally and exposes only shape and color metadata.”
 
-Show the Drawing DNA card, then press **Wake it up**. Pause long enough to see the layered character blink and float.
+Show the Drawing DNA card, then press **Wake it up**. Pause while the paper disappears and the exact drawing contour becomes a beveled solid. Turn or wave it long enough to show the real side thickness. Point out that the app adds no eyes or limbs—the marks remain exactly the child’s.
 
 ## 0:38–1:02 — Explain WebMCP
 

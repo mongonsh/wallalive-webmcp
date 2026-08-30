@@ -6,7 +6,7 @@
 
 **Public source:** https://github.com/mongonsh/wallalive-webmcp
 
-WallAlive turns a child’s drawing into a layered 3D character that can live and perform in the real room. A child explicitly opens the camera and approves a drawing; then a compatible browser agent can name it, shape its personality, place it, animate it, recolor its generated depth, and direct a mini story through WebMCP.
+WallAlive turns a child’s drawing into a contour-extruded 3D solid that can live and perform in the real room. A child explicitly opens the camera and approves a drawing; then a compatible browser agent can name it, shape its personality, place it, animate it, recolor its generated edge, and direct a mini story through WebMCP.
 
 The camera is intentionally **not** a WebMCP tool. Drawing extraction happens in browser memory, no image is uploaded, and the agent receives semantic shape/color analysis only after human approval.
 
@@ -24,7 +24,7 @@ WallAlive is a shared imagination surface, not a chat box attached to an AR demo
 ## The magic loop
 
 1. **Scan:** the child presses **Start camera** and centers a bold drawing.
-2. **Wake:** WallAlive separates the drawing locally and creates a seven-layer 2.5D character with real 3D eyes, limbs, lighting, and shadow.
+2. **Wake:** WallAlive isolates the centered ink component, closes small gaps, flood-fills its silhouette, traces and simplifies its contour, then builds a beveled `ExtrudeGeometry` solid with real thickness, relief, lighting, and shadow.
 3. **Play:** a browser agent places the character and directs movements or a four-beat story.
 4. **Enter AR:** supported Android/WebXR devices use surface hit testing; every other modern browser gets the camera-overlay experience.
 
@@ -35,11 +35,11 @@ Press **Play Judge Demo** for a deterministic, camera-free version of the comple
 | Tool | Mode | Purpose |
 | --- | --- | --- |
 | `inspect_wall_scene` | Read | Returns approved drawing semantics, character state, AR capability, and the privacy boundary. |
-| `create_character_from_drawing` | Write | Wakes the human-approved drawing with a name, personality, body shape, eyes, and generated accent. |
+| `create_character_from_drawing` | Write | Extrudes the human-approved drawing’s traced contour with a name, personality, and generated edge accent. |
 | `set_character_personality` | Write | Changes performance intent without altering the child’s original pixels. |
 | `place_character` | Write | Places and scales the character at a normalized position in the visible scene. |
 | `animate_character` | Write | Plays one of seven safe visible actions. |
-| `recolor_character` | Write | Recolors only generated depth and limbs; original drawing colors stay untouched. |
+| `recolor_character` | Write | Recolors only the generated solid edge; original drawing colors stay untouched. |
 | `tell_character_story` | Write | Performs a cancellable one-to-four-beat story with animation and captions. |
 | `list_activity` | Read | Returns recent attributed actions without camera or image data. |
 
@@ -58,26 +58,26 @@ All tools have strict JSON schemas, `additionalProperties: false`, cancellation 
 | iPhone/iPad and non-WebXR browsers | Full camera-overlay fallback; immersive hit testing is not claimed |
 | No-camera judging | Built-in demo doodle and one-click judge sequence |
 
-WallAlive currently makes a convincing layered 2.5D character from the captured silhouette; it does not claim photogrammetric mesh reconstruction. High-contrast art on a plain background produces the cleanest extraction.
+WallAlive constructs a genuine polygonal 3D solid from the captured silhouette; it does not claim photogrammetry or hallucinate anatomy that was not drawn. High-contrast closed line art produces the cleanest extraction.
 
 ## Architecture
 
 ```text
 human camera gesture
-        │ local Canvas pixel extraction
+        │ local ink scoring + connected components
         ▼
-approved texture + shape/color analysis
+flood-filled silhouette + simplified contour + relief map
         │                     │
         │                     └── WebMCP reads semantic state only
         ▼
-Three.js layered character ◄──── WebMCP personality / place / animate / story
+Three.js beveled extrusion ◄──── WebMCP personality / place / animate / story
         │
         ├── WebXR hit-test placement when supported
         └── transparent camera overlay everywhere else
 ```
 
 - React 19 + TypeScript, built with vinext for Cloudflare/Sites
-- Three.js transparent WebGL character layer
+- Three.js `ExtrudeGeometry` solid plus displaced original-art surface
 - WebXR `immersive-ar` session with real-world hit testing
 - `document.modelContext.registerTool()` imperative WebMCP integration
 - One canonical action layer shared by UI controls and tool executors

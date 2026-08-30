@@ -22,7 +22,7 @@ A child-safe AR playground that turns an approved wall drawing into a 3D charact
 
 ## Short description
 
-WallAlive makes children’s drawings live in the real room. A child explicitly opens the camera and approves a drawing; local Canvas processing extracts its silhouette, while Three.js adds layered depth, eyes, limbs, lighting, and motion. A visiting browser agent then uses eight strict WebMCP tools to name the character, shape its personality, place it, recolor generated depth, animate it, and perform mini stories. The agent can never open the camera, capture a frame, upload the art, or change the original pixels. Compatible Android devices get WebXR hit-test placement; all modern browsers get a camera-overlay fallback and judges get a deterministic no-camera demo.
+WallAlive makes children’s drawings live in the real room. A child explicitly opens the camera and approves a drawing; local Canvas math isolates the centered ink, flood-fills the body, traces its contour, and simplifies the polygon. Three.js then bevel-extrudes that exact outline into a solid with a drawing-derived relief surface, lighting, shadow, and motion—without inventing eyes, limbs, or a rectangular paper body. A visiting browser agent uses eight strict WebMCP tools to name the character, shape its personality, place it, recolor generated depth, animate it, and perform mini stories. The agent can never open the camera, capture a frame, upload the art, or change the original pixels. Compatible Android devices get WebXR hit-test placement; all modern browsers get a camera-overlay fallback and judges get a deterministic no-camera demo.
 
 ## Judging case
 
@@ -32,7 +32,7 @@ WebMCP is the creative control plane, not a decorative integration. Eight impera
 
 ### 2. Quality of idea and execution
 
-This is a working responsive camera + WebGL + WebXR application, not a mockup. It includes local drawing segmentation, a seven-layer 2.5D character with real 3D features, seven animations, normalized and hit-test placement, multi-beat stories, attribution history, camera permission UX, mobile fallbacks, security headers, a one-click judge demo, automated tests, and public deployment.
+This is a working responsive camera + WebGL + WebXR application, not a mockup. It includes local connected-component segmentation, morphological silhouette recovery, contour simplification, true polygon extrusion, drawing-derived surface relief, seven animations, normalized and hit-test placement, multi-beat stories, attribution history, camera permission UX, mobile fallbacks, security headers, a one-click judge demo, automated tests, and public deployment.
 
 ### 3. Potential impact
 

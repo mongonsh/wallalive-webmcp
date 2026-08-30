@@ -5,12 +5,14 @@ import { join, resolve } from "node:path";
 
 const outputDirectory = resolve(process.argv[2] ?? "outputs/demo-frames");
 const targetUrl = process.argv[3] ?? "https://wallalive-webmcp.mungunshagai-tb.chatgpt.site";
+const smokeMode = process.argv.includes("--smoke");
+const mobileMode = process.argv.includes("--mobile");
 const chromePath = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 const profileDirectory = mkdtempSync(join(tmpdir(), "wallalive-demo-chrome-"));
 const port = 9300 + Math.floor(Math.random() * 500);
 const fps = 10;
-const width = 1440;
-const height = 900;
+const width = mobileMode ? 390 : 1440;
+const height = mobileMode ? 844 : 900;
 
 mkdirSync(outputDirectory, { recursive: true });
 
@@ -130,26 +132,29 @@ try {
 
   await wait(4000);
   await clickButton("PLAY JUDGE DEMO");
+  if (mobileMode) await send("Runtime.evaluate", { expression: "document.querySelector('.camera-frame')?.scrollIntoView({ block: 'center' })" });
   await wait(800);
   const demoState = await send("Runtime.evaluate", { expression: "document.querySelector('.notice')?.textContent", returnByValue: true });
   console.log(`Demo state: ${demoState?.result?.value ?? "unknown"}`);
   await wait(6200);
-  await clickButton("tools");
-  await wait(6000);
-  await clickButton("privacy");
-  await wait(6000);
-  await clickButton("history");
-  await wait(6000);
-  await clickButton("agent");
-  await wait(3500);
-  await clickButton("Dance");
-  await wait(4000);
-  await clickButton("Wave");
-  await wait(4000);
+  if (!smokeMode) {
+    await clickButton("tools");
+    await wait(6000);
+    await clickButton("privacy");
+    await wait(6000);
+    await clickButton("history");
+    await wait(6000);
+    await clickButton("agent");
+    await wait(3500);
+    await clickButton("Dance");
+    await wait(4000);
+    await clickButton("Wave");
+    await wait(4000);
+  }
 
   recording = false;
   await captureLoop;
-  writeFileSync(join(outputDirectory, "manifest.json"), JSON.stringify({ fps, width, height, frameCount: frameNumber, source: targetUrl }, null, 2));
+  writeFileSync(join(outputDirectory, "manifest.json"), JSON.stringify({ fps, width, height, frameCount: frameNumber, source: targetUrl, smokeMode, mobileMode }, null, 2));
   console.log(`Recorded ${frameNumber} frames to ${outputDirectory}`);
 } finally {
   socket?.close();

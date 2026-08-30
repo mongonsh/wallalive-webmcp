@@ -63,7 +63,13 @@ test("implements local drawing extraction and real WebXR hit testing", async () 
 
   assert.match(drawing, /getImageData/);
   assert.match(drawing, /toDataURL/);
+  assert.match(drawing, /connectedComponents/);
+  assert.match(drawing, /recoverSilhouette/);
+  assert.match(drawing, /ramerDouglasPeucker/);
   assert.doesNotMatch(drawing, /fetch\(|XMLHttpRequest|WebSocket/);
+  assert.match(stage, /ExtrudeGeometry/);
+  assert.match(stage, /displacementMap/);
+  assert.doesNotMatch(stage, /SphereGeometry|CapsuleGeometry|TorusGeometry/);
   assert.match(stage, /isSessionSupported\("immersive-ar"\)/);
   assert.match(stage, /requestSession\("immersive-ar"/);
   assert.match(stage, /requiredFeatures: \["hit-test"\]/);

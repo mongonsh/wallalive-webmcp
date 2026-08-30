@@ -19,9 +19,9 @@ WallAlive — Drawings Come Alive in AR with WebMCP | Hackathon Demo
 
 ## Description
 
-WallAlive turns a child’s approved wall drawing into a layered 3D character that lives and performs in the room.
+WallAlive turns a child’s approved wall drawing into a mathematically traced, contour-extruded 3D solid that lives and performs in the room.
 
-The child explicitly opens the camera and approves a drawing. Local Canvas processing extracts it without an upload. A visiting browser agent then uses eight strict WebMCP tools to inspect approved shape and color metadata, create a personality, place the character, animate it, recolor generated depth, and perform mini stories. The camera is deliberately not a WebMCP tool: an agent cannot open it, capture a frame, or upload a child’s room.
+The child explicitly opens the camera and approves a drawing. Local Canvas processing selects the centered ink component, flood-fills the silhouette, traces and simplifies its contour, then Three.js bevel-extrudes that exact outline without an upload or invented anatomy. A visiting browser agent uses eight strict WebMCP tools to inspect approved shape and color metadata, create a personality, place the character, animate it, recolor generated depth, and perform mini stories. The camera is deliberately not a WebMCP tool: an agent cannot open it, capture a frame, or upload a child’s room.
 
 Compatible Android devices get real WebXR hit-test placement; every modern browser gets the camera-overlay fallback and a deterministic no-camera judge demo.
 
