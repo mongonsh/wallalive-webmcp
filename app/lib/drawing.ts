@@ -85,7 +85,7 @@ export type DrawingExtraction = {
   analysis: DrawingAnalysis;
   semanticRegions?: SemanticRegionCandidate[];
   learnedRecognition?: {
-    model: "wallalive-parts-v1";
+    model: "wallalive-parts-v2-ensemble";
     latencyMs: number;
     detectedKinds: SemanticPartKind[];
   };
@@ -1395,7 +1395,7 @@ export function mergeLearnedPartHints(extraction: DrawingExtraction, hints: Lear
   const accepted = hints.filter((hint) => hint.confidence >= (hint.kind === "cheek" || hint.kind === "mouth" ? 0.42 : 0.48));
   if (!accepted.length) return {
     ...extraction,
-    learnedRecognition: { model: "wallalive-parts-v1", latencyMs, detectedKinds: [] },
+    learnedRecognition: { model: "wallalive-parts-v2-ensemble", latencyMs, detectedKinds: [] },
   };
   const body = extraction.rig.parts.find((part) => part.kind === "body");
   if (!body) return extraction;
@@ -1570,7 +1570,7 @@ export function mergeLearnedPartHints(extraction: DrawingExtraction, hints: Lear
   return {
     ...extraction,
     rig: { ...extraction.rig, parts, joints, detectedKinds },
-    learnedRecognition: { model: "wallalive-parts-v1", latencyMs, detectedKinds: [...predictedKinds] },
+    learnedRecognition: { model: "wallalive-parts-v2-ensemble", latencyMs, detectedKinds: [...predictedKinds] },
   };
 }
 

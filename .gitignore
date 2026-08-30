@@ -39,3 +39,7 @@ yarn-error.log*
 /outputs/
 /work/
 .gstack/
+
+# local ML tooling
+__pycache__/
+*.py[cod]

@@ -114,21 +114,27 @@ test("implements local drawing extraction and real WebXR hit testing", async () 
 });
 
 test("ships a compact same-origin learned drawing-part model", async () => {
-  const modelUrl = new URL("../public/models/wallalive-parts-v1.onnx", import.meta.url);
-  const report = JSON.parse(await readFile(new URL("../public/models/wallalive-parts-v1.json", import.meta.url), "utf8"));
+  const modelUrl = new URL("../public/models/wallalive-parts-v2.onnx", import.meta.url);
+  const report = JSON.parse(await readFile(new URL("../public/models/wallalive-parts-v2.json", import.meta.url), "utf8"));
   const model = await stat(modelUrl);
   const recognizer = await readFile(new URL("../app/lib/learned-parts.ts", import.meta.url), "utf8");
 
-  assert.ok(model.size > 900_000 && model.size < 1_100_000, `expected a compact substantive ONNX model, got ${model.size} bytes`);
-  assert.equal(report.architecture, "WallAlive PartUNet v1");
-  assert.equal(report.parameters, 235_949);
-  assert.equal(report.training_samples, 5_000);
-  assert.equal(report.validation_samples, 500);
+  assert.ok(model.size > 950_000 && model.size < 1_100_000, `expected a compact substantive ONNX model, got ${model.size} bytes`);
+  assert.equal(report.architecture, "WallAlive Hierarchical PartUNet v2");
+  assert.deepEqual(report.coarse_channels, ["foreground", "face", "upper_appendage", "lower_appendage"]);
+  assert.equal(report.parameters, 246_508);
+  assert.equal(report.training_samples, 6_000);
+  assert.equal(report.validation_samples, 700);
+  assert.equal(report.real_training_drawings, 392);
+  assert.equal(report.real_validation_drawings, 98);
   assert.deepEqual(report.parts, ["body", "eye", "cheek", "mouth", "ear", "arm", "hand", "leg", "foot"]);
   for (const [kind, iou] of Object.entries(report.validation_iou)) {
     assert.ok(iou >= 0.55, `${kind} held-out IoU should stay above the regression floor, got ${iou}`);
   }
-  assert.match(recognizer, /const MODEL_PATH = ["']\/models\/wallalive-parts-v1\.onnx["']/);
+  assert.ok(report.real_validation_iou.body >= 0.7, `real drawing foreground IoU should stay above 0.7, got ${report.real_validation_iou.body}`);
+  assert.match(recognizer, /const MODEL_PATH = ["']\/models\/wallalive-parts-v2\.onnx["']/);
+  assert.match(recognizer, /const FALLBACK_MODEL_PATH = ["']\/models\/wallalive-parts-v1\.onnx["']/);
+  assert.match(recognizer, /supplementMissingHints/);
   assert.match(recognizer, /import\(["']onnxruntime-web\/wasm["']\)/);
   assert.doesNotMatch(recognizer, /https?:\/\//);
 });

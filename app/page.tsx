@@ -228,7 +228,7 @@ export default function Home() {
       ? learned ? `Local ML recognized ${learned.detectedKinds.join(", ") || "the silhouette"} in ${learned.latencyMs} ms. Generate real 3D to infer its back and skinned mesh.` : "Drawing isolated locally. Generate real 3D to infer its back, mesh, skeleton, and skin weights."
       : "Demo drawing is ready. Generate real 3D—or play the no-wait rigged judge demo.");
     setAgentLine(`The local preview found ${detected || "a body silhouette"}${learned ? " using a trained drawing-part model plus exact pixel geometry" : ""}. AniGen will infer real unseen geometry and a skinned skeleton.`);
-    record("WALLALIVE", learned ? "Recognized and isolated the approved drawing" : "Isolated the approved drawing", `${next.rig.parts.length} local preview regions · ${next.analysis.shapeHint} silhouette${learned ? ` · WallAlive PartUNet ${learned.latencyMs} ms` : ""} · no upload yet.`);
+    record("WALLALIVE", learned ? "Recognized and isolated the approved drawing" : "Isolated the approved drawing", `${next.rig.parts.length} local preview regions · ${next.analysis.shapeHint} silhouette${learned ? ` · Hierarchical PartUNet v2 ${learned.latencyMs} ms` : ""} · no upload yet.`);
   }, [commitCharacter, commitNeuralAsset, handleRiggedAssetInfo, record]);
 
   const recognizeAndSetDrawing = useCallback(async (next: DrawingExtraction, source: "camera" | "demo") => {

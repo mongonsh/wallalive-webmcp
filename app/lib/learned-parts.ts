@@ -1,6 +1,7 @@
 import { mergeLearnedPartHints, type DrawingExtraction, type LearnedPartHint } from "./drawing";
 
-const MODEL_PATH = "/models/wallalive-parts-v1.onnx";
+const MODEL_PATH = "/models/wallalive-parts-v2.onnx";
+const FALLBACK_MODEL_PATH = "/models/wallalive-parts-v1.onnx";
 const MODEL_SIZE = 64;
 const PARTS = ["body", "eye", "cheek", "mouth", "ear", "arm", "hand", "leg", "foot"] as const;
 const THRESHOLDS: Record<(typeof PARTS)[number], number> = {
@@ -17,7 +18,7 @@ const THRESHOLDS: Record<(typeof PARTS)[number], number> = {
 
 type OrtRuntime = typeof import("onnxruntime-web/wasm");
 let runtimePromise: Promise<OrtRuntime> | null = null;
-let sessionPromise: Promise<{ ort: OrtRuntime; session: import("onnxruntime-web/wasm").InferenceSession }> | null = null;
+let sessionPromise: Promise<{ ort: OrtRuntime; sessions: import("onnxruntime-web/wasm").InferenceSession[] }> | null = null;
 
 function loadSession() {
   if (!sessionPromise) {
@@ -25,12 +26,16 @@ function loadSession() {
     sessionPromise = runtimePromise.then(async (ort) => {
       ort.env.wasm.numThreads = typeof crossOriginIsolated !== "undefined" && crossOriginIsolated ? 2 : 1;
       ort.env.wasm.proxy = false;
-      const session = await ort.InferenceSession.create(MODEL_PATH, {
-        executionProviders: ["wasm"],
-        graphOptimizationLevel: "all",
-        executionMode: "sequential",
-      });
-      return { ort, session };
+      const options = {
+        executionProviders: ["wasm"] as const,
+        graphOptimizationLevel: "all" as const,
+        executionMode: "sequential" as const,
+      };
+      const sessions = await Promise.all([
+        ort.InferenceSession.create(MODEL_PATH, options),
+        ort.InferenceSession.create(FALLBACK_MODEL_PATH, options),
+      ]);
+      return { ort, sessions };
     });
   }
   return sessionPromise;
@@ -165,9 +170,22 @@ function decodeHints(output: import("onnxruntime-web/wasm").Tensor) {
   return hints;
 }
 
+function supplementMissingHints(primary: LearnedPartHint[], fallback: LearnedPartHint[]) {
+  const combined = [...primary];
+  for (const hint of fallback) {
+    const sameKind = combined.filter((candidate) => candidate.kind === hint.kind);
+    const overlaps = sameKind.some((candidate) => Math.hypot(candidate.center.x - hint.center.x, candidate.center.y - hint.center.y) < 0.11);
+    if (overlaps) continue;
+    const maximumInstances = hint.kind === "mouth" ? 1 : hint.kind === "eye" ? 3 : 2;
+    if (sameKind.length >= maximumInstances) continue;
+    combined.push({ ...hint, confidence: hint.confidence * 0.92 });
+  }
+  return combined;
+}
+
 export async function recognizeDrawingParts(extraction: DrawingExtraction): Promise<DrawingExtraction> {
   const started = performance.now();
-  const [{ ort, session }, image] = await Promise.all([loadSession(), loadImage(extraction.textureUrl)]);
+  const [{ ort, sessions }, image] = await Promise.all([loadSession(), loadImage(extraction.textureUrl)]);
   const canvas = document.createElement("canvas");
   canvas.width = MODEL_SIZE;
   canvas.height = MODEL_SIZE;
@@ -186,8 +204,11 @@ export async function recognizeDrawingParts(extraction: DrawingExtraction): Prom
     input[area + index] = rgba[index * 4 + 1] / 255;
     input[area * 2 + index] = rgba[index * 4 + 2] / 255;
   }
-  const results = await session.run({ pixel_values: new ort.Tensor("float32", input, [1, 3, MODEL_SIZE, MODEL_SIZE]) });
-  const output = results.part_logits ?? Object.values(results)[0];
-  const hints = decodeHints(output);
+  const [primaryResults, fallbackResults] = await Promise.all(sessions.map((session) => session.run({
+    pixel_values: new ort.Tensor("float32", input, [1, 3, MODEL_SIZE, MODEL_SIZE]),
+  })));
+  const primaryHints = decodeHints(primaryResults.part_logits ?? Object.values(primaryResults)[0]);
+  const fallbackHints = decodeHints(fallbackResults.part_logits ?? Object.values(fallbackResults)[0]);
+  const hints = supplementMissingHints(primaryHints, fallbackHints);
   return mergeLearnedPartHints(extraction, hints, Math.round(performance.now() - started));
 }
