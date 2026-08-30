@@ -13,27 +13,26 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "CutRoom — Direct the intention",
+  metadataBase: new URL("https://wallalive-webmcp.mungunshagai-tb.chatgpt.site"),
+  title: "WallAlive — Draw it. Wake it. Play.",
   description:
-    "A human-agent storyboard studio powered by WebMCP. Lock what matters, then let your agent find the coverage.",
-  applicationName: "CutRoom",
-  keywords: ["WebMCP", "storyboard", "filmmaking", "browser agent", "creative tools"],
-  authors: [{ name: "CutRoom" }],
+    "Turn a child's wall drawing into an animated character that lives in the room, directed by a browser agent through WebMCP.",
+  applicationName: "WallAlive",
+  keywords: ["WebMCP", "WebXR", "augmented reality", "children's drawings", "browser agent"],
+  authors: [{ name: "WallAlive" }],
   openGraph: {
+    title: "WallAlive — Draw it. Wake it. Play.",
+    description: "A child-safe AR playground where approved drawings become 3D characters directed through WebMCP.",
     type: "website",
-    title: "CutRoom — Direct the intention",
-    description: "Lock what matters. Let your browser agent find the coverage.",
-    siteName: "CutRoom",
-    images: [{ url: "/cutroom-og.png", width: 1536, height: 1024, alt: "CutRoom paper-cut laundromat storyboard" }],
+    url: "/",
+    siteName: "WallAlive",
+    images: [{ url: "/wallalive-og.png", width: 1536, height: 1024, alt: "A child’s wall doodle becoming a dimensional AR character in WallAlive" }],
   },
   twitter: {
     card: "summary_large_image",
-    title: "CutRoom — A WebMCP storyboard studio",
-    description: "Direct the intention. Let the agent find the coverage.",
-    images: ["/cutroom-og.png"],
-  },
-  icons: {
-    icon: "/cutroom-og.png",
+    title: "WallAlive — Draw it. Wake it. Play.",
+    description: "Turn an approved wall drawing into a 3D character a browser agent can animate through WebMCP.",
+    images: ["/wallalive-og.png"],
   },
 };
 

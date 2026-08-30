@@ -1,5 +1,5 @@
 {
-  "name": "cutroom-webmcp",
+  "name": "wallalive-webmcp",
   "version": "1.0.0",
   "private": true,
   "engines": {
@@ -13,8 +13,11 @@
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next"
   },
   "dependencies": {
+    "@types/three": "^0.185.4",
+    "@types/webxr": "^0.5.24",
     "react": "19.2.6",
-    "react-dom": "19.2.6"
+    "react-dom": "19.2.6",
+    "three": "^0.185.1"
   },
   "devDependencies": {
     "@cloudflare/vite-plugin": "1.37.1",

@@ -1,51 +1,86 @@
-# CutRoom
+# WallAlive
 
-**Direct the intention. Let the agent find the coverage.**
+**Draw it. Wake it. Play.**
 
-**Live demo:** https://cutroom-webmcp.mungunshagai-tb.chatgpt.site
+**Live demo:** https://wallalive-webmcp.mungunshagai-tb.chatgpt.site
 
-CutRoom is a human-agent storyboard studio built for the WebMCP Challenge. A filmmaker sets the creative anchor, then any compatible browser agent can inspect the board, propose coverage, lock decisions, branch an alternate cut, and audit continuity inside the same visible interface.
+WallAlive turns a child’s drawing into a layered 3D character that can live and perform in the real room. A child explicitly opens the camera and approves a drawing; then a compatible browser agent can name it, shape its personality, place it, animate it, recolor its generated depth, and direct a mini story through WebMCP.
 
-The product does not embed a model or require an API key. The visiting browser agent supplies the intelligence; CutRoom supplies the shared state, narrow tools, creative guardrails, and provenance.
+The camera is intentionally **not** a WebMCP tool. Drawing extraction happens in browser memory, no image is uploaded, and the agent receives semantic shape/color analysis only after human approval.
 
-## Why this is a WebMCP-native product
+## Why this needs WebMCP
 
-This is not a chat box beside a storyboard generator. WebMCP is the collaboration layer:
+WallAlive is a shared imagination surface, not a chat box attached to an AR demo:
 
-- The agent reads the exact live board instead of relying on screenshots or DOM guessing.
-- Tool calls and human actions update the same application state.
-- Director locks are enforced inside every write path, including agent tools.
-- Alternate cuts preserve the original rather than overwriting creative work.
-- Every action is visible, attributable, locally persisted, and easy to verify.
-- A continuity tool returns exact shot IDs and repairable issues.
+- Human and agent actions update the same visible character and scene.
+- The browser agent composes personality, placement, motion, and story through narrow tools.
+- A human-only camera boundary is enforced by capability design, not prompt instructions.
+- Every action is visibly attributed to `CHILD`, `BROWSER AGENT`, or `WALLALIVE`.
+- Tool calls return verification-rich state so the agent can observe what actually happened.
+- The app has no embedded model, API key, account, or server-side image pipeline.
+
+## The magic loop
+
+1. **Scan:** the child presses **Start camera** and centers a bold drawing.
+2. **Wake:** WallAlive separates the drawing locally and creates a seven-layer 2.5D character with real 3D eyes, limbs, lighting, and shadow.
+3. **Play:** a browser agent places the character and directs movements or a four-beat story.
+4. **Enter AR:** supported Android/WebXR devices use surface hit testing; every other modern browser gets the camera-overlay experience.
+
+Press **Play Judge Demo** for a deterministic, camera-free version of the complete loop.
 
 ## WebMCP tool surface
 
 | Tool | Mode | Purpose |
 | --- | --- | --- |
-| `inspect_storyboard` | Read | Returns the scene, active cut, shots, branches, selection, locks, and version. |
-| `create_shot` | Write | Appends one structured shot to the active cut. |
-| `update_shot` | Write | Revises an unlocked shot; rejects director-locked shots. |
-| `lock_creative_decision` | Write | Protects a shot from future agent edits. Agent locks are one-way. |
-| `expand_sequence` | Write | Adds up to six proposed coverage beats atomically. |
-| `create_alternate_cut` | Write | Clones the active cut, inherits locks, and changes only unlocked shots. |
-| `check_continuity` | Read | Audits umbrella visibility, screen direction, and wardrobe. |
-| `select_cut` | Write | Switches the visible working branch without deleting or merging. |
+| `inspect_wall_scene` | Read | Returns approved drawing semantics, character state, AR capability, and the privacy boundary. |
+| `create_character_from_drawing` | Write | Wakes the human-approved drawing with a name, personality, body shape, eyes, and generated accent. |
+| `set_character_personality` | Write | Changes performance intent without altering the child’s original pixels. |
+| `place_character` | Write | Places and scales the character at a normalized position in the visible scene. |
+| `animate_character` | Write | Plays one of seven safe visible actions. |
+| `recolor_character` | Write | Recolors only generated depth and limbs; original drawing colors stay untouched. |
+| `tell_character_story` | Write | Performs a cancellable one-to-four-beat story with animation and captions. |
+| `list_activity` | Read | Returns recent attributed actions without camera or image data. |
 
-All tools use strict JSON schemas, narrow inputs, cancellation signals, annotations, shared validation, and result payloads that include enough state to verify the outcome.
+All tools have strict JSON schemas, `additionalProperties: false`, cancellation signals, read/write annotations, bounded inputs, shared validation, and explicit error results. There is deliberately no `open_camera`, `capture_image`, or `upload_drawing` tool.
 
-## Fast demo
+## Demo prompt
 
-Open the app and press **Play Judge Demo**. In under five seconds it demonstrates the complete collaboration loop:
+> Inspect the approved drawing. Turn it into a shy but brave character, place it on the wall, then tell a three-beat story where it hides, hops, and waves.
 
-1. Inspect the director's seed and creative lock.
-2. Expand three beats into a six-shot sequence.
-3. Lock the insert and create an alternate cut without changing Cut A.
-4. Run continuity and identify the intentional screen-direction risk by shot number.
+## Browser support
 
-In a WebMCP-enabled browser, a visiting agent can perform the same flow using the registered tools. A strong first prompt is:
+| Capability | Support |
+| --- | --- |
+| Camera capture + 3D overlay | Modern mobile and desktop browsers over HTTPS |
+| Immersive room placement | WebXR `immersive-ar` + `hit-test`, typically Chrome on compatible Android devices |
+| iPhone/iPad and non-WebXR browsers | Full camera-overlay fallback; immersive hit testing is not claimed |
+| No-camera judging | Built-in demo doodle and one-click judge sequence |
 
-> Inspect this storyboard. Expand it to six shots while preserving every director lock. Lock the strongest insert, create an alternate cut that reveals the stranger earlier, then check continuity and summarize every change.
+WallAlive currently makes a convincing layered 2.5D character from the captured silhouette; it does not claim photogrammetric mesh reconstruction. High-contrast art on a plain background produces the cleanest extraction.
+
+## Architecture
+
+```text
+human camera gesture
+        │ local Canvas pixel extraction
+        ▼
+approved texture + shape/color analysis
+        │                     │
+        │                     └── WebMCP reads semantic state only
+        ▼
+Three.js layered character ◄──── WebMCP personality / place / animate / story
+        │
+        ├── WebXR hit-test placement when supported
+        └── transparent camera overlay everywhere else
+```
+
+- React 19 + TypeScript, built with vinext for Cloudflare/Sites
+- Three.js transparent WebGL character layer
+- WebXR `immersive-ar` session with real-world hit testing
+- `document.modelContext.registerTool()` imperative WebMCP integration
+- One canonical action layer shared by UI controls and tool executors
+- Session-only Canvas data URLs; no network path in drawing extraction
+- Permissions Policy for WebMCP tools, camera, and WebXR; plus referrer, MIME sniffing, and frame protection headers
 
 ## Local development
 
@@ -61,20 +96,8 @@ Validation:
 ```bash
 npm run lint
 npm test
+npm audit --omit=dev
 ```
-
-## Architecture
-
-- React 19 + TypeScript, built with vinext for Cloudflare/Sites
-- `document.modelContext.registerTool()` imperative WebMCP integration
-- One canonical mutation layer shared by the UI and tool executors
-- Local-first persistence through `localStorage`
-- Deterministic paper-cut storyboard art rendered with HTML and CSS
-- No account, backend, model dependency, uploaded screenplay, or API key
-
-## Design decisions
-
-CutRoom deliberately targets a narrow but real moment in creative work: a director has an intention worth protecting and needs coverage options quickly. The product's novelty is the collaboration contract—not generic image generation. Human locks, safe branching, continuity checks, provenance, and reversible exploration make the browser agent feel like a respectful creative collaborator.
 
 ## License
 
