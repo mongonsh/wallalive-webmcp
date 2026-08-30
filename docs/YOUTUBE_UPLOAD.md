@@ -4,7 +4,7 @@
 
 `outputs/WallAlive-WebMCP-demo.mp4`
 
-- 45.4 seconds
+- 46 seconds
 - 1440×900 H.264 video + AAC narration
 - 11 MB
 - Public visibility required for the challenge
