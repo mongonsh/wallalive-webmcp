@@ -106,6 +106,9 @@ button:disabled { cursor: not-allowed; opacity: 0.45; }
 .captured-room { position: absolute; inset: 0; z-index: 2; width: 100%; height: 100%; object-fit: cover; pointer-events: none; }
 .three-layer { position: absolute; inset: 0; z-index: 4; pointer-events: none; }
 .three-layer canvas { width: 100%; height: 100%; display: block; }
+.renderer-fallback { position: absolute; inset: 0; display: grid; place-content: center; gap: 6px; padding: 28px; background: rgba(24, 49, 46, 0.88); color: var(--cream); text-align: center; }
+.renderer-fallback b { color: var(--lime); font: 850 9px var(--mono); letter-spacing: 0.09em; }
+.renderer-fallback span { max-width: 290px; font-size: 10px; line-height: 1.5; }
 .capture-guide { position: absolute; inset: 17% 22%; z-index: 5; display: flex; align-items: end; justify-content: center; border: 2px dashed var(--lime); pointer-events: none; }
 .capture-guide::before, .capture-guide::after, .capture-guide span::before, .capture-guide span::after { content: ""; position: absolute; width: 24px; height: 24px; border-color: var(--lime); }
 .capture-guide::before { left: -3px; top: -3px; border-left: 4px solid; border-top: 4px solid; }

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
-import { extractMedialSkeleton, scoreDrawingCandidate } from "../app/lib/drawing.ts";
+import { extractMedialSkeleton, inferSemanticRig, scoreDrawingCandidate } from "../app/lib/drawing.ts";
 
 async function render() {
   const workerUrl = new URL("../dist/server/index.js", import.meta.url);
@@ -58,7 +58,9 @@ test("registers eight strict WebMCP tools without camera authority", async () =>
   assert.match(page, /cameraFeedExposed: false/);
   assert.match(page, /neuralModelUsed: false/);
   assert.match(page, /volumeResolution: 64/);
-  assert.match(page, /MEDIAL NODES/);
+  assert.match(page, /SEMANTIC 3D DNA/);
+  assert.match(page, /texturePlane: false/);
+  assert.match(page, /viewableDegrees: 360/);
 });
 
 test("implements local drawing extraction and real WebXR hit testing", async () => {
@@ -80,9 +82,13 @@ test("implements local drawing extraction and real WebXR hit testing", async () 
   assert.match(stage, /medial-skeleton-sphere-union/);
   assert.match(stage, /point\.radius - Math\.hypot/);
   assert.match(stage, /volume\.field\.fill/);
-  assert.match(stage, /computeVertexNormals/);
-  assert.match(stage, /positions\.setZ/);
-  assert.doesNotMatch(stage, /ExtrudeGeometry|SphereGeometry|CapsuleGeometry|TorusGeometry/);
+  assert.match(stage, /wallalive-semantic-character/);
+  assert.match(stage, /SphereGeometry/);
+  assert.match(stage, /CapsuleGeometry/);
+  assert.match(stage, /TubeGeometry/);
+  assert.match(stage, /texturePlane: false/);
+  assert.match(stage, /viewableDegrees: 360/);
+  assert.doesNotMatch(stage, /PlaneGeometry|drawing-curved-over-inflated-front|TextureLoader/);
   assert.match(stage, /isSessionSupported\("immersive-ar"\)/);
   assert.match(stage, /requestSession\("immersive-ar"/);
   assert.match(stage, /requiredFeatures: \["hit-test"\]/);
@@ -145,4 +151,33 @@ test("extracts a radius-bearing medial skeleton from a filled character body", (
   assert.ok(skeleton.length >= 3);
   assert.ok(Math.max(...skeleton.map((point) => point.radius)) > 10);
   assert.ok(skeleton.every((point) => mask[point.y * size + point.x] === 1));
+});
+
+test("builds a semantic joint rig from facial regions and silhouette branches", () => {
+  const skeleton = [
+    { x: 0, y: 0, radius: 0.3 },
+    { x: -0.27, y: 0.4, radius: 0.075 },
+    { x: 0.27, y: 0.4, radius: 0.075 },
+    { x: -0.45, y: 0.01, radius: 0.055 },
+    { x: 0.45, y: 0.01, radius: 0.055 },
+    { x: -0.14, y: -0.43, radius: 0.06 },
+    { x: 0.14, y: -0.43, radius: 0.06 },
+  ];
+  const contour = [
+    { x: -0.58, y: -0.68 }, { x: 0.58, y: -0.68 },
+    { x: 0.58, y: 0.68 }, { x: -0.58, y: 0.68 },
+  ];
+  const regions = [
+    { id: "left-eye", x: -0.13, y: 0.17, width: 0.1, height: 0.12, color: "#9c3450", pixelCount: 80, density: 0.42 },
+    { id: "right-eye", x: 0.13, y: 0.17, width: 0.1, height: 0.12, color: "#9c3450", pixelCount: 82, density: 0.43 },
+    { id: "mouth-line", x: 0, y: -0.08, width: 0.18, height: 0.05, color: "#9c3450", pixelCount: 60, density: 0.35 },
+  ];
+  const rig = inferSemanticRig(skeleton, contour, regions, "#f4eee2", "#9c3450");
+  for (const kind of ["body", "eye", "pupil", "mouth", "ear", "arm", "hand", "leg", "foot"]) {
+    assert.ok(rig.detectedKinds.includes(kind), `expected semantic ${kind}`);
+  }
+  assert.ok(rig.parts.length >= 15);
+  assert.ok(rig.joints.some((joint) => joint.childId === "arm-right"));
+  assert.ok(rig.parts.some((part) => part.kind === "eye" && part.source === "image-region"));
+  assert.ok(rig.parts.some((part) => part.kind === "leg" && part.source === "silhouette-branch"));
 });

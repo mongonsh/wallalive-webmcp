@@ -114,6 +114,7 @@ export default function Home() {
   const captureRef = useRef<DrawingExtraction | null>(null);
   const characterRef = useRef<CharacterState>(initialCharacter);
   const activityRef = useRef<Activity[]>([]);
+  const rotateGestureRef = useRef<{ pointerId: number; lastX: number; lastY: number; moved: boolean } | null>(null);
 
   const [step, setStep] = useState<AppStep>("ready");
   const [cameraState, setCameraState] = useState<CameraState>("idle");
@@ -187,9 +188,10 @@ export default function Home() {
     captureRef.current = next;
     setCapture(next);
     setStep("captured");
-    setNotice(source === "camera" ? "Drawing isolated and contour-traced locally. Press Sculpt in 3D to inflate a closed volume." : "Demo drawing traced. Press Sculpt in 3D—or run the full magic demo.");
-    setAgentLine(`I found a ${next.analysis.shapeHint}, ${next.analysis.edgeEnergy} drawing. Its strongest color is ${next.analysis.dominantColor}.`);
-    record("WALLALIVE", "Isolated a drawing", `${next.analysis.coveragePercent}% foreground · ${next.analysis.shapeHint} silhouette · no upload.`);
+    const detected = next.rig.detectedKinds.filter((kind) => kind !== "body").join(", ");
+    setNotice(source === "camera" ? "Drawing parsed into semantic regions and an articulated 3D rig. Press Sculpt in 3D." : "Demo drawing parsed into movable 3D parts. Press Sculpt in 3D—or run the full magic demo.");
+    setAgentLine(`I found ${detected || "a body silhouette"}. Each recognized region can become its own 3D part.`);
+    record("WALLALIVE", "Parsed a character rig", `${next.rig.parts.length} volumetric parts · ${next.rig.joints.length} joints · ${next.analysis.shapeHint} silhouette · no upload.`);
   }, [record]);
 
   const captureDrawing = useCallback(() => {
@@ -223,11 +225,11 @@ export default function Home() {
       action: "idle",
       storyTitle: "",
     };
-    commitCharacter(next, `${next.name} is now a closed, rounded 3D volume.`);
+    commitCharacter(next, `${next.name} is now a closed, articulated 3D character.`);
     setStep("alive");
     setAgentLine(`${next.name} feels ${next.personality}. I’ll protect the original colors while we play.`);
     setStoryCaption(`${next.name} lifts away from the wall for the first time.`);
-    record(actor, "Built a skeleton-driven 3D body", `${next.name} · ${drawing.skeleton.length} medial nodes · 64³ sphere-union field · inflation ${next.inflation.toFixed(2)}.`, toolName);
+    record(actor, "Built an articulated 3D character", `${next.name} · ${drawing.rig.parts.length} semantic parts · ${drawing.rig.joints.length} joints · closed 64³ body field.`, toolName);
     return next;
   }, [commitCharacter, record]);
 
@@ -297,16 +299,22 @@ export default function Home() {
     drawingAnalysis: captureRef.current?.analysis ?? null,
     reconstruction: captureRef.current ? {
       segmentation: "target-aware line-art scoring with dense-clutter and border rejection",
-      method: "medial skeleton with local-radius sphere union",
-      field: "skeleton-driven implicit surface",
+      semanticParser: "hierarchical image regions plus silhouette-branch anatomy inference",
+      method: "articulated volumetric parts over a closed medial-skeleton body",
+      field: "semantic skeleton-driven implicit surface",
       polygonizer: "Marching Cubes",
       volumeResolution: 64,
-      topology: "closed rounded front, sides, and back",
+      topology: "closed front, sides, and generated back",
+      texturePlane: false,
+      viewableDegrees: 360,
       contourPoints: captureRef.current.contour.length,
       skeletonPoints: captureRef.current.skeleton.length,
+      rigVersion: captureRef.current.rig.version,
+      semanticParts: captureRef.current.rig.parts.map((part) => ({ id: part.id, kind: part.kind, side: part.side, confidence: part.confidence, source: part.source })),
+      joints: captureRef.current.rig.joints,
       inflation: characterRef.current.inflation,
       neuralModelUsed: false,
-      neuralUpgradePath: "Stable Fast 3D or Hunyuan3D requires a configured GPU inference service",
+      neuralUpgradePath: "CharSegNet-style learned part parsing plus DrawingSpinUp-style multi-view reconstruction requires a configured GPU inference service",
     } : null,
     character: { ...characterRef.current, textureUrl: undefined },
     cameraFeedExposed: false,
@@ -335,8 +343,8 @@ export default function Home() {
       },
       {
         name: "reconstruct_volumetric_character",
-        title: "Reconstruct approved drawing as a volume",
-        description: "Build a closed 3D body from the human-approved drawing's recovered silhouette and medial skeleton. Local-radius spheres follow the skeleton, then Marching Cubes creates the front, sides, and back. This tool cannot open or capture the camera.",
+        title: "Reconstruct approved drawing as an articulated 3D character",
+        description: "Build a closed, 360-degree character from the approved drawing. Hierarchical regions identify facial marks while silhouette branches infer ears and limbs; separate volumetric parts attach to a joint hierarchy over a Marching Cubes body. No front texture plane is used. This tool cannot open or capture the camera.",
         inputSchema: {
           ...base,
           properties: {
@@ -446,7 +454,7 @@ export default function Home() {
       setAgentLine("1 / 4 · I can see the approved shape and colors—but not a live camera feed.");
       await wait(550);
       createCharacter({ name: "Pip", personality: "brave on the outside, shy on the inside", accent: "#5fc7df", inflation: 1.12 }, "BROWSER AGENT", "reconstruct_volumetric_character");
-      setAgentLine("2 / 4 · Medial bones and local radii build Pip’s closed 3D body—not a cutout.");
+      setAgentLine("2 / 4 · Eyes, mouth, ears, arms, hands, legs, and feet become separate volumetric rig parts—not a front card.");
       await wait(700);
       placeCharacter(.68, .53, "wall", 1, "BROWSER AGENT", "place_character");
       setAgentLine("3 / 4 · The agent places Pip without controlling the camera.");
@@ -457,7 +465,7 @@ export default function Home() {
         { action: "wave", caption: "Pip peeks out and waves hello.", durationMs: 1000 },
         { action: "spin", caption: "A full turn reveals Pip’s rounded back.", durationMs: 1400 },
       ], "BROWSER AGENT", "tell_character_story");
-      setAgentLine("4 / 4 · The full turn proves rounded front, sides, and back—with the child in control.");
+      setAgentLine("4 / 4 · The full turn proves a filled back and real 360° geometry; the wave comes from an arm joint.");
     } finally {
       setDemoRunning(false);
     }
@@ -471,7 +479,7 @@ export default function Home() {
     } else setNotice(result?.error ?? "Immersive AR is unavailable; camera-overlay mode is active.");
   }, [record]);
 
-  const handleStageClick = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+  const activateStagePoint = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     const bounds = event.currentTarget.getBoundingClientRect();
     const x = (event.clientX - bounds.left) / bounds.width;
     const y = (event.clientY - bounds.top) / bounds.height;
@@ -484,6 +492,34 @@ export default function Home() {
     if (!characterRef.current.created) return;
     placeCharacter(x, y, "screen", characterRef.current.scale, "CHILD");
   }, [cameraState, placeCharacter]);
+
+  const handleStagePointerDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    rotateGestureRef.current = { pointerId: event.pointerId, lastX: event.clientX, lastY: event.clientY, moved: false };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }, []);
+
+  const handleStagePointerMove = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    const gesture = rotateGestureRef.current;
+    if (!gesture || gesture.pointerId !== event.pointerId || !characterRef.current.created || cameraState === "active") return;
+    const dx = event.clientX - gesture.lastX;
+    const dy = event.clientY - gesture.lastY;
+    if (Math.hypot(dx, dy) > 1.5) gesture.moved = true;
+    gesture.lastX = event.clientX;
+    gesture.lastY = event.clientY;
+    const bounds = event.currentTarget.getBoundingClientRect();
+    stageRef.current?.rotateBy((dx / Math.max(1, bounds.width)) * Math.PI * 1.7, (dy / Math.max(1, bounds.height)) * Math.PI * 1.15);
+  }, [cameraState]);
+
+  const handleStagePointerUp = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    const gesture = rotateGestureRef.current;
+    rotateGestureRef.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+    if (gesture?.moved) {
+      setNotice("360° model rotated. Drag again to inspect its filled back and separate parts.");
+      return;
+    }
+    activateStagePoint(event);
+  }, [activateStagePoint]);
 
   const handleARCapability = useCallback((supported: boolean) => {
     setImmersiveAR(supported);
@@ -534,7 +570,7 @@ export default function Home() {
                   {capture.skeleton.map((point, index) => <circle key={index} cx={(point.x / 1.4 + 0.5) * 100} cy={(0.5 - point.y / 1.4) * 100} r={Math.max(1.1, point.radius / 1.4 * 100)} />)}
                 </svg>
               </div>
-              <div><p className="kicker">DRAWING DNA</p><strong>{capture.analysis.shapeHint} · {capture.analysis.edgeEnergy}</strong><span><i style={{ background: capture.analysis.dominantColor }} /><i style={{ background: capture.analysis.secondaryColor }} /> {capture.analysis.coveragePercent}% INK · {capture.analysis.skeletonPoints} MEDIAL NODES</span></div>
+              <div><p className="kicker">SEMANTIC 3D DNA</p><strong>{capture.rig.detectedKinds.filter((kind) => kind !== "body").join(" · ") || capture.analysis.shapeHint}</strong><span><i style={{ background: capture.rig.bodyColor }} /><i style={{ background: capture.rig.lineColor }} /> {capture.rig.parts.length} PARTS · {capture.rig.joints.length} JOINTS</span></div>
             </div>
           ) : null}
 
@@ -555,13 +591,13 @@ export default function Home() {
             </div>
           </div>
 
-          <div className={`camera-frame step-${step}`} onPointerDown={handleStageClick}>
+          <div className={`camera-frame step-${step}`} onPointerDown={handleStagePointerDown} onPointerMove={handleStagePointerMove} onPointerUp={handleStagePointerUp} onPointerCancel={() => { rotateGestureRef.current = null; }}>
             <video ref={videoRef} className={cameraState === "active" ? "camera-video visible" : "camera-video"} autoPlay muted playsInline aria-label="Live local camera preview" />
             {cameraState !== "active" ? <div className="demo-room"><span className="frame-a" /><span className="frame-b" /><span className="shelf" /><span className="plant" /><span className="baseboard" /></div> : null}
             {capture && cameraState !== "active" ? <img className="captured-room" src={capture.previewUrl} alt="Approved drawing preview" /> : null}
             {step === "camera" ? <><div className="capture-guide"><span /><b>TAP CHARACTER · THEN CAPTURE</b></div><div className="capture-target" style={{ left: `${captureTarget.x * 100}%`, top: `${captureTarget.y * 100}%` }}><i /></div></> : null}
-            <ARStage ref={stageRef} textureUrl={capture?.textureUrl ?? null} skeleton={capture?.skeleton ?? null} action={character.action} accent={character.accent} inflation={character.inflation} visible={character.created} onCapability={handleARCapability} onPlaced={handleARPlaced} />
-            <div className="camera-hud"><span><i /> {cameraState === "active" ? "LIVE CAMERA · LOCAL" : character.created ? "CLOSED 3D VOLUME LIVE" : "SAFE DEMO ROOM"}</span><strong>{immersiveAR ? "WEBXR READY" : "CAMERA AR FALLBACK"}</strong></div>
+            <ARStage ref={stageRef} skeleton={capture?.skeleton ?? null} rig={capture?.rig ?? null} action={character.action} accent={character.accent} inflation={character.inflation} visible={character.created} onCapability={handleARCapability} onPlaced={handleARPlaced} />
+            <div className="camera-hud"><span><i /> {cameraState === "active" ? "LIVE CAMERA · LOCAL" : character.created ? "SEMANTIC 3D RIG LIVE" : "SAFE DEMO ROOM"}</span><strong>{immersiveAR ? "WEBXR READY" : "CAMERA AR FALLBACK"}</strong></div>
             {character.created ? <div className="story-caption"><span>{character.storyTitle || "LIVE MOMENT"}</span><p>{storyCaption}</p></div> : null}
             {cameraState === "denied" || cameraState === "unavailable" ? <div className="camera-message"><b>CAMERA OPTIONAL</b><p>The demo doodle still proves the complete WebMCP and 3D workflow.</p></div> : null}
           </div>
@@ -570,7 +606,7 @@ export default function Home() {
             <div><span>CHARACTER ACTIONS</span><small>{character.created ? `${character.name.toUpperCase()} · ${character.personality.toUpperCase()}` : "WAKE A DRAWING TO PLAY"}</small></div>
             {actions.map((item) => <button key={item.action} disabled={!character.created} className={character.action === item.action ? "active" : ""} onClick={() => animateCharacter(item.action, "CHILD")}><i>{item.glyph}</i>{item.label}</button>)}
           </div>
-          <p className="placement-tip">{character.created ? "Tap to place · Spin reveals the rounded front, sides & generated back" : "Center one closed, bold drawing—the math inflates its silhouette into a closed surface"}</p>
+          <p className="placement-tip">{character.created ? "Drag to rotate freely · Spin shows all 360° · Wave moves a detected arm joint" : "Center one closed, bold drawing—local regions become articulated 3D parts"}</p>
         </section>
 
         <aside className="agent-panel">
