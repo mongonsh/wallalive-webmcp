@@ -16,7 +16,8 @@ export function sameSemanticInstance(candidate: SpatialHint, hint: SpatialHint) 
   if (candidate.kind !== hint.kind) return false;
   const separation = Math.hypot(candidate.center.x - hint.center.x, candidate.center.y - hint.center.y);
   const extent = Math.max(candidate.size.x, candidate.size.y, hint.size.x, hint.size.y) * 0.75;
-  const reach = Math.min(0.14, Math.max(0.065, extent));
+  const minimumReach = hint.kind === "cheek" ? 0.085 : 0.065;
+  const reach = Math.min(0.14, Math.max(minimumReach, extent));
   if (separation >= reach) return false;
   if (hint.kind !== "arm" && hint.kind !== "leg") return true;
   const rawAngle = Math.abs(candidate.rotation - hint.rotation) % Math.PI;

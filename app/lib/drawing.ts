@@ -1461,7 +1461,14 @@ export function mergeLearnedPartHints(extraction: DrawingExtraction, hints: Lear
     return best;
   };
 
-  for (const hint of learned.filter((candidate) => candidate.kind === "eye" || candidate.kind === "cheek" || candidate.kind === "mouth")) {
+  const learnedEyes = learned.filter((candidate) => candidate.kind === "eye");
+  const learnedEyeY = learnedEyes.length
+    ? learnedEyes.reduce((total, eye) => total + eye.center.y, 0) / learnedEyes.length
+    : null;
+  for (const hint of learned.filter((candidate) => (
+    candidate.kind === "eye" || candidate.kind === "mouth"
+      || (candidate.kind === "cheek" && (learnedEyeY === null || candidate.center.y <= learnedEyeY + body.size.y * 0.08))
+  ))) {
     const region = nearestRegion(hint);
     const center = region ? { x: region.x, y: region.y, z: 0 } : hint.center;
     const side = hint.kind === "mouth" ? "center" : sideFor(center.x);
@@ -1491,7 +1498,7 @@ export function mergeLearnedPartHints(extraction: DrawingExtraction, hints: Lear
     const side = sideFor(hint.center.x);
     const existing = parts.filter((part) => part.kind === hint.kind && part.side === side)
       .sort((a, b) => distanceToPart(a, hint) - distanceToPart(b, hint))[0];
-    const mergeReach = body.size.x * (hint.kind === "ear" ? 0.12 : 0.18);
+    const mergeReach = body.size.x * (hint.kind === "ear" ? 0.12 : 0.25);
     if (existing && distanceToPart(existing, hint) <= mergeReach) {
       existing.confidence = Math.max(existing.confidence, hint.confidence);
       existing.source = "learned-model";
