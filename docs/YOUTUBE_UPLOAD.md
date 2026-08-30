@@ -1,0 +1,44 @@
+# YouTube upload package
+
+## Video
+
+`outputs/WallAlive-WebMCP-demo.mp4`
+
+- 46.1 seconds
+- 1440×900 H.264 video + AAC narration
+- 12 MB
+- Public visibility required for the challenge
+
+## Thumbnail
+
+`outputs/WallAlive-YouTube-thumbnail.png` — 1280×720
+
+## Title
+
+WallAlive — Drawings Come Alive in AR with WebMCP | Hackathon Demo
+
+## Description
+
+WallAlive turns a child’s approved wall drawing into a layered 3D character that lives and performs in the room.
+
+The child explicitly opens the camera and approves a drawing. Local Canvas processing extracts it without an upload. A visiting browser agent then uses eight strict WebMCP tools to inspect approved shape and color metadata, create a personality, place the character, animate it, recolor generated depth, and perform mini stories. The camera is deliberately not a WebMCP tool: an agent cannot open it, capture a frame, or upload a child’s room.
+
+Compatible Android devices get real WebXR hit-test placement; every modern browser gets the camera-overlay fallback and a deterministic no-camera judge demo.
+
+Live demo: https://wallalive-webmcp.mungunshagai-tb.chatgpt.site
+
+Public source (MIT): https://github.com/mongonsh/wallalive-webmcp
+
+Built for the WebMCP Challenge.
+
+#WebMCP #WebXR #AugmentedReality #ThreeJS #CreativeCoding
+
+## Settings
+
+- Visibility: **Public**
+- Audience: **No, it’s not made for kids** — this is a developer hackathon demo explaining software, not children’s programming
+- Category: Science & Technology
+- Language: English
+- License: Standard YouTube License
+- Allow embedding: On
+- Paid promotion: Off
