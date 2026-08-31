@@ -3,6 +3,7 @@
 
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ARStageHandle, CharacterAction } from "./components/ARStage";
+import { DrawingWall } from "./components/DrawingWall";
 import { createAniGenDemoDrawing, createDemoDoodle, POSE_SKELETON_EDGES, selectAnimatableRigParts, type CaptureTarget, type DrawingExtraction, type SemanticPart, type SemanticPartKind, type SemanticSide } from "./lib/drawing";
 import { recognizeDrawingParts, recognizeDrawingsFromImageUrl, recognizeDrawingsFromVideo } from "./lib/learned-parts";
 import { createBundledAniGenAsset, disposeNeuralAsset, generateAniGenAsset, isAniGenUnavailableError, type NeuralAsset, type NeuralProgress } from "./lib/anigen";
@@ -14,6 +15,7 @@ type Actor = "CHILD" | "BROWSER AGENT" | "WALLALIVE";
 type AppStep = "ready" | "camera" | "captured" | "alive";
 type CameraState = "idle" | "requesting" | "active" | "denied" | "unavailable";
 type PanelTab = "agent" | "tools" | "privacy" | "history";
+type WorldId = "studio" | "storybook" | "wizard" | "museum";
 
 type CharacterState = {
   created: boolean;
@@ -72,11 +74,19 @@ const toolNames = [
   ["reconstruct_rigged_3d_character", "WRITE"],
   ["set_character_personality", "WRITE"],
   ["place_character", "WRITE"],
+  ["set_scene_world", "WRITE"],
   ["animate_character", "WRITE"],
   ["recolor_character", "WRITE"],
   ["tell_character_story", "WRITE"],
   ["list_activity", "READ"],
 ] as const;
+
+const worlds: Array<{ id: WorldId; label: string; short: string }> = [
+  { id: "studio", label: "My room", short: "ROOM" },
+  { id: "storybook", label: "Storybook kingdom", short: "KINGDOM" },
+  { id: "wizard", label: "Wizard academy", short: "WIZARD" },
+  { id: "museum", label: "Grand museum", short: "MUSEUM" },
+];
 
 const actions: Array<{ action: CharacterAction; label: string; glyph: string }> = [
   { action: "wave", label: "Wave", glyph: "◒" },
@@ -138,6 +148,7 @@ export default function Home() {
   const rotateGestureRef = useRef<{ pointerId: number; lastX: number; lastY: number; moved: boolean } | null>(null);
   const partDragRef = useRef<{ pointerId: number; partId: string } | null>(null);
   const pendingUploadRef = useRef<PendingUpload | null>(null);
+  const worldRef = useRef<WorldId>("studio");
 
   const [step, setStep] = useState<AppStep>("ready");
   const [cameraState, setCameraState] = useState<CameraState>("idle");
@@ -163,6 +174,8 @@ export default function Home() {
   const [selectedPartId, setSelectedPartId] = useState<string | null>(null);
   const [pendingPartKind, setPendingPartKind] = useState<(typeof anatomyKinds)[number] | null>(null);
   const [pendingUpload, setPendingUpload] = useState<PendingUpload | null>(null);
+  const [drawingWallOpen, setDrawingWallOpen] = useState(false);
+  const [world, setWorld] = useState<WorldId>("studio");
 
   const record = useCallback((actor: Actor, action: string, detail: string, toolName?: string) => {
     const item: Activity = { id: makeId(), time: timeLabel(), actor, action, detail, toolName };
@@ -353,6 +366,23 @@ export default function Home() {
     }
   }, [record, setDrawing]);
 
+  const processWallDrawing = useCallback(async ({ dataUrl, target }: { dataUrl: string; target: CaptureTarget }) => {
+    setDrawingWallOpen(false);
+    setNotice("Separating your wall into characters, then building one movement rig for each…");
+    try {
+      const drawings = await recognizeDrawingsFromImageUrl(dataUrl, target, 6);
+      setDrawing(drawings[0], "upload", drawings);
+      record("CHILD", "Painted on the Wall Studio", `${drawings.length} clean authored figure${drawings.length === 1 ? "" : "s"} found · separate masks and rigs · no paper, room, or camera noise.`);
+      setNotice(drawings.length > 1
+        ? `${drawings.length} characters found. Each one has its own cutout and movement rig.`
+        : "Character found. Check the clean cutout, then choose private or neural 3D.");
+    } catch (error) {
+      console.warn("WallAlive authored-wall recognition was safely rejected", error);
+      setDrawingWallOpen(true);
+      setNotice(error instanceof Error ? error.message : "I could not find a complete character on the wall yet.");
+    }
+  }, [record, setDrawing]);
+
   const cancelPendingUpload = useCallback(() => {
     if (pendingUploadRef.current) URL.revokeObjectURL(pendingUploadRef.current.url);
     pendingUploadRef.current = null;
@@ -480,6 +510,16 @@ export default function Home() {
     return next;
   }, [commitCharacter, record]);
 
+  const changeWorld = useCallback((requested: WorldId, actor: Actor, toolName?: string) => {
+    const next = worlds.some((candidate) => candidate.id === requested) ? requested : "studio";
+    worldRef.current = next;
+    setWorld(next);
+    const selected = worlds.find((candidate) => candidate.id === next) ?? worlds[0];
+    setNotice(`${selected.label} is now behind the characters.`);
+    record(actor, "Changed the 3D world", selected.label, toolName);
+    return { id: selected.id, label: selected.label };
+  }, [record]);
+
   const animateCharacter = useCallback((action: CharacterAction, actor: Actor, toolName?: string, caption?: string) => {
     const current = characterRef.current;
     if (!current.created) throw new Error("Create the character before animating it.");
@@ -533,6 +573,7 @@ export default function Home() {
   }, [animateCharacter, commitCharacter, record]);
 
   const inspectScene = useCallback(() => ({
+    world: worldRef.current,
     drawingApproved: Boolean(captureRef.current),
     drawingAnalysis: captureRef.current?.analysis ?? null,
     reconstruction: captureRef.current ? {
@@ -669,6 +710,14 @@ export default function Home() {
         execute: async (input, options) => { const signal = executionSignal(options); try { guard(signal); return ok({ character: placeCharacter(numberValue(input.x, .5), numberValue(input.y, .5), ["wall", "floor"].includes(String(input.surface)) ? input.surface as "wall" | "floor" : "screen", numberValue(input.scale, 1), "BROWSER AGENT", "place_character") }); } catch (error) { return fail(error); } },
       },
       {
+        name: "set_scene_world",
+        title: "Change the shared 3D world",
+        description: "Switch the approved character scene between the real room and three original child-safe fantasy environments. Does not navigate, capture, or upload anything.",
+        inputSchema: { ...base, properties: { world: { type: "string", enum: ["studio", "storybook", "wizard", "museum"] } }, required: ["world"] },
+        annotations: { readOnlyHint: false, untrustedContentHint: true },
+        execute: async (input, options) => { const signal = executionSignal(options); try { guard(signal); return ok({ world: changeWorld(stringValue(input.world, "studio", 20) as WorldId, "BROWSER AGENT", "set_scene_world") }); } catch (error) { return fail(error); } },
+      },
+      {
         name: "animate_character",
         title: "Animate character",
         description: "Play one safe visible animation on the created character. Does not navigate, capture, upload, or modify the original drawing.",
@@ -728,7 +777,7 @@ export default function Home() {
       setNotice(`${tools.length} WebMCP tools are ready. Camera capture remains human-only.`);
     }).catch(() => setWebMcpReady(false));
     return () => controller.abort();
-  }, [animateCharacter, createCharacter, inspectScene, placeCharacter, recolorCharacter, requestNeuralConsent, runStory, setPersonality]);
+  }, [animateCharacter, changeWorld, createCharacter, inspectScene, placeCharacter, recolorCharacter, requestNeuralConsent, runStory, setPersonality]);
 
   const runMagicDemo = useCallback(async () => {
     if (demoRunning) return;
@@ -966,7 +1015,7 @@ export default function Home() {
         <a className="alive-brand" href="#play"><span>WALL</span>ALIVE<i>●</i></a>
         <div className="mini-steps" aria-label="Three steps"><span className={stepIndex >= 1 ? "done" : "active"}>1 Scan</span><span className={stepIndex >= 2 ? "done" : ""}>2 Check</span><span className={stepIndex >= 3 ? "done" : ""}>3 Play</span></div>
         <div className="header-actions">
-          <div className={`ready-pill ${webMcpReady ? "is-ready" : ""}`}><i /> {webMcpReady ? "8 WEBMCP TOOLS" : "INTERACTIVE DEMO"}</div>
+          <div className={`ready-pill ${webMcpReady ? "is-ready" : ""}`}><i /> {webMcpReady ? `${toolNames.length} WEBMCP TOOLS` : "INTERACTIVE DEMO"}</div>
           <button className="inspector-toggle" onClick={() => setInspectorOpen(true)}>WEBMCP</button>
           <button className="judge-demo" onClick={runMagicDemo} disabled={demoRunning}>{demoRunning ? "PLAYING…" : "PLAY JUDGE DEMO"}</button>
         </div>
@@ -1012,6 +1061,7 @@ export default function Home() {
             <p>Drawing-aware isolation and character checks stay on-device. Real 3D sends only the reviewed cutout after a second visible approval—never live frames.</p>
           </div>
           <input ref={uploadRef} hidden type="file" accept="image/*" onChange={uploadDrawing} />
+          <button className="demo-doodle wall-drawing-link" onClick={() => setDrawingWallOpen(true)}>OPEN THE DRAWING WALL <span>✦</span></button>
           <button className="demo-doodle upload-drawing" onClick={() => uploadRef.current?.click()}>UPLOAD A DRAWING PHOTO <span>↥</span></button>
           <button className="demo-doodle" onClick={loadDemoDrawing}>NO CAMERA? TRY A DEMO DOODLE <span>＋</span></button>
         </aside>
@@ -1023,6 +1073,7 @@ export default function Home() {
               {immersiveAR && character.created ? <button className="ar-button" onClick={enterAR}>ENTER REAL AR <span>◎</span></button> : null}
               {cameraState === "active" ? <button className="stop-camera" onClick={stopCamera}>STOP CAMERA</button> : null}
               {cameraState !== "active" && step === "ready" ? <button className="upload-camera" onClick={() => uploadRef.current?.click()}>UPLOAD PHOTO</button> : null}
+              {cameraState !== "active" ? <button className="draw-wall-cta" onClick={() => setDrawingWallOpen(true)}>DRAW ON WALL <span>✦</span></button> : null}
               <button className="primary-camera" onClick={primaryButton.action} disabled={cameraState === "requesting" || neuralBusy}>{cameraState === "requesting" ? "OPENING…" : neuralBusy ? "GENERATING…" : primaryButton.label}<span>↗</span></button>
             </div>
           </div>
@@ -1044,10 +1095,10 @@ export default function Home() {
             <button onClick={() => setPartEditorOpen(true)}>REVIEW RIG</button>
           </div> : null}
 
-          <div className={`camera-frame step-${step}`} onPointerDown={handleStagePointerDown} onPointerMove={handleStagePointerMove} onPointerUp={handleStagePointerUp} onPointerCancel={() => { rotateGestureRef.current = null; }}>
+          <div className={`camera-frame step-${step} world-${world}`} onPointerDown={handleStagePointerDown} onPointerMove={handleStagePointerMove} onPointerUp={handleStagePointerUp} onPointerCancel={() => { rotateGestureRef.current = null; }}>
             <video ref={videoRef} className={cameraState === "active" ? "camera-video visible" : "camera-video"} autoPlay muted playsInline aria-label="Live local camera preview" />
-            {cameraState !== "active" ? <div className="demo-room"><span className="frame-a" /><span className="frame-b" /><span className="shelf" /><span className="plant" /><span className="baseboard" /></div> : null}
-            {capture && cameraState !== "active" ? <img className="captured-room" src={capture.previewUrl} alt="Original drawing scene" /> : null}
+            {cameraState !== "active" && world === "studio" ? <div className="demo-room"><span className="frame-a" /><span className="frame-b" /><span className="shelf" /><span className="plant" /><span className="baseboard" /></div> : null}
+            {capture && cameraState !== "active" && world === "studio" ? <img className="captured-room" src={capture.previewUrl} alt="Original drawing scene" /> : null}
             {capture && cameraState !== "active" && !character.created ? <div className="cutout-review" onPointerDown={(event) => event.stopPropagation()}><img src={capture.textureUrl} alt="Isolated character cutout to review" /><span>{captureEnsemble.length > 1 ? `${captureEnsemble.length} SEPARATE FIGURES FOUND` : "IS THE WHOLE CHARACTER VISIBLE?"}</span><div><button onClick={requestNeuralConsent}>YES · CONTINUE</button><button onClick={() => capture.sourceScope === "camera" ? startCamera() : uploadRef.current?.click()}>NO · TRY AGAIN</button></div></div> : null}
             {step === "camera" ? <><div className="capture-guide"><span /><b>TAP CHARACTER · THEN CAPTURE</b></div><div className="capture-target" style={{ left: `${captureTarget.x * 100}%`, top: `${captureTarget.y * 100}%` }}><i /></div></> : null}
             {character.created ? <Suspense fallback={<div className="three-layer" aria-hidden="true" />}>
@@ -1061,6 +1112,8 @@ export default function Home() {
             {character.created && storyCaption ? <div className="story-caption"><span>{character.storyTitle || "LIVE MOMENT"}</span><p>{storyCaption}</p></div> : null}
             {cameraState === "denied" || cameraState === "unavailable" ? <div className="camera-message"><b>CAMERA OPTIONAL</b><p>The demo doodle still proves the complete WebMCP and 3D workflow.</p></div> : null}
           </div>
+
+          <div className="world-switcher" aria-label="Choose a 3D world"><div><span>3D WORLDS</span><small>{worlds.find((item) => item.id === world)?.label}</small></div>{worlds.map((item) => <button key={item.id} className={world === item.id ? "active" : ""} onClick={() => changeWorld(item.id, "CHILD")}><i>{item.id === "studio" ? "⌂" : item.id === "storybook" ? "♜" : item.id === "wizard" ? "✦" : "◉"}</i>{item.short}</button>)}</div>
 
           <div className="action-tray">
             <div><span>CHARACTER ACTIONS</span><small>{character.created ? `${character.name.toUpperCase()} · ${character.personality.toUpperCase()}` : "WAKE A DRAWING TO PLAY"}</small></div>
@@ -1089,7 +1142,7 @@ export default function Home() {
 
           {panelTab === "tools" ? (
             <div className="panel-body">
-              <p className="kicker">WEBMCP INSPECTOR</p><h2>Eight tools.<br />Zero camera control.</h2><p>The agent acts on approved state through narrow schemas and shared validation.</p>
+              <p className="kicker">WEBMCP INSPECTOR</p><h2>Nine tools.<br />Zero camera control.</h2><p>The agent can now direct the character and its world through narrow schemas and shared validation.</p>
               <div className="tools-list">{toolNames.map(([name, mode], index) => <div key={name}><span>{String(index + 1).padStart(2, "0")}</span><code>{name}</code><i>{mode}</i></div>)}</div>
             </div>
           ) : null}
@@ -1110,6 +1163,7 @@ export default function Home() {
           <footer className="agent-footer"><span>THE AGENT DIRECTS</span><b>THE CHILD DECIDES</b></footer>
         </aside>
       </section>
+      <DrawingWall open={drawingWallOpen} onClose={() => setDrawingWallOpen(false)} onMake3D={processWallDrawing} />
       {pendingUpload ? <div className="paper-picker-backdrop" role="dialog" aria-modal="true" aria-labelledby="paper-picker-title">
         <section className="paper-picker">
           <header><div><span>ONE QUICK TAP</span><h2 id="paper-picker-title">Which drawing?</h2></div><button onClick={cancelPendingUpload} aria-label="Close photo">×</button></header>

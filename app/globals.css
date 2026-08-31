@@ -560,3 +560,149 @@ body::before {
   .part-editor-tools > div { grid-template-columns: repeat(3, 1fr); }
   .part-editor-tools footer { grid-template-columns: repeat(3, 1fr); }
 }
+
+/* Native authoring + original scene worlds */
+.draw-wall-cta { background: var(--lime); box-shadow: 4px 4px 0 var(--ink); }
+.draw-wall-cta span { margin-left: 12px; }
+.wall-drawing-link { color: var(--coral); }
+
+.camera-frame.world-storybook,
+.camera-frame.world-wizard,
+.camera-frame.world-museum {
+  background-color: #b9aa92;
+  background-image: linear-gradient(180deg, rgba(24, 49, 46, .03), rgba(24, 49, 46, .13)), url("/wallalive-worlds.png");
+  background-repeat: no-repeat;
+  background-size: 300% 100%;
+}
+.camera-frame.world-storybook { background-position: left center; }
+.camera-frame.world-wizard { background-position: center center; }
+.camera-frame.world-museum { background-position: right center; }
+
+.world-switcher {
+  margin-top: 14px;
+  padding: 7px;
+  display: grid;
+  grid-template-columns: minmax(150px, 1fr) repeat(4, minmax(80px, .64fr));
+  gap: 6px;
+  border: 1px solid rgba(24, 49, 46, .14);
+  background: rgba(255, 250, 240, .55);
+}
+.world-switcher > div { align-self: center; padding: 0 8px; display: grid; gap: 3px; }
+.world-switcher > div span { font: 850 8px var(--mono); letter-spacing: .1em; }
+.world-switcher > div small { opacity: .5; font: 7px var(--mono); text-transform: uppercase; }
+.world-switcher button { min-height: 48px; padding: 5px 7px; border: 1px solid rgba(24,49,46,.14); display: grid; grid-template-columns: auto 1fr; place-items: center; gap: 6px; background: rgba(255,255,255,.44); cursor: pointer; font: 800 7px var(--mono); letter-spacing: .04em; }
+.world-switcher button i { font: 17px var(--serif); font-style: normal; }
+.world-switcher button.active { border-color: var(--ink); background: var(--ink); color: var(--cream); box-shadow: 3px 3px 0 var(--lime); }
+
+.drawing-wall-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  padding: 12px;
+  display: grid;
+  place-items: center;
+  background: rgba(15, 31, 29, .88);
+  backdrop-filter: blur(14px);
+}
+.drawing-wall {
+  width: min(1500px, 100%);
+  height: min(920px, calc(100dvh - 24px));
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  overflow: hidden;
+  border: 1px solid rgba(255,255,255,.3);
+  background: var(--cream);
+  box-shadow: 12px 12px 0 var(--lime), 0 34px 120px rgba(0,0,0,.45);
+}
+.drawing-wall > header {
+  min-height: 76px;
+  padding: 12px 18px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  border-bottom: 1px solid var(--line);
+  background: var(--paper);
+}
+.drawing-wall > header span { color: var(--coral); font: 850 8px var(--mono); letter-spacing: .13em; }
+.drawing-wall > header h2 { margin: 3px 0 0; font: clamp(24px, 3vw, 36px)/1 var(--serif); letter-spacing: -.035em; }
+.wall-history { display: flex; gap: 6px; }
+.wall-history button { min-width: 43px; height: 43px; padding: 0 12px; border: 1px solid var(--line); background: transparent; cursor: pointer; font: 850 9px var(--mono); }
+.wall-history button:last-child { font: 27px/1 var(--font-geist-sans); }
+.wall-workspace { min-height: 0; display: grid; grid-template-columns: 84px minmax(0, 1fr); background: #d7cbb7; }
+.wall-tools { min-height: 0; padding: 8px; overflow-y: auto; display: grid; align-content: start; gap: 5px; border-right: 1px solid rgba(24,49,46,.18); background: var(--paper); }
+.wall-tools button { min-height: 54px; padding: 6px 2px; border: 1px solid transparent; display: grid; place-items: center; gap: 2px; background: transparent; cursor: pointer; font: 750 7px var(--mono); }
+.wall-tools button i { font: 19px var(--serif); font-style: normal; }
+.wall-tools button.active { border-color: var(--ink); background: var(--lime); box-shadow: 3px 3px 0 var(--ink); }
+.wall-canvas-wrap {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  padding: 14px;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  background-image: linear-gradient(rgba(24,49,46,.08) 1px, transparent 1px), linear-gradient(90deg, rgba(24,49,46,.08) 1px, transparent 1px);
+  background-size: 28px 28px;
+}
+.wall-canvas-wrap canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  max-width: 1400px;
+  max-height: 850px;
+  object-fit: contain;
+  background: white;
+  box-shadow: 0 18px 55px rgba(24,49,46,.2);
+  cursor: crosshair;
+  touch-action: none;
+}
+.wall-canvas-status { position: absolute; left: 50%; bottom: 24px; translate: -50% 0; padding: 8px 12px; border-radius: 999px; display: flex; align-items: center; gap: 7px; background: rgba(24,49,46,.9); color: var(--cream); white-space: nowrap; font: 750 7px var(--mono); letter-spacing: .04em; pointer-events: none; }
+.wall-canvas-status i { width: 7px; height: 7px; border-radius: 50%; background: var(--lime); }
+.drawing-wall > footer { min-height: 76px; padding: 10px 12px; display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 16px; border-top: 1px solid var(--line); background: var(--paper); }
+.wall-palette { display: flex; align-items: center; gap: 5px; overflow-x: auto; scrollbar-width: none; }
+.wall-palette::-webkit-scrollbar { display: none; }
+.wall-palette button, .wall-palette label { flex: 0 0 auto; width: 29px; height: 29px; border: 2px solid var(--paper); outline: 1px solid rgba(24,49,46,.17); border-radius: 50%; cursor: pointer; }
+.wall-palette button.active { outline: 3px solid var(--ink); outline-offset: 1px; }
+.wall-palette label { position: relative; display: grid; place-items: center; overflow: hidden; background: conic-gradient(#f44, #ff0, #0f8, #0af, #83f, #f44); }
+.wall-palette label input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.wall-palette label span { color: white; font-size: 18px; text-shadow: 0 1px 3px #000; pointer-events: none; }
+.wall-size { min-width: 170px; display: grid; grid-template-columns: auto 110px auto; align-items: center; gap: 8px; font: 850 7px var(--mono); }
+.wall-size input { accent-color: var(--coral); }
+.wall-size i { display: block; max-width: 30px; max-height: 30px; border-radius: 50%; }
+.wall-make-3d { min-width: 188px; min-height: 52px; padding: 0 16px; border: 0; display: flex; align-items: center; justify-content: space-between; gap: 20px; background: var(--coral); color: white; box-shadow: 5px 5px 0 var(--ink); cursor: pointer; font: 900 9px var(--mono); letter-spacing: .08em; }
+.wall-make-3d i { color: var(--lime); font: 18px var(--serif); font-style: normal; }
+
+@media (max-width: 820px) {
+  .world-switcher { grid-template-columns: repeat(4, 1fr); }
+  .world-switcher > div { grid-column: 1 / -1; padding: 3px; }
+  .world-switcher button { grid-template-columns: 1fr; gap: 2px; }
+  .drawing-wall-backdrop { padding: 0; }
+  .drawing-wall { width: 100%; height: 100dvh; box-shadow: none; border: 0; }
+  .drawing-wall > header { min-height: 62px; padding: 8px 10px; }
+  .drawing-wall > header h2 { font-size: 20px; }
+  .wall-history button { min-width: 36px; height: 38px; padding: 0 8px; }
+  .wall-history button:nth-child(3) { display: none; }
+  .wall-workspace { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); }
+  .wall-tools { padding: 6px; overflow-x: auto; overflow-y: hidden; grid-auto-flow: column; grid-auto-columns: 55px; border-right: 0; border-bottom: 1px solid var(--line); }
+  .wall-tools button { min-height: 47px; }
+  .wall-tools button span { display: none; }
+  .wall-canvas-wrap { padding: 8px; }
+  .wall-canvas-status { bottom: 14px; max-width: calc(100% - 28px); overflow: hidden; text-overflow: ellipsis; }
+  .drawing-wall > footer { min-height: 112px; padding: 8px; grid-template-columns: minmax(0, 1fr) auto; gap: 9px; }
+  .wall-palette { grid-column: 1 / -1; }
+  .wall-size { min-width: 0; grid-template-columns: auto minmax(70px, 1fr) auto; }
+  .wall-make-3d { min-width: 150px; min-height: 47px; }
+}
+
+@media (max-width: 430px) {
+  .draw-wall-cta { order: -1; }
+  .world-switcher button { font-size: 6px; }
+  .drawing-wall > header span { display: none; }
+  .drawing-wall > header h2 { font-size: 17px; }
+  .wall-history button { min-width: 32px; width: 32px; padding: 0; }
+  .wall-size { grid-template-columns: auto minmax(55px, 1fr); }
+  .wall-size i { display: none; }
+  .wall-make-3d { min-width: 138px; padding: 0 11px; font-size: 8px; }
+}

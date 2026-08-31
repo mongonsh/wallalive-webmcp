@@ -36,13 +36,14 @@ test("server-renders the WallAlive product shell and security headers", async ()
   assert.doesNotMatch(html, /codex-preview|react-loading-skeleton|Starter Project|CutRoom/i);
 });
 
-test("registers eight strict WebMCP tools without camera authority", async () => {
+test("registers nine strict WebMCP tools without camera authority", async () => {
   const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
   const expectedTools = [
     "inspect_wall_scene",
     "reconstruct_rigged_3d_character",
     "set_character_personality",
     "place_character",
+    "set_scene_world",
     "animate_character",
     "recolor_character",
     "tell_character_story",
@@ -52,7 +53,7 @@ test("registers eight strict WebMCP tools without camera authority", async () =>
   for (const tool of expectedTools) assert.match(page, new RegExp(`name: ["']${tool}["']`));
 
   const registeredNames = [...page.matchAll(/name: ["']([^"']+)["']/g)].map((match) => match[1]);
-  assert.equal(registeredNames.filter((name) => expectedTools.includes(name)).length, 8);
+  assert.equal(registeredNames.filter((name) => expectedTools.includes(name)).length, 9);
   assert.equal(registeredNames.some((name) => /camera|capture|upload/.test(name)), false);
   assert.match(page, /document\.modelContext/);
   assert.match(page, /registerTool\(tool, \{ signal: controller\.signal \}\)/);
@@ -72,6 +73,23 @@ test("registers eight strict WebMCP tools without camera authority", async () =>
   assert.match(page, /Private contour-preserving 3D is ready/);
   assert.match(page, /topologyRecognition/);
   assert.match(page, /variable graph decoded from learned centerline, endpoints, and junction fields/);
+  assert.match(page, /world: worldRef\.current/);
+  assert.match(page, /DRAW ON WALL/);
+  assert.match(page, /recognizeDrawingsFromImageUrl\(dataUrl, target, 6\)/);
+});
+
+test("ships a pressure-aware full drawing wall and original switchable scene atlas", async () => {
+  const wall = await readFile(new URL("../app/components/DrawingWall.tsx", import.meta.url), "utf8");
+  const css = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
+  const worlds = new URL("../public/wallalive-worlds.png", import.meta.url);
+  assert.match(wall, /getCoalescedEvents/);
+  assert.match(wall, /event\.pressure/);
+  assert.match(wall, /floodFill/);
+  for (const tool of ["pencil", "brush", "marker", "spray", "eraser", "fill", "line", "rectangle", "circle", "triangle", "star"]) assert.match(wall, new RegExp(`id: ["']${tool}["']`));
+  assert.match(wall, /canvas\.toDataURL\("image\/png"\)/);
+  assert.match(css, /wallalive-worlds\.png/);
+  assert.match(css, /background-size: 300% 100%/);
+  assert.ok((await stat(worlds)).size > 100_000);
 });
 
 test("implements local drawing extraction and real WebXR hit testing", async () => {
