@@ -34,6 +34,20 @@ export type NeuralAsset = {
   generatedAt: string;
 };
 
+export class AniGenUnavailableError extends Error {
+  reason: "capacity" | "network";
+
+  constructor(reason: "capacity" | "network", message: string) {
+    super(message);
+    this.name = "AniGenUnavailableError";
+    this.reason = reason;
+  }
+}
+
+export function isAniGenUnavailableError(error: unknown): error is AniGenUnavailableError {
+  return error instanceof AniGenUnavailableError;
+}
+
 type AniGenFile = { url?: string; path?: string; mime_type?: string };
 
 function abortError() {
@@ -97,10 +111,10 @@ function friendlyError(error: unknown) {
   if (error instanceof DOMException && error.name === "AbortError") return error;
   const message = error instanceof Error ? error.message : String(error);
   if (/quota|GPU task aborted|ZeroGPU|requested vs\./i.test(message)) {
-    return new Error("AniGen's public GPU time is temporarily full. The no-wait rigged judge demo still works; live generation can be retried later or pointed at a self-hosted AniGen GPU.");
+    return new AniGenUnavailableError("capacity", "AniGen's shared GPU is busy, so WallAlive is finishing privately on this device.");
   }
-  if (/failed to fetch|network|load failed/i.test(message)) {
-    return new Error("AniGen could not be reached from this browser. Check the connection and try again; the approved drawing remains local.");
+  if (/failed to fetch|network|load failed|space metadata could not be loaded|could not load (?:the |this )?space|connection (?:failed|error)/i.test(message)) {
+    return new AniGenUnavailableError("network", "AniGen could not be reached, so WallAlive is finishing privately on this device.");
   }
   return error instanceof Error ? error : new Error(message);
 }

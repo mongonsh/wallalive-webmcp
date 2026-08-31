@@ -67,7 +67,8 @@ test("registers eight strict WebMCP tools without camera authority", async () =>
   assert.match(page, /externalUploadApproved/);
   assert.match(page, /FULL NEURAL RIG \+ DRAWING PARTS/);
   assert.match(page, /COLOR MATCHED/);
-  assert.match(page, /viewableDegrees: neuralAssetRef\.current \? 360 : 0/);
+  assert.match(page, /viewableDegrees: neuralAssetRef\.current \|\| localFallbackRef\.current \? 360 : 0/);
+  assert.match(page, /local-fallback-ready/);
   assert.match(page, /No fake 3D model was created/);
   assert.match(page, /topologyRecognition/);
   assert.match(page, /variable graph decoded from learned centerline, endpoints, and junction fields/);
