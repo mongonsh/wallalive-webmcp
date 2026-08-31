@@ -3,9 +3,9 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import * as THREE from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
-import { MarchingCubes } from "three/addons/objects/MarchingCubes.js";
 import { selectAnimatableRigParts, type CharacterRig, type ContourPoint, type DrawingExtraction, type LearnedDepthField, type SkeletonPoint } from "../lib/drawing";
-import { classifySurfaceMaterial, hasRecognizableArtworkSurface } from "../lib/mesh-materials";
+import { buildArtworkShellGeometry } from "../lib/artwork-shell";
+import { hasRecognizableArtworkSurface } from "../lib/mesh-materials";
 import { disposeObject, prepareNeuralCharacter, type NeuralRigMap, type NeuralSemanticMap, type RiggedAssetInfo } from "../lib/rigged-model";
 
 export type CharacterAction = "idle" | "wave" | "dance" | "hop" | "walk" | "hide" | "spin";
@@ -42,25 +42,6 @@ type SceneHandles = {
   dispose: () => void;
 };
 
-const VOLUME_RESOLUTION = 64;
-function pointInsideContour(x: number, y: number, contour: ContourPoint[]) {
-  let inside = false;
-  for (let current = 0, previous = contour.length - 1; current < contour.length; previous = current, current += 1) {
-    const a = contour[current];
-    const b = contour[previous];
-    if ((a.y > y) !== (b.y > y) && x < ((b.x - a.x) * (y - a.y)) / (b.y - a.y) + a.x) inside = !inside;
-  }
-  return inside;
-}
-
-function distanceToSegment(x: number, y: number, start: ContourPoint, end: ContourPoint) {
-  const dx = end.x - start.x;
-  const dy = end.y - start.y;
-  const lengthSquared = dx * dx + dy * dy;
-  const amount = lengthSquared ? Math.min(1, Math.max(0, ((x - start.x) * dx + (y - start.y) * dy) / lengthSquared)) : 0;
-  return Math.hypot(x - (start.x + dx * amount), y - (start.y + dy * amount));
-}
-
 function segmentProjection(x: number, y: number, start: ContourPoint, end: ContourPoint) {
   const dx = end.x - start.x;
   const dy = end.y - start.y;
@@ -70,28 +51,6 @@ function segmentProjection(x: number, y: number, start: ContourPoint, end: Conto
     amount,
     distance: Math.hypot(x - (start.x + dx * amount), y - (start.y + dy * amount)),
   };
-}
-
-function distanceToContour(x: number, y: number, contour: ContourPoint[]) {
-  let distance = Infinity;
-  for (let index = 0; index < contour.length; index += 1) {
-    distance = Math.min(distance, distanceToSegment(x, y, contour[index], contour[(index + 1) % contour.length]));
-  }
-  return distance;
-}
-
-function sampleLearnedDepth(field: Float32Array, depth: LearnedDepthField, x: number, y: number) {
-  const modelX = Math.min(depth.size - 1, Math.max(0, (x / 1.4 + 0.5) * (depth.size - 1)));
-  const modelY = Math.min(depth.size - 1, Math.max(0, (0.5 - y / 1.4) * (depth.size - 1)));
-  const x0 = Math.floor(modelX);
-  const y0 = Math.floor(modelY);
-  const x1 = Math.min(depth.size - 1, x0 + 1);
-  const y1 = Math.min(depth.size - 1, y0 + 1);
-  const amountX = modelX - x0;
-  const amountY = modelY - y0;
-  const top = field[y0 * depth.size + x0] * (1 - amountX) + field[y0 * depth.size + x1] * amountX;
-  const bottom = field[y1 * depth.size + x0] * (1 - amountX) + field[y1 * depth.size + x1] * amountX;
-  return (top * (1 - amountY) + bottom * amountY) * depth.depthScale;
 }
 
 export function buildCharacter(
@@ -134,123 +93,23 @@ export function buildCharacter(
     metalness: 0,
     side: THREE.DoubleSide,
   });
-  const volume = new MarchingCubes(VOLUME_RESOLUTION, sideMaterial, false, false, 200_000);
-  volume.name = "silhouette-distance-lens";
-  volume.isolation = 0;
-  volume.field.fill(-1);
-  const half = VOLUME_RESOLUTION / 2;
-  const cell = 1 / half;
   const bodyPart = rig.parts.find((part) => part.kind === "body");
-  const insideField = new Uint8Array(VOLUME_RESOLUTION * VOLUME_RESOLUTION);
-  const edgeDistanceField = new Float32Array(VOLUME_RESOLUTION * VOLUME_RESOLUTION);
-  let maximumInteriorDistance = cell;
-  for (let y = 1; y < VOLUME_RESOLUTION - 1; y += 1) {
-    const fieldY = (y - half) / half;
-    for (let x = 1; x < VOLUME_RESOLUTION - 1; x += 1) {
-      const fieldX = (x - half) / half;
-      const index = y * VOLUME_RESOLUTION + x;
-      const inside = pointInsideContour(fieldX, fieldY, contour);
-      const edgeDistance = distanceToContour(fieldX, fieldY, contour);
-      insideField[index] = inside ? 1 : 0;
-      edgeDistanceField[index] = edgeDistance;
-      if (inside) maximumInteriorDistance = Math.max(maximumInteriorDistance, edgeDistance);
-    }
-  }
-  // The learned depth prior was trained on analytic ellipsoids. Used without
-  // an envelope it can turn an uncertain photo mask into a face-like sphere.
-  // Keep the model's front/back asymmetry, but constrain it inside a shallow
-  // signed-distance relief whose silhouette and artwork stay authoritative.
-  const bodyHalfDepth = Math.min(0.16, Math.max(0.075, (bodyPart?.size.z ?? 0.28) * 0.42 * inflation));
-  const fallbackDepthAt = (x: number, y: number) => {
-    if (!pointInsideContour(x, y, contour)) return 0;
-    const normalizedDistance = Math.min(1, distanceToContour(x, y, contour) / maximumInteriorDistance);
-    return Math.max(cell * 0.7, bodyHalfDepth * Math.sqrt(normalizedDistance));
-  };
-  const clampDepth = (learnedValue: number, envelope: number, envelopeScale: number) => Math.max(
-    cell * 0.7,
-    Math.min(bodyHalfDepth * 1.12, envelope * envelopeScale, Math.max(envelope * 0.72, learnedValue)),
-  );
-  const frontDepthAt = (x: number, y: number) => {
-    if (!pointInsideContour(x, y, contour)) return 0;
-    const envelope = fallbackDepthAt(x, y);
-    if (!depth) return envelope;
-    return clampDepth(sampleLearnedDepth(depth.front, depth, x, y) * inflation, envelope, 1.12);
-  };
-  const backDepthAt = (x: number, y: number) => {
-    if (!pointInsideContour(x, y, contour)) return 0;
-    const envelope = fallbackDepthAt(x, y);
-    if (!depth) return envelope;
-    return clampDepth(sampleLearnedDepth(depth.back, depth, x, y) * inflation, envelope, 1.04);
-  };
-  const frontDepthField = new Float32Array(VOLUME_RESOLUTION * VOLUME_RESOLUTION);
-  const backDepthField = new Float32Array(VOLUME_RESOLUTION * VOLUME_RESOLUTION);
-  for (let y = 1; y < VOLUME_RESOLUTION - 1; y += 1) {
-    const fieldY = (y - half) / half;
-    for (let x = 1; x < VOLUME_RESOLUTION - 1; x += 1) {
-      const planeIndex = y * VOLUME_RESOLUTION + x;
-      if (!insideField[planeIndex]) continue;
-      const fieldX = (x - half) / half;
-      frontDepthField[planeIndex] = frontDepthAt(fieldX, fieldY);
-      backDepthField[planeIndex] = backDepthAt(fieldX, fieldY);
-    }
-  }
-  for (let z = 1; z < VOLUME_RESOLUTION - 1; z += 1) {
-    const fieldZ = (z - half) / half;
-    for (let y = 1; y < VOLUME_RESOLUTION - 1; y += 1) {
-      for (let x = 1; x < VOLUME_RESOLUTION - 1; x += 1) {
-        const planeIndex = y * VOLUME_RESOLUTION + x;
-        const edgeDistance = edgeDistanceField[planeIndex];
-        const signedEdge = insideField[planeIndex] ? edgeDistance : -edgeDistance;
-        const localFront = frontDepthField[planeIndex];
-        const localBack = backDepthField[planeIndex];
-        volume.setCell(x, y, z, Math.min(signedEdge, localFront - fieldZ, localBack + fieldZ));
-      }
-    }
-  }
-  volume.blur(0.08);
-  volume.update();
-  // MarchingCubes allocates its maximum vertex budget up front. Compact to the
-  // actual polygonized surface before adding UVs and skinning.
-  const activeVertexCount = volume.geometry.drawRange.count;
-  const sourcePositions = volume.geometry.getAttribute("position") as THREE.BufferAttribute;
-  const sourceNormals = volume.geometry.getAttribute("normal") as THREE.BufferAttribute;
-  const compactGeometry = new THREE.BufferGeometry();
-  compactGeometry.setAttribute("position", new THREE.Float32BufferAttribute(
-    new Float32Array((sourcePositions.array as Float32Array).subarray(0, activeVertexCount * 3)), 3,
-  ));
-  compactGeometry.setAttribute("normal", new THREE.Float32BufferAttribute(
-    new Float32Array((sourceNormals.array as Float32Array).subarray(0, activeVertexCount * 3)), 3,
-  ));
-  const compactPositions = compactGeometry.getAttribute("position") as THREE.BufferAttribute;
-  const compactNormals = compactGeometry.getAttribute("normal") as THREE.BufferAttribute;
-  const uvs = new Float32Array(compactPositions.count * 2);
-  for (let vertex = 0; vertex < compactPositions.count; vertex += 1) {
-    uvs[vertex * 2] = Math.min(1, Math.max(0, compactPositions.getX(vertex) / 1.4 + 0.5));
-    uvs[vertex * 2 + 1] = Math.min(1, Math.max(0, compactPositions.getY(vertex) / 1.4 + 0.5));
-  }
-  compactGeometry.setAttribute("uv", new THREE.BufferAttribute(uvs, 2));
-  compactGeometry.clearGroups();
-  let texturedFrontTriangles = 0;
-  let neutralBackTriangles = 0;
-  for (let first = 0; first + 2 < compactPositions.count; first += 3) {
-    const normalX = (compactNormals.getX(first) + compactNormals.getX(first + 1) + compactNormals.getX(first + 2)) / 3;
-    const normalY = (compactNormals.getY(first) + compactNormals.getY(first + 1) + compactNormals.getY(first + 2)) / 3;
-    const normalZ = (compactNormals.getZ(first) + compactNormals.getZ(first + 1) + compactNormals.getZ(first + 2)) / 3;
-    const positionZ = (compactPositions.getZ(first) + compactPositions.getZ(first + 1) + compactPositions.getZ(first + 2)) / 3;
-    const materialIndex = classifySurfaceMaterial(normalX, normalY, normalZ, positionZ);
-    if (materialIndex === 1) texturedFrontTriangles += 1;
-    if (materialIndex === 2) neutralBackTriangles += 1;
-    compactGeometry.addGroup(first, 3, materialIndex);
-  }
-  const totalTriangles = compactPositions.count / 3;
+  // The exact segmented outline is the source of truth. Build a closed,
+  // contour-preserving rounded 3D puppet instead of blurring the artwork into
+  // an implicit Marching Cubes blob. Learned depth may shape the shell by a
+  // small bounded amount, but it can never move the silhouette or remap art.
+  // This replaces the old voxel bounds (`localFront - fieldZ` and
+  // `localBack + fieldZ`) while retaining independent learned front/back depth.
+  const requestedHalfDepth = Math.min(0.16, Math.max(0.075, (bodyPart?.size.z ?? 0.28) * 0.42));
+  const shell = buildArtworkShellGeometry(contour, depth, requestedHalfDepth, inflation, 2);
+  const compactGeometry = shell.geometry;
+  const texturedFrontTriangles = shell.frontTriangleCount;
+  const neutralBackTriangles = shell.backTriangleCount;
+  const totalTriangles = shell.frontTriangleCount + shell.backTriangleCount + shell.sideTriangleCount;
   const artworkSurfaceCoverage = texturedFrontTriangles / Math.max(1, totalTriangles);
   if (!hasRecognizableArtworkSurface(texturedFrontTriangles, totalTriangles, Boolean(artworkTexture))) {
     throw new Error("The private 3D preview could not preserve the drawing texture, so WallAlive refused to show it.");
   }
-  compactGeometry.setDrawRange(0, activeVertexCount);
-  compactGeometry.computeBoundingBox();
-  compactGeometry.computeBoundingSphere();
-  volume.geometry.dispose();
   // Only pose/topology paths that passed the character gate may deform the
   // artwork. Heuristic labels stay visible in the editor but never become
   // bones. This keeps safety while restoring real arm and leg movement.
@@ -313,17 +172,19 @@ export function buildCharacter(
   skinnedVolume.castShadow = true;
   skinnedVolume.receiveShadow = true;
   skinnedVolume.userData.reconstruction = {
-    method: "identity-preserving constrained 3D relief",
-    polygonizer: "Marching Cubes",
-    resolution: VOLUME_RESOLUTION,
+    method: "contour-preserving rounded 3D puppet",
+    polygonizer: "deterministic triangulated artwork shell",
+    subdivisions: 2,
     topology: "closed",
     contourPoints: contour.length,
     skeletonPoints: skeleton.length,
     semanticRig: rig.version,
     skinning: `${branchBones.length} verified branch bones over one continuous surface; unreviewed anatomy cannot deform geometry`,
-    maximumHalfDepth: bodyHalfDepth * 1.12,
+    maximumHalfDepth: shell.maximumHalfDepth,
     texturedFrontTriangles,
     neutralBackTriangles,
+    sideTriangles: shell.sideTriangleCount,
+    silhouetteError: 0,
     artworkSurfaceCoverage,
     projectedSemanticFeatures: false,
     learnedDepth: depth ? {
@@ -336,12 +197,12 @@ export function buildCharacter(
   character.add(skinnedVolume);
 
   character.userData.reconstruction = {
-    method: "identity-preserving constrained 3D relief",
+    method: "contour-preserving rounded 3D puppet",
     texturePlane: false,
     viewableDegrees: 360,
     bodyTopology: "closed",
     backPrior: "bounded hidden-surface relief; the original artwork appears only on the front",
-    maximumHalfDepth: bodyHalfDepth * 1.12,
+    maximumHalfDepth: shell.maximumHalfDepth,
     texturedFrontTriangles,
     neutralBackTriangles,
     artworkSurfaceCoverage,

@@ -394,7 +394,7 @@ export default function Home() {
     setStoryCaption(`${next.name} lifts away from the wall for the first time.`);
     record(actor, neural ? "Loaded a rigged neural 3D character" : "Loaded private on-device 3D fallback", neural
       ? `${next.name} · ${neural.provider} · glTF SkinnedMesh · generated mesh, skeleton, and skin weights · ${graphNodes} semantic nodes · ${graphEdges} branches.`
-      : `${next.name} · ${ensemble.length} independent closed Marching Cubes volume${ensemble.length === 1 ? "" : "s"} · original front artwork · verified pose/topology bones · no external GPU.`, toolName);
+      : `${next.name} · ${ensemble.length} independent contour-preserving rounded puppet${ensemble.length === 1 ? "" : "s"} · exact original silhouette and front artwork · verified pose/topology bones · no external GPU.`, toolName);
     return next;
   }, [commitCharacter, record]);
 
@@ -458,10 +458,17 @@ export default function Home() {
   }, [commitNeuralAsset, createCharacter, record]);
 
   const keepPrivatePreview = useCallback(() => {
+    const drawing = captureRef.current;
+    if (!drawing) return;
     setNeuralConsentVisible(false);
-    setNeuralProgress({ phase: "idle", progress: 0, message: "" });
-    setNotice("The verified cutout remains private in this tab. No fake 3D model was created and nothing was uploaded.");
-  }, []);
+    externalUploadApprovedRef.current = false;
+    localFallbackRef.current = true;
+    setLocalFallbackActive(true);
+    setNeuralProgress({ phase: "ready", progress: 1, message: "Private contour-preserving 3D is ready." });
+    createCharacter({ name: "Pip", personality: "curious and kind", accent: drawing.analysis.secondaryColor }, "WALLALIVE");
+    setNotice("Private 3D is ready. The exact outline and artwork stayed on this device; nothing was uploaded.");
+    record("WALLALIVE", "Built private contour-preserving 3D", "Exact drawing silhouette · closed rounded shell · skeleton skinning · no upload.");
+  }, [createCharacter, record]);
 
   const setPersonality = useCallback((personality: string, actor: Actor, toolName?: string) => {
     const current = characterRef.current;
@@ -530,8 +537,8 @@ export default function Home() {
     drawingAnalysis: captureRef.current?.analysis ?? null,
     reconstruction: captureRef.current ? {
       localIsolation: "Drawing-aware point extraction, compact drawing mask, then MagicTouch only as a gated last resort",
-      localPreview: localFallbackRef.current ? "closed private 3D volume with the original artwork on the front and neutral inferred sides and back" : "verified transparent character cutout awaiting human review; it is not represented as 3D",
-      method: neuralAssetRef.current ? `${neuralAssetRef.current.provider} full-volume neural mesh + skeleton skinning` : localFallbackRef.current ? "on-device contour and learned-depth Marching Cubes fallback" : "local drawing segmentation + learned character-evidence gate + human review",
+      localPreview: localFallbackRef.current ? "closed contour-preserving 3D puppet with the exact original silhouette and artwork on the front plus neutral inferred sides and back" : "verified transparent character cutout awaiting human review; it is not represented as 3D",
+      method: neuralAssetRef.current ? `${neuralAssetRef.current.provider} full-volume neural mesh + skeleton skinning` : localFallbackRef.current ? "on-device triangulated artwork shell with bounded learned depth and skeleton skinning" : "local drawing segmentation + learned character-evidence gate + human review",
       provider: neuralAssetRef.current?.provider ?? (localFallbackRef.current ? "WallAlive on-device fallback" : "WallAlive local recognition"),
       model: neuralAssetRef.current?.model ?? (localFallbackRef.current ? captureRef.current.depthRecognition?.model ?? "bounded-contour-volume" : captureRef.current.cutoutRecognition?.model ?? "authored-alpha-cutout"),
       assetType: neuralAssetRef.current ? "glTF SkinnedMesh" : localFallbackRef.current ? "closed local SkinnedMesh with a safe root bone" : "reviewed transparent 2D cutout",
@@ -1047,7 +1054,7 @@ export default function Home() {
               <ARStage ref={stageRef} characters={localFallbackActive ? captureEnsemble : null} contour={capture?.contour ?? null} skeleton={capture?.skeleton ?? null} textureUrl={capture?.textureUrl ?? null} rig={capture?.rig ?? null} depth={capture?.depthRecognition ?? null} action={character.action} accent={character.accent} inflation={character.inflation} neuralAssetUrl={neuralAsset?.meshUrl ?? null} visible onCapability={handleARCapability} onPlaced={handleARPlaced} onNeuralAssetInfo={handleRiggedAssetInfo} />
             </Suspense> : null}
             {neuralConsentVisible ? <div className="neural-consent" role="dialog" aria-modal="true" aria-labelledby="neural-consent-title" onPointerDown={(event) => event.stopPropagation()}>
-              <span>REAL RIGGED 3D · HUMAN APPROVAL</span><h2 id="neural-consent-title">Does this cutout contain only the character?</h2><p>If yes, send only this transparent cutout to AniGen for generated unseen geometry, a mesh skeleton, and skin weights. The live camera and room frame are never sent. If no, keep it private and capture again.</p><div><button onClick={startNeuralReconstruction}>YES · GENERATE REAL 3D</button><button onClick={keepPrivatePreview}>NO · KEEP PRIVATE</button></div>
+              <span>CHOOSE THE 3D ENGINE</span><h2 id="neural-consent-title">How should this character come alive?</h2><p>Full neural 3D sends only this reviewed cutout to AniGen. Private 3D keeps every pixel in this tab and builds a closed, rotatable, skinned puppet from the exact outline.</p><div><button onClick={startNeuralReconstruction}>GENERATE REAL 3D</button><button onClick={keepPrivatePreview}>PRIVATE 3D · NO UPLOAD</button></div>
             </div> : null}
             {neuralBusy ? <div className="neural-progress" role="status" onPointerDown={(event) => event.stopPropagation()}><span>ANIGEN · RIGGED 3D</span><b>{neuralProgress.message}</b><div><i style={{ width: `${Math.round(neuralProgress.progress * 100)}%` }} /></div><small>{Math.round(neuralProgress.progress * 100)}% · PUBLIC GPU</small></div> : null}
             <div className="camera-hud"><span><i /> {cameraState === "active" ? "LIVE CAMERA · LOCAL" : neuralAsset && character.created ? `FULL NEURAL RIG · ${riggedAssetInfo?.bones ?? "…"} BONES` : localFallbackActive && character.created ? captureEnsemble.length > 1 ? `${captureEnsemble.length} RIGGED FIGURES · PRIVATE` : "ON-DEVICE 3D · PRIVATE" : capture ? "CUTOUT REVIEW · LOCAL" : "SAFE DEMO ROOM"}</span><strong>{immersiveAR ? "WEBXR READY" : "CAMERA AR FALLBACK"}</strong></div>

@@ -69,7 +69,7 @@ test("registers eight strict WebMCP tools without camera authority", async () =>
   assert.match(page, /COLOR MATCHED/);
   assert.match(page, /viewableDegrees: neuralAssetRef\.current \|\| localFallbackRef\.current \? 360 : 0/);
   assert.match(page, /local-fallback-ready/);
-  assert.match(page, /No fake 3D model was created/);
+  assert.match(page, /Private contour-preserving 3D is ready/);
   assert.match(page, /topologyRecognition/);
   assert.match(page, /variable graph decoded from learned centerline, endpoints, and junction fields/);
 });
@@ -90,15 +90,13 @@ test("implements local drawing extraction and real WebXR hit testing", async () 
   assert.match(drawing, /Float32Array/);
   assert.match(drawing, /Math\.SQRT2/);
   assert.doesNotMatch(drawing, /fetch\(|XMLHttpRequest|WebSocket/);
-  assert.match(stage, /MarchingCubes/);
+  assert.match(stage, /buildArtworkShellGeometry/);
   assert.match(stage, /silhouette-distance-lens/);
-  assert.match(stage, /pointInsideContour/);
-  assert.match(stage, /distanceToContour/);
   assert.doesNotMatch(stage, /DecalGeometry/);
-  assert.match(stage, /identity-preserving constrained 3D relief/);
+  assert.match(stage, /contour-preserving rounded 3D puppet/);
   assert.match(stage, /frontMaterial/);
   assert.match(stage, /backMaterial/);
-  assert.match(stage, /volume\.field\.fill/);
+  assert.doesNotMatch(stage, /MarchingCubes|volume\.field\.fill|volume\.blur/);
   assert.match(stage, /wallalive-semantic-character/);
   assert.match(stage, /SkinnedMesh/);
   assert.match(stage, /skinIndex/);
