@@ -6,16 +6,18 @@
 
 **Public source:** https://github.com/mongonsh/wallalive-webmcp
 
-WallAlive turns one human-approved drawing into a colored, 360° **rigged 3D character** in the camera view. Drawing-specific point extraction runs before the compact drawing mask; general MediaPipe MagicTouch is only a gated last resort. Six local ONNX graphs then look for facial, pose, articulated-part, or variable-topology evidence. A rectangular paper/screen patch or unverified mask is rejected, and every accepted transparent cutout stops for a visible human review. [AniGen](https://github.com/VAST-AI-Research/AniGen) is the live path for jointly generated unseen surfaces, skeleton, and skinning weights. WallAlive no longer presents its shallow Marching Cubes research relief as a finished character. WebMCP can request generation and, after a real skinned GLB succeeds, name, place, animate, recolor, and direct it without receiving camera authority.
+WallAlive turns one or more human-approved drawings into colored, 360° **rigged 3D characters** in the camera view. Drawing-specific point extraction runs before the compact drawing mask; general MediaPipe MagicTouch is only a gated last resort. Six local ONNX graphs then look for facial, pose, articulated-part, or variable-topology evidence. A rectangular paper/screen patch or unverified mask is rejected, and every accepted transparent cutout stops for a visible human review. [AniGen](https://github.com/VAST-AI-Research/AniGen) is the optional live path for jointly generated unseen surfaces, skeleton, and skinning weights. WebMCP turns the browser agent into a creative director: it reads the actual abilities of every rig, stages typed multi-character choreography, and waits for the human to approve the visible show.
 
 ## Why this needs WebMCP
 
-- Human and agent actions update the same visible character and AR scene.
-- The agent composes personality, placement, movement, and story through eight narrow tools.
+- Human and agent actions update the same visible cast, worlds, and AR scene.
+- The agent reads exact per-character abilities before assigning movement; unsupported actions are rejected with a machine-readable reason.
+- One `stage_magic_show` call can coordinate roles, worlds, captions, timing, and different actions across up to six characters—work that would require many brittle UI operations.
+- A staged show is inert until the human presses **Approve & play**. Planning authority and performance authority are deliberately separate.
 - The camera is deliberately absent from the tool surface.
 - A WebMCP tool may request reconstruction, but only a visible human action can approve the isolated-image upload.
 - Every action is attributed to `CHILD`, `BROWSER AGENT`, or `WALLALIVE`.
-- `inspect_wall_scene` exposes the real provider, model, GLB type, mesh/bone counts, generation phase, and privacy boundary.
+- Tool results report the validated plan or exact performed actions, final idle state, and `cameraDataIncluded: false` so the agent can verify outcomes.
 
 ## The real 3D loop
 
@@ -31,16 +33,14 @@ WallAlive turns one human-approved drawing into a colored, 360° **rigged 3D cha
 
 | Tool | Mode | Purpose |
 | --- | --- | --- |
-| `inspect_wall_scene` | Read | Returns approved drawing state, actual reconstruction provider/type/counts, AR capability, and privacy boundary. |
-| `reconstruct_rigged_3d_character` | Write | Surfaces human approval for real rigged-GLB generation. It cannot approve, upload, or substitute a fake local slab by itself. |
-| `set_character_personality` | Write | Changes performance intent without modifying the original drawing. |
-| `place_character` | Write | Places and scales the character in the visible scene. |
-| `animate_character` | Write | Drives one safe action on the generated skeleton. |
-| `recolor_character` | Write | Changes a generated presentation accent, not the original pixels. |
-| `tell_character_story` | Write | Performs a cancellable one-to-four-beat story. |
-| `list_activity` | Read | Returns recent attributed actions without camera or image data. |
+| `inspect_creative_scene` | Read | Returns the shared workflow phase, cast count, worlds, pending show, next agent steps, and human-only controls. |
+| `inspect_character_capabilities` | Read | Returns semantic part counts, verified movable branches, supported actions, and blocked-action reasons for every character. |
+| `request_rigged_3d_cast` | Request | Surfaces the visible 3D choice. It cannot approve external processing, open the camera, capture, or receive pixels. |
+| `stage_magic_show` | Stage | Validates a typed cast and one-to-five-beat ensemble plan, then displays it without playing it. Human approval is required. |
+| `direct_live_ensemble` | Live | Performs one short capability-checked moment with distinct per-character actions and returns a verifiable final state. |
+| `list_collaboration_history` | Read | Returns attributed plan, approval, performance, and system activity without image data. |
 
-All tools use strict schemas, `additionalProperties: false`, cancellation signals, bounded inputs, read/write annotations, and explicit error results. There is no camera, capture, or upload tool.
+All tools are registered imperatively in the top-level document. They use strict schemas, nested `additionalProperties: false`, short bounded inputs, cancellation signals, read-only annotations, capability validation, and explicit result evidence. Human UI and WebMCP executors share the same state and action functions. There is no camera, capture, upload, or approval tool.
 
 ## Privacy boundary
 
@@ -98,7 +98,7 @@ AniGen: image condition → shape + skeleton + skin weights
         ▼
 rigged GLB → local Blob URL → Three.js GLTFLoader / SkinnedMesh
         │                              ▲
-        ├── 360° camera overlay / AR   └── WebMCP place / animate / story
+        ├── 360° camera overlay / AR   └── WebMCP inspect → stage → human approve → ensemble show
         └── WebXR hit-test placement
 ```
 

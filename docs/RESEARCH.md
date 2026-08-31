@@ -101,14 +101,15 @@ The current free ZeroGPU quota prevented repeated end-to-end generations across 
 
 WallAlive follows the [WebMCP Community Group draft](https://webmachinelearning.github.io/webmcp/) and the official [imperative API explainer](https://github.com/webmachinelearning/webmcp#imperative-tool-registration-documentmodelcontext):
 
-- Register goal-oriented tools with `document.modelContext.registerTool()`.
-- Use precise descriptions and strict JSON Schema.
-- Bind registration and stories to `AbortSignal` cancellation.
-- Mark read-only and mutating actions.
-- Share the same validated action functions between UI controls and tools.
-- Return exact provider, model, asset, phase, and geometry metadata for verification.
+- Register six goal-level tools with `document.modelContext.registerTool()` in the top-level page.
+- Expose shared workflow state and separate per-character action capabilities before mutation.
+- Use narrow descriptions, strict nested JSON Schema, bounded cast/beat arrays, and cancellation.
+- Validate every proposed move against verified pose/topology branches rather than silently animating the wrong geometry.
+- Share the same state and per-character action channels between human UI and tool executors.
+- Separate staging from execution: `stage_magic_show` displays an inert plan, while **Approve & play** remains a human-only UI action.
+- Return the validated plan or exact performed actions, final state, and camera-data exclusion for verification.
 
-The important safety capability is structural: no registered tool can open the camera, capture a frame, or approve an external upload. `reconstruct_rigged_3d_character` can surface the approval card, then stops. This makes human agency enforceable in code instead of relying on a prompt.
+The important safety capability is structural: no registered tool can open the camera, capture a frame, approve external processing, or approve a staged show. `request_rigged_3d_cast` and `stage_magic_show` can surface human decisions, then stop. This makes human agency enforceable in code instead of relying on a prompt.
 
 ## Honest capability statement
 

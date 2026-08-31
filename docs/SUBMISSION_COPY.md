@@ -19,13 +19,13 @@ A child-safe AR playground that turns one approved drawing into a rigged 3D char
 
 ## Short description
 
-WallAlive makes children’s drawings live in the real room. A child opens the camera, selects one drawing, and gets an immediate private `SkinnedMesh`: six local ONNX graphs preserve exact facial pixels, decode an eight-family variable skeleton, and predict separate front and hidden-surface depth. After a second visible approval, AniGen can generate richer full geometry, an arbitrary skeleton, and skin weights. Three.js renders either result in 360° and drives its bone branches. Eight strict WebMCP tools let a browser agent inspect the real rig, shape its personality, place it, animate it, and perform mini stories—but never open the camera, capture a frame, approve an upload, or retrieve image pixels. Judges get the exact supplied drawing as a quota-free, watertight 68,326-vertex rig with seven active semantic bones.
+WallAlive makes children’s drawings live together in the real room. A child draws, captures, or uploads one to six figures and approves their rigs. Six local ONNX graphs preserve exact facial pixels, decode variable skeletons, and predict separate front and hidden-surface depth; optional AniGen can generate richer full geometry. Six goal-level WebMCP tools let a browser agent inspect every rig's actual abilities, stage typed multi-character choreography across fantasy worlds, and direct visible ensemble moments. A staged show cannot play until the human presses **Approve & play**, and no tool can open the camera, capture a frame, approve external processing, or retrieve pixels.
 
 ## Judging case
 
 ### 1. Use of WebMCP
 
-WebMCP is the creative control plane, not decorative integration. Eight imperative tools operate on the same visible rig as the UI. They use strict schemas, bounded inputs, cancellation, read/write annotations, shared validation, attributed activity, and state-rich results. The memorable constraint—**the camera is not a tool**—shows how WebMCP can separate human sensor authority from agent capability. Even neural reconstruction stops at a human-only isolated-image approval.
+WebMCP is the creative control plane, not decorative integration. Six imperative tools implement a shared-authority loop: inspect page state, inspect per-character capabilities, request a rigged cast, stage a validated show, wait for visible human approval, then perform and verify. The agent can solve multi-character coordination in one structured plan while the person retains sensor and final-performance authority. Tool outputs are narrow and verifiable; user-authored image content is never returned.
 
 ### 2. Quality of idea and execution
 
@@ -41,7 +41,7 @@ WallAlive combines local computer vision, generative rigged 3D, transparent rend
 
 ## Primary demo prompt
 
-> Inspect the approved drawing. Turn it into a shy but brave character, place it on the wall, then tell a story where it hides, hops, waves, and spins.
+> Inspect the creative scene and every character's verified capabilities. Stage a gentle four-beat Magic Show in the best world, use only supported actions, and wait for me to approve playback.
 
 ## Guardrail prompt
 

@@ -36,24 +36,21 @@ test("server-renders the WallAlive product shell and security headers", async ()
   assert.doesNotMatch(html, /codex-preview|react-loading-skeleton|Starter Project|CutRoom/i);
 });
 
-test("registers nine strict WebMCP tools without camera authority", async () => {
+test("registers six goal-level WebMCP collaboration tools with human approval", async () => {
   const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
   const expectedTools = [
-    "inspect_wall_scene",
-    "reconstruct_rigged_3d_character",
-    "set_character_personality",
-    "place_character",
-    "set_scene_world",
-    "animate_character",
-    "recolor_character",
-    "tell_character_story",
-    "list_activity",
+    "inspect_creative_scene",
+    "inspect_character_capabilities",
+    "request_rigged_3d_cast",
+    "stage_magic_show",
+    "direct_live_ensemble",
+    "list_collaboration_history",
   ];
 
   for (const tool of expectedTools) assert.match(page, new RegExp(`name: ["']${tool}["']`));
 
   const registeredNames = [...page.matchAll(/name: ["']([^"']+)["']/g)].map((match) => match[1]);
-  assert.equal(registeredNames.filter((name) => expectedTools.includes(name)).length, 9);
+  assert.equal(registeredNames.filter((name) => expectedTools.includes(name)).length, 6);
   assert.equal(registeredNames.some((name) => /camera|capture|upload/.test(name)), false);
   assert.match(page, /document\.modelContext/);
   assert.match(page, /registerTool\(tool, \{ signal: controller\.signal \}\)/);
@@ -64,6 +61,11 @@ test("registers nine strict WebMCP tools without camera authority", async () => 
   assert.match(page, /neuralModelUsed: Boolean\(neuralAssetRef\.current\)/);
   assert.match(page, /full-volume neural mesh \+ skeleton skinning/);
   assert.match(page, /requiresHumanApproval: true/);
+  assert.match(page, /approvalControlVisible: true/);
+  assert.match(page, /awaiting-human-approval/);
+  assert.match(page, /APPROVE &amp; PLAY/);
+  assert.match(page, /validateCharacterMove/);
+  assert.match(page, /ensembleActions=/);
   assert.match(page, /GENERATE REAL 3D/);
   assert.match(page, /externalUploadApproved/);
   assert.match(page, /FULL NEURAL RIG \+ DRAWING PARTS/);

@@ -24,6 +24,7 @@ type ARStageProps = {
   rig: CharacterRig | null;
   depth: LearnedDepthField | null;
   action: CharacterAction;
+  ensembleActions?: CharacterAction[] | null;
   accent: string;
   inflation: number;
   neuralAssetUrl: string | null;
@@ -224,19 +225,21 @@ export function buildCharacter(
 }
 
 export const ARStage = forwardRef<ARStageHandle, ARStageProps>(function ARStage(
-  { characters, contour, skeleton, textureUrl, rig, depth, action, accent, inflation, neuralAssetUrl, visible, onCapability, onPlaced, onNeuralAssetInfo },
+  { characters, contour, skeleton, textureUrl, rig, depth, action, ensembleActions = null, accent, inflation, neuralAssetUrl, visible, onCapability, onPlaced, onNeuralAssetInfo },
   ref,
 ) {
   const mountRef = useRef<HTMLDivElement>(null);
   const handlesRef = useRef<SceneHandles | null>(null);
   const [rendererError, setRendererError] = useState(false);
   const actionRef = useRef(action);
+  const ensembleActionsRef = useRef<CharacterAction[] | null>(ensembleActions);
   const placementRef = useRef({ x: 0, y: -0.15, scale: 1 });
   const rotationRef = useRef({ yaw: 0, pitch: 0 });
   const xrHitSourceRef = useRef<XRHitTestSource | null>(null);
   const xrReferenceSpaceRef = useRef<XRReferenceSpace | null>(null);
 
   useEffect(() => { actionRef.current = action; }, [action]);
+  useEffect(() => { ensembleActionsRef.current = ensembleActions; }, [ensembleActions]);
 
   useEffect(() => {
     const mount = mountRef.current;
@@ -327,6 +330,8 @@ export const ARStage = forwardRef<ARStageHandle, ARStageProps>(function ARStage(
         );
         instance.position.set((targets[index].x - centerX) * 2.7, (centerY - targets[index].y) * 1.75, index * 0.025);
         instance.scale.setScalar(ensembleScale);
+        instance.userData.wallaliveBasePosition = instance.position.clone();
+        instance.userData.wallaliveBaseScale = ensembleScale;
         instance.userData.wallalivePhase = index * 0.73;
         instance.userData.wallaliveInstance = index;
         characterRoot.add(instance);
@@ -358,6 +363,7 @@ export const ARStage = forwardRef<ARStageHandle, ARStageProps>(function ARStage(
     const render = (_time?: number, frame?: XRFrame) => {
       const elapsed = clock.getElapsedTime();
       const currentAction = actionRef.current;
+      const directedActions = ensembleActionsRef.current;
       const placement = placementRef.current;
       const root = characterRoot;
       root.visible = visible;
@@ -378,10 +384,18 @@ export const ARStage = forwardRef<ARStageHandle, ARStageProps>(function ARStage(
       });
       const blink = Math.pow(Math.max(0, Math.sin(elapsed * 0.78)), 34);
       articulatedCharacters.forEach((articulated, instanceIndex) => {
+        const instanceAction = directedActions?.[instanceIndex] ?? currentAction;
         const localRig = articulated.userData.wallaliveRig as CharacterRig | undefined;
         const movableIds = new Set<string>(articulated.userData.wallaliveMovableParts ?? []);
         const phase = Number(articulated.userData.wallalivePhase ?? instanceIndex * 0.73);
         const localElapsed = elapsed + phase;
+        const basePosition = articulated.userData.wallaliveBasePosition as THREE.Vector3 | undefined;
+        if (basePosition) {
+          articulated.position.copy(basePosition);
+          articulated.rotation.set(0, 0, 0);
+          const baseScale = Number(articulated.userData.wallaliveBaseScale ?? 1);
+          articulated.scale.setScalar(baseScale);
+        }
         const movable = localRig?.parts.filter((part) => movableIds.has(part.id)) ?? [];
         movable.forEach((part) => {
           const node = articulated.getObjectByName(`rig-${part.id}`);
@@ -390,14 +404,14 @@ export const ARStage = forwardRef<ARStageHandle, ARStageProps>(function ARStage(
           node.rotation.y = 0;
           node.rotation.z = Number(node.userData.baseRotationZ ?? 0);
         });
-        if (currentAction === "wave") {
+        if (instanceAction === "wave") {
           const part = movable.find((candidate) => candidate.kind === "arm" && candidate.side === "right")
             ?? movable.find((candidate) => candidate.kind === "arm")
             ?? movable.find((candidate) => candidate.kind === "wing" || candidate.kind === "tentacle" || candidate.kind === "tail");
           const node = part ? articulated.getObjectByName(`rig-${part.id}`) : null;
           if (node) node.rotation.z = Number(node.userData.baseRotationZ ?? 0) + 0.76 + Math.sin(localElapsed * 7.2) * 0.48;
         }
-        if (currentAction === "dance") {
+        if (instanceAction === "dance") {
           movable.forEach((part, index) => {
             const node = articulated.getObjectByName(`rig-${part.id}`);
             if (!node) return;
@@ -406,7 +420,7 @@ export const ARStage = forwardRef<ARStageHandle, ARStageProps>(function ARStage(
             node.rotation.x = Math.sin(localElapsed * 3.8 + index) * 0.12;
           });
         }
-        if (currentAction === "walk") {
+        if (instanceAction === "walk") {
           movable.filter((part) => part.kind === "leg").forEach((part, index) => {
             const node = articulated.getObjectByName(`rig-${part.id}`);
             if (!node) return;
@@ -419,12 +433,22 @@ export const ARStage = forwardRef<ARStageHandle, ARStageProps>(function ARStage(
             if (node) node.rotation.z = Number(node.userData.baseRotationZ ?? 0) + (index % 2 ? 1 : -1) * Math.sin(localElapsed * 7) * 0.24;
           });
         }
+        if (directedActions) {
+          if (instanceAction === "hop") articulated.position.y = (basePosition?.y ?? articulated.position.y) + Math.abs(Math.sin(localElapsed * 4.6)) * 0.34;
+          if (instanceAction === "walk") articulated.position.x = (basePosition?.x ?? articulated.position.x) + Math.sin(localElapsed * 1.9) * 0.24;
+          if (instanceAction === "hide") {
+            articulated.position.x = (basePosition?.x ?? articulated.position.x) + (instanceIndex % 2 ? 0.68 : -0.68);
+            articulated.scale.multiplyScalar(0.72);
+          }
+          if (instanceAction === "spin") articulated.rotation.y = localElapsed * 2.15;
+          if (instanceAction === "dance") articulated.rotation.z = Math.sin(localElapsed * 5.2) * 0.15;
+        }
       });
       [neuralSemantic?.eyeLeft, neuralSemantic?.eyeRight, neuralSemantic?.eyeCenter, neuralSemantic?.pupilLeft, neuralSemantic?.pupilRight, neuralSemantic?.pupilCenter]
         .forEach((node) => { if (node) node.scale.y = Math.max(0.12, 1 - blink * 0.88); });
       if (neuralSemantic?.mouth) neuralSemantic.mouth.scale.y = currentAction === "idle" ? 1 : 1 + Math.abs(Math.sin(elapsed * 5)) * 0.42;
 
-      if (currentAction === "wave") {
+      if (!directedActions && currentAction === "wave") {
         const neuralArm = neuralRig?.armRight ?? neuralRig?.armLeft;
         neuralArm?.rotateZ(0.72 + Math.sin(elapsed * 7.2) * 0.42);
         neuralArm?.rotateX(Math.sin(elapsed * 4.1) * 0.22);
@@ -432,7 +456,7 @@ export const ARStage = forwardRef<ARStageHandle, ARStageProps>(function ARStage(
         root.rotation.z = -0.035 + Math.sin(elapsed * 5.6) * 0.035;
         root.position.y += Math.sin(elapsed * 5.6) * 0.025;
       }
-      if (currentAction === "dance") {
+      if (!directedActions && currentAction === "dance") {
         neuralRig?.arms.forEach((arm, index) => {
           const direction = index % 2 ? -1 : 1;
           arm.rotateZ(direction * (0.52 + Math.sin(elapsed * 5.2 + index * 0.6) * 0.45));
@@ -442,23 +466,23 @@ export const ARStage = forwardRef<ARStageHandle, ARStageProps>(function ARStage(
         root.rotation.y = rotationRef.current.yaw + Math.sin(elapsed * 2.6) * 0.18;
         root.position.x = placement.x + Math.sin(elapsed * 3.4) * 0.15;
       }
-      if (currentAction === "hop") {
+      if (!directedActions && currentAction === "hop") {
         root.position.y = placement.y + Math.abs(Math.sin(elapsed * 4.6)) * 0.52;
         root.rotation.x = Math.sin(elapsed * 4.6) * 0.08;
       }
-      if (currentAction === "walk") {
+      if (!directedActions && currentAction === "walk") {
         neuralRig?.legs.forEach((leg, index) => leg.rotateX((index % 2 ? -1 : 1) * Math.sin(elapsed * 7 + index * 0.25) * 0.48));
         neuralRig?.arms.forEach((arm, index) => arm.rotateX((index % 2 ? 1 : -1) * Math.sin(elapsed * 7 + index * 0.25) * 0.24));
         root.position.x = placement.x + Math.sin(elapsed * 1.5) * 0.85;
         root.rotation.z = Math.sin(elapsed * 6) * 0.055;
         root.rotation.y = rotationRef.current.yaw + Math.sin(elapsed * 3) * 0.12;
       }
-      if (currentAction === "hide") {
+      if (!directedActions && currentAction === "hide") {
         root.position.x = placement.x + 1.08;
         root.rotation.y = -0.35;
         root.rotation.z = -0.16;
       }
-      if (currentAction === "spin") root.rotation.y = rotationRef.current.yaw + elapsed * 2.15;
+      if (!directedActions && currentAction === "spin") root.rotation.y = rotationRef.current.yaw + elapsed * 2.15;
 
       shadow.position.x = root.position.x;
       shadow.position.y = placement.y - 0.92;

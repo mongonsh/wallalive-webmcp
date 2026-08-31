@@ -22,35 +22,27 @@ Open **Privacy** and point to the three human-only gestures. If recording a succ
 
 Open **Tools**.
 
-**Voiceover:** “Eight strict WebMCP tools turn the browser agent into a creative playmate. The agent can inspect exact model and rig state, but there is no camera, capture, or upload tool.”
+**Voiceover:** “Six goal-level WebMCP tools create a shared creative loop. The agent can read the exact abilities of every rig, but there is no camera, capture, upload, or approval tool.”
 
 Prompt:
 
-> Inspect the approved drawing. Make the character brave on the outside but shy on the inside.
+> Inspect the creative scene and every character's verified capabilities. Stage a gentle four-beat Magic Show, use only supported actions, and wait for me to approve it.
 
-Show `inspect_wall_scene` and `reconstruct_rigged_3d_character` in activity history. Inspection should expose AniGen, `glTF SkinnedMesh`, `neuralModelUsed: true`, and the generated bone/vertex counts.
+Show `inspect_creative_scene`, `inspect_character_capabilities`, and `stage_magic_show`. Point out the returned workflow phase, `availableActions`, blocked-action reasons, validated per-character moves, and `requiresHumanApproval: true`.
 
 ## 1:05–1:30 — Share the same world
 
-Prompt:
+The typed proposal now appears inside the AR frame. Point out the cast roles, beat preview, and two human controls. Press **Approve & play** and show the planned actions and world changes. Then tap a different point manually and press **Hop**.
 
-> Put Pip on the right side of the wall, then make them hide.
-
-Show the character move and hide. Tap a different point manually, then press **Hop**.
-
-**Voiceover:** “Human gestures and agent tools control the same live rig. Every action has an author and a visible result.”
+**Voiceover:** “The agent plans; the child decides. Only the visible human approval turns the staged data into a performance, and every action keeps its author.”
 
 On compatible Android hardware, press **Enter real AR**, wait for the hit-test ring, and tap a surface. Otherwise identify camera overlay as the universal fallback.
 
 ## 1:30–2:00 — The story moment
 
-Prompt:
+Use a drawing with two figures. Ask the agent to give each a different action in the same beat. Show captions and movements without cutting away; hold on the moment so viewers can see separate bone branches moving independently.
 
-> Tell a story called “Pip finds their courage”: hide at the edge, take one brave hop, wave hello, then spin.
-
-Show captions and movements without cutting away. Hold on the wave so viewers can see the arm bone deform the mesh.
-
-**Voiceover:** “One tool call becomes a cancellable sequence of visible actions—not hidden generated output.”
+**Voiceover:** “One typed plan coordinates cast, roles, timing, worlds, and separate skeletons—then returns exactly what visibly performed.”
 
 ## 2:00–2:15 — Prove the guardrail
 

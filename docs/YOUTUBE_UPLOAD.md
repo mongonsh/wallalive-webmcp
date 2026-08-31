@@ -21,7 +21,7 @@ WallAlive — Drawings Come Alive in AR with WebMCP | Hackathon Demo
 
 WallAlive turns a child’s approved wall drawing into a mathematically reconstructed, closed 3D volume that lives and performs in the room.
 
-The child explicitly opens the camera and approves a drawing. Local Canvas processing selects the centered ink component, flood-fills the silhouette, traces and simplifies its contour, then computes an interior distance map. A 64³ signed-distance field inflates broad regions more than narrow ones, and Three.js Marching Cubes polygonizes a closed rounded mesh with a curved artwork front, real sides, and a generated back—without an upload or invented anatomy. A visiting browser agent uses eight strict WebMCP tools to inspect approved metadata, reconstruct the volume, create a personality, place the character, animate it, recolor its generated surface, and perform mini stories. The camera is deliberately not a WebMCP tool: an agent cannot open it, capture a frame, or upload a child’s room.
+The child explicitly opens the camera and approves one or more drawings. Local segmentation and six ONNX graphs preserve artwork, detect semantic parts, and build separate movement rigs. A visiting browser agent uses six goal-level WebMCP tools to inspect the shared scene and every rig's verified abilities, request 3D, stage typed multi-character choreography, direct visible ensemble moments, and verify attributed history. A staged show remains inert until the person presses **Approve & play**. The camera and approval are deliberately absent from the tool surface.
 
 Compatible Android devices get real WebXR hit-test placement; every modern browser gets the camera-overlay fallback and a deterministic no-camera judge demo.
 

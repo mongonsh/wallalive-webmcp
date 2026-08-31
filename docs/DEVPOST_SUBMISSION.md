@@ -29,36 +29,34 @@ Children already treat drawings as living characters. A few lines can have a nam
 
 1. The child explicitly opens the camera, taps one character, and captures it.
 2. Local Canvas processing separates the drawing from smooth lighting, page borders, text, and foreground clutter.
-3. Six local ONNX graphs recognize exact face/body pixels, decode an eight-family variable skeleton, and predict distinct front and hidden-surface depth. Marching Cubes immediately produces one private closed `SkinnedMesh` rather than a flat cut-out.
+3. Six local ONNX graphs recognize exact face/body pixels, decode an eight-family variable skeleton, and predict distinct front and hidden-surface depth. A contour-preserving artwork shell produces a private closed `SkinnedMesh` while keeping separate drawings as separate rigs.
 4. A second visible approval explains that only the isolated drawing—not the live camera or room frame—may go to AniGen, which jointly predicts richer full geometry, an arbitrary skeleton, and skinning weights.
 5. WallAlive loads generated GLBs as Three.js `SkinnedMesh` assets. Seven actions drive bone branches; drag/spin exposes true 360° geometry and the generated back.
-6. Eight WebMCP tools let the agent inspect exact model state, create a personality, place and scale the rig, animate it, recolor an accent, and perform a cancellable mini story.
+6. Six goal-level WebMCP tools let the agent inspect shared state and each rig's verified abilities, request 3D, stage a typed multi-character Magic Show, direct one live ensemble moment, and inspect attributed history.
 7. WebXR hit testing places the same character on a real surface when supported; every other browser gets the camera-overlay experience.
 
 The one-click judge demo uses the exact supplied drawing and loads its precomputed full neural reconstruction immediately: 68,326 vertices, 136,648 triangles, seven active semantic bones, a complete watertight back, normalized weights, and restored approved front color without copying facial marks onto the rear. Judging never depends on shared public GPU quota. A separate official AniGen reference fixture remains in the automated evidence suite.
 
 ## Why WallAlive is a strong fit for WebMCP
 
-WebMCP is the collaboration layer, not a chat box attached to AR. The child authors the input and keeps sensor authority. The agent composes personality, placement, motion, and narrative through structured actions inside the same visible world.
+WebMCP is the collaboration layer, not a chat box attached to AR. The child authors the input and keeps sensor authority. The agent reads the real capabilities of every character, assigns compatible roles and actions, and submits a structured multi-character production plan inside the same visible world.
 
-The safety boundary is structural: **the camera is not a tool**. No registered tool can open the camera, capture a frame, approve an external upload, or retrieve pixels. `reconstruct_rigged_3d_character` can surface the visible approval UI, then stops for the human. This boundary is enforced by capability design, not a prompt.
+The shared-authority boundary is structural: **the camera and approval are not tools**. No registered tool can open the camera, capture a frame, approve external processing, retrieve pixels, or approve a staged show. `request_rigged_3d_cast` can surface the visible 3D choice, then stops. `stage_magic_show` validates and displays choreography, then stops until the human presses **Approve & play**.
 
-Without WebMCP, an agent would infer changing 3D state through screenshots and brittle clicks. With WebMCP, it can inspect provider/model/mesh/bone metadata, invoke bounded actions, verify results, and stay synchronized with the child.
+Without WebMCP, an agent would have to infer multiple rigs and coordinate dozens of controls through screenshots and brittle clicks. With WebMCP, it can inspect semantic capabilities, avoid impossible movements, stage a five-beat ensemble across changing worlds in one typed call, and verify the exact actions that performed.
 
 ## WebMCP implementation
 
-WallAlive registers eight imperative tools with `document.modelContext.registerTool()`:
+WallAlive registers six imperative tools with `document.modelContext.registerTool()` in the top-level document:
 
-- `inspect_wall_scene`
-- `reconstruct_rigged_3d_character`
-- `set_character_personality`
-- `place_character`
-- `animate_character`
-- `recolor_character`
-- `tell_character_story`
-- `list_activity`
+- `inspect_creative_scene`
+- `inspect_character_capabilities`
+- `request_rigged_3d_cast`
+- `stage_magic_show`
+- `direct_live_ensemble`
+- `list_collaboration_history`
 
-Each tool uses strict JSON Schema, `additionalProperties: false`, bounded values, cancellation signals, read/write annotations, and shared validation. UI controls and tool executors call the same canonical action layer. Inspection returns the neural provider, model, asset type, mesh/bone/vertex counts, generation phase, approval state, and `cameraFeedExposed: false`.
+Each tool uses narrow JSON Schema, nested `additionalProperties: false`, bounded arrays and strings, cancellation signals, read-only annotations, shared capability validation, and verification-rich results. The stage tool returns `requiresHumanApproval: true` and `approvalControlVisible: true`; the live tool returns the exact per-character actions, world, duration, visible-result flag, final idle state, and `cameraDataIncluded: false`.
 
 ## How we built it
 
@@ -93,7 +91,7 @@ The fourth challenge was anatomy. A good silhouette still gave straight, misplac
 - A locally trained 17-joint drawing pose model whose ONNX export exactly reproduces the untouched-test result
 - Generated bone-branch animation instead of whole-object-only motion
 - Real WebXR surface hit testing plus universal camera overlay
-- Eight WebMCP tools sharing one mutation layer with the human UI
+- Six goal-level WebMCP tools sharing one capability and performance layer with the human UI
 - Visible attribution for every human, agent, and system action
 - Human-only authority for camera, capture, and isolated-image upload
 - A quota-free one-click judge demo

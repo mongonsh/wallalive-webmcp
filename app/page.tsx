@@ -5,6 +5,7 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 import type { ARStageHandle, CharacterAction } from "./components/ARStage";
 import { DrawingWall } from "./components/DrawingWall";
 import { createAniGenDemoDrawing, createDemoDoodle, POSE_SKELETON_EDGES, selectAnimatableRigParts, type CaptureTarget, type DrawingExtraction, type SemanticPart, type SemanticPartKind, type SemanticSide } from "./lib/drawing";
+import { inspectCharacterCapabilities as buildCharacterCapabilities, SAFE_SHOW_ACTIONS, validateCharacterMove, type CharacterCapability } from "./lib/creative-show";
 import { recognizeDrawingParts, recognizeDrawingsFromImageUrl, recognizeDrawingsFromVideo } from "./lib/learned-parts";
 import { createBundledAniGenAsset, disposeNeuralAsset, generateAniGenAsset, isAniGenUnavailableError, type NeuralAsset, type NeuralProgress } from "./lib/anigen";
 import type { RiggedAssetInfo } from "./lib/rigged-model";
@@ -40,6 +41,20 @@ type Activity = {
 
 type PendingUpload = { url: string; fileName: string };
 
+type ShowMove = { characterIndex: number; action: CharacterAction };
+type ShowBeat = { caption: string; durationMs: number; world?: WorldId; moves: ShowMove[] };
+type ShowCastMember = { characterIndex: number; name: string; role: string; personality: string };
+type MagicShowPlan = {
+  id: string;
+  title: string;
+  theme: string;
+  tone: "gentle" | "silly" | "adventurous" | "dreamy";
+  world: WorldId;
+  cast: ShowCastMember[];
+  beats: ShowBeat[];
+  status: "awaiting-human-approval" | "playing" | "complete" | "dismissed";
+};
+
 type WebMCPTool = {
   name: string;
   title: string;
@@ -70,15 +85,12 @@ const initialCharacter: CharacterState = {
 };
 
 const toolNames = [
-  ["inspect_wall_scene", "READ"],
-  ["reconstruct_rigged_3d_character", "WRITE"],
-  ["set_character_personality", "WRITE"],
-  ["place_character", "WRITE"],
-  ["set_scene_world", "WRITE"],
-  ["animate_character", "WRITE"],
-  ["recolor_character", "WRITE"],
-  ["tell_character_story", "WRITE"],
-  ["list_activity", "READ"],
+  ["inspect_creative_scene", "READ"],
+  ["inspect_character_capabilities", "READ"],
+  ["request_rigged_3d_cast", "REQUEST"],
+  ["stage_magic_show", "STAGE"],
+  ["direct_live_ensemble", "LIVE"],
+  ["list_collaboration_history", "READ"],
 ] as const;
 
 const worlds: Array<{ id: WorldId; label: string; short: string }> = [
@@ -149,6 +161,9 @@ export default function Home() {
   const partDragRef = useRef<{ pointerId: number; partId: string } | null>(null);
   const pendingUploadRef = useRef<PendingUpload | null>(null);
   const worldRef = useRef<WorldId>("studio");
+  const magicShowPlanRef = useRef<MagicShowPlan | null>(null);
+  const showAbortRef = useRef<AbortController | null>(null);
+  const showPlayingRef = useRef(false);
 
   const [step, setStep] = useState<AppStep>("ready");
   const [cameraState, setCameraState] = useState<CameraState>("idle");
@@ -176,6 +191,9 @@ export default function Home() {
   const [pendingUpload, setPendingUpload] = useState<PendingUpload | null>(null);
   const [drawingWallOpen, setDrawingWallOpen] = useState(false);
   const [world, setWorld] = useState<WorldId>("studio");
+  const [magicShowPlan, setMagicShowPlan] = useState<MagicShowPlan | null>(null);
+  const [ensembleActions, setEnsembleActions] = useState<CharacterAction[] | null>(null);
+  const [showPlaying, setShowPlaying] = useState(false);
 
   const record = useCallback((actor: Actor, action: string, detail: string, toolName?: string) => {
     const item: Activity = { id: makeId(), time: timeLabel(), actor, action, detail, toolName };
@@ -214,6 +232,7 @@ export default function Home() {
   useEffect(() => () => {
     streamRef.current?.getTracks().forEach((track) => track.stop());
     neuralAbortRef.current?.abort();
+    showAbortRef.current?.abort();
     disposeNeuralAsset(neuralAssetRef.current);
     if (pendingUploadRef.current) URL.revokeObjectURL(pendingUploadRef.current.url);
   }, []);
@@ -250,6 +269,13 @@ export default function Home() {
   const setDrawing = useCallback((next: DrawingExtraction, source: "camera" | "upload" | "demo", ensemble: DrawingExtraction[] = [next]) => {
     neuralAbortRef.current?.abort();
     neuralAbortRef.current = null;
+    showAbortRef.current?.abort();
+    showAbortRef.current = null;
+    showPlayingRef.current = false;
+    magicShowPlanRef.current = null;
+    setShowPlaying(false);
+    setMagicShowPlan(null);
+    setEnsembleActions(null);
     commitNeuralAsset(null);
     handleRiggedAssetInfo(null);
     externalUploadApprovedRef.current = false;
@@ -500,16 +526,6 @@ export default function Home() {
     record("WALLALIVE", "Built private contour-preserving 3D", "Exact drawing silhouette · closed rounded shell · skeleton skinning · no upload.");
   }, [createCharacter, record]);
 
-  const setPersonality = useCallback((personality: string, actor: Actor, toolName?: string) => {
-    const current = characterRef.current;
-    if (!current.created) throw new Error("Create the character before setting its personality.");
-    const next = { ...current, personality: stringValue(personality, current.personality, 120) };
-    commitCharacter(next, `${next.name} now feels ${next.personality}.`);
-    setAgentLine(`I’ll express “${next.personality}” through movement, without changing the child’s drawing.`);
-    record(actor, "Changed the personality", `${next.name} is now ${next.personality}.`, toolName);
-    return next;
-  }, [commitCharacter, record]);
-
   const changeWorld = useCallback((requested: WorldId, actor: Actor, toolName?: string) => {
     const next = worlds.some((candidate) => candidate.id === requested) ? requested : "studio";
     worldRef.current = next;
@@ -530,16 +546,6 @@ export default function Home() {
     return next;
   }, [commitCharacter, record]);
 
-  const recolorCharacter = useCallback((accent: string, actor: Actor, toolName?: string) => {
-    const current = characterRef.current;
-    if (!current.created) throw new Error("Create the character before changing its 3D edge color.");
-    const safeAccent = /^#[0-9a-fA-F]{6}$/.test(accent) ? accent : current.accent;
-    const next = { ...current, accent: safeAccent };
-    commitCharacter(next, `3D edges changed to ${safeAccent}; original drawing colors preserved.`);
-    record(actor, "Changed the 3D accent", `Applied ${safeAccent} only to the generated solid edge.`, toolName);
-    return next;
-  }, [commitCharacter, record]);
-
   const placeCharacter = useCallback((x: number, y: number, surface: CharacterState["surface"], scale: number, actor: Actor, toolName?: string) => {
     const current = characterRef.current;
     if (!current.created) throw new Error("Create the character before placing it.");
@@ -552,25 +558,6 @@ export default function Home() {
     record(actor, "Placed the character", `${surface} · x ${safeX.toFixed(2)} · y ${safeY.toFixed(2)} · scale ${safeScale.toFixed(2)}.`, toolName);
     return next;
   }, [commitCharacter, record]);
-
-  const runStory = useCallback(async (title: string, beats: Record<string, unknown>[], actor: Actor, toolName?: string, signal?: AbortSignal) => {
-    const current = characterRef.current;
-    if (!current.created) throw new Error("Create the character before telling a story.");
-    const storyTitle = stringValue(title, `${current.name}'s first adventure`, 80);
-    commitCharacter({ ...current, storyTitle }, `Playing “${storyTitle}”.`);
-    record(actor, "Started a mini story", `${storyTitle} · ${beats.length} beats.`, toolName);
-    const allowedActions: CharacterAction[] = ["idle", "wave", "dance", "hop", "walk", "hide", "spin"];
-    for (const beat of beats.slice(0, 4)) {
-      if (signal?.aborted) throw new DOMException("Story cancelled", "AbortError");
-      const proposed = stringValue(beat.action, "idle", 20) as CharacterAction;
-      const action = allowedActions.includes(proposed) ? proposed : "idle";
-      animateCharacter(action, actor, toolName, stringValue(beat.caption, `${characterRef.current.name} ${action}s.`, 120));
-      await wait(Math.min(2200, Math.max(650, numberValue(beat.durationMs, 1100))), signal);
-    }
-    animateCharacter("idle", actor, toolName, `${characterRef.current.name}'s story is ready for another chapter.`);
-    window.setTimeout(() => setStoryCaption(""), 1200);
-    return { title: storyTitle, beatsPlayed: Math.min(4, beats.length), finalAction: "idle" };
-  }, [animateCharacter, commitCharacter, record]);
 
   const inspectScene = useCallback(() => ({
     world: worldRef.current,
@@ -623,6 +610,191 @@ export default function Home() {
     placementModes: immersiveAR ? ["world-hit-test", "camera-overlay"] : ["camera-overlay"],
   }), [immersiveAR]);
 
+  const currentCharacterCapabilities = useCallback((): CharacterCapability[] => {
+    const drawings = captureEnsembleRef.current.length
+      ? captureEnsembleRef.current
+      : captureRef.current
+        ? [captureRef.current]
+        : [];
+    return buildCharacterCapabilities(drawings, Boolean(neuralAssetRef.current));
+  }, []);
+
+  const inspectCreativeScene = useCallback(() => {
+    const scene = inspectScene();
+    const capabilities = currentCharacterCapabilities();
+    const pending = magicShowPlanRef.current;
+    return {
+      workflowPhase: !scene.drawingApproved ? "human-needs-to-add-art" : !characterRef.current.created ? "human-review-or-3d-approval" : pending?.status === "awaiting-human-approval" ? "show-awaiting-human-approval" : showPlayingRef.current ? "show-playing" : "ready-for-agent-direction",
+      world: scene.world,
+      approvedCharacterCount: capabilities.length,
+      characterCreated: characterRef.current.created,
+      character: characterRef.current.created ? { name: characterRef.current.name, personality: characterRef.current.personality, surface: characterRef.current.surface } : null,
+      availableWorlds: worlds.map(({ id, label }) => ({ id, label })),
+      pendingShow: pending ? { id: pending.id, title: pending.title, status: pending.status, beats: pending.beats.length, cast: pending.cast.length } : null,
+      humanOnlyControls: ["open_camera", "capture_frame", "approve_cutout", "approve_external_3d", "approve_and_play_staged_show"],
+      agentWorkflow: characterRef.current.created
+        ? ["inspect_character_capabilities", "stage_magic_show", "wait_for_visible_human_approval"]
+        : ["ask_human_to_draw_or_capture", "request_rigged_3d_cast", "wait_for_visible_human_approval"],
+      cameraFeedExposed: false,
+      externalUploadApproved: scene.reconstruction?.externalUploadApproved ?? false,
+      arPlacement: scene.placementModes,
+    };
+  }, [currentCharacterCapabilities, inspectScene]);
+
+  const parseShowMoves = useCallback((value: unknown, capabilities: CharacterCapability[]) => {
+    if (!Array.isArray(value) || value.length < 1 || value.length > 6) throw new Error("Each beat needs one to six character moves.");
+    const seen = new Set<number>();
+    return value.map((raw) => {
+      if (!isRecord(raw)) throw new Error("Every move must be an object.");
+      const characterIndex = Math.round(numberValue(raw.characterIndex, -1));
+      const action = stringValue(raw.action, "", 16) as CharacterAction;
+      if (seen.has(characterIndex)) throw new Error(`Character ${characterIndex} has two actions in the same beat.`);
+      seen.add(characterIndex);
+      const validation = validateCharacterMove(capabilities, characterIndex, action);
+      if (!validation.ok) throw new Error(validation.error);
+      return { characterIndex, action };
+    });
+  }, []);
+
+  const directEnsembleBeat = useCallback(async (beat: ShowBeat, actor: Actor, toolName?: string, signal?: AbortSignal) => {
+    const current = characterRef.current;
+    if (!current.created) throw new Error("The human must approve a rigged 3D cast before it can be directed.");
+    if (showPlayingRef.current && toolName === "direct_live_ensemble") throw new Error("An approved Magic Show is already playing.");
+    const capabilities = currentCharacterCapabilities();
+    const moves = parseShowMoves(beat.moves, capabilities);
+    const nextWorld = beat.world ?? worldRef.current;
+    if (nextWorld !== worldRef.current) changeWorld(nextWorld, actor, toolName);
+    const durationMs = Math.min(2400, Math.max(650, beat.durationMs));
+    const firstAction = moves[0]?.action ?? "idle";
+    setStoryCaption(beat.caption);
+    if (neuralAssetRef.current || capabilities.length <= 1) {
+      setEnsembleActions(null);
+      animateCharacter(firstAction, actor, toolName, beat.caption);
+    } else {
+      const directed = capabilities.map((capability) => moves.find((move) => move.characterIndex === capability.characterIndex)?.action ?? "idle");
+      setEnsembleActions(directed);
+      commitCharacter({ ...current, action: firstAction }, `${current.name} is performing a coordinated scene.`);
+      record(actor, "Directed the live ensemble", `${moves.map((move) => `#${move.characterIndex} ${move.action}`).join(" · ")} · ${durationMs}ms.`, toolName);
+    }
+    try {
+      await wait(durationMs, signal);
+    } finally {
+      setEnsembleActions(null);
+      commitCharacter({ ...characterRef.current, action: "idle" });
+    }
+    return {
+      world: worldRef.current,
+      caption: beat.caption,
+      durationMs,
+      performed: moves,
+      finalActions: capabilities.map(({ characterIndex }) => ({ characterIndex, action: "idle" })),
+      visibleResult: true,
+      cameraDataIncluded: false,
+    };
+  }, [animateCharacter, changeWorld, commitCharacter, currentCharacterCapabilities, parseShowMoves, record]);
+
+  const stageMagicShow = useCallback((input: Record<string, unknown>) => {
+    if (!characterRef.current.created) throw new Error("No playable cast exists. The human must approve a rigged 3D cast first.");
+    const capabilities = currentCharacterCapabilities();
+    const rawCast = Array.isArray(input.cast) ? input.cast.filter(isRecord).slice(0, 6) : [];
+    if (!rawCast.length) throw new Error("A Magic Show needs at least one cast member.");
+    const seenCast = new Set<number>();
+    const cast: ShowCastMember[] = rawCast.map((member) => {
+      const characterIndex = Math.round(numberValue(member.characterIndex, -1));
+      if (!capabilities.some((candidate) => candidate.characterIndex === characterIndex)) throw new Error(`Cast member ${characterIndex} does not exist.`);
+      if (seenCast.has(characterIndex)) throw new Error(`Character ${characterIndex} appears twice in the cast.`);
+      seenCast.add(characterIndex);
+      return {
+        characterIndex,
+        name: stringValue(member.name, `Character ${characterIndex + 1}`, 32),
+        role: stringValue(member.role, "friend", 48),
+        personality: stringValue(member.personality, "curious and kind", 80),
+      };
+    });
+    const requestedWorld = stringValue(input.world, "studio", 20) as WorldId;
+    const world = worlds.some((candidate) => candidate.id === requestedWorld) ? requestedWorld : "studio";
+    const rawBeats = Array.isArray(input.beats) ? input.beats.filter(isRecord).slice(0, 5) : [];
+    if (!rawBeats.length) throw new Error("A Magic Show needs at least one beat.");
+    const beats: ShowBeat[] = rawBeats.map((beat) => {
+      const requestedBeatWorld = stringValue(beat.world, "", 20) as WorldId;
+      const beatWorld = worlds.some((candidate) => candidate.id === requestedBeatWorld) ? requestedBeatWorld : undefined;
+      return {
+        caption: stringValue(beat.caption, "The friends share a magical moment.", 110),
+        durationMs: Math.min(2400, Math.max(650, numberValue(beat.durationMs, 1200))),
+        world: beatWorld,
+        moves: parseShowMoves(beat.moves, capabilities),
+      };
+    });
+    const proposedTone = stringValue(input.tone, "gentle", 20) as MagicShowPlan["tone"];
+    const tone = (["gentle", "silly", "adventurous", "dreamy"] as const).includes(proposedTone) ? proposedTone : "gentle";
+    const plan: MagicShowPlan = {
+      id: `show-${makeId()}`,
+      title: stringValue(input.title, "A tiny Magic Show", 72),
+      theme: stringValue(input.theme, "friendship", 72),
+      tone,
+      world,
+      cast,
+      beats,
+      status: "awaiting-human-approval",
+    };
+    magicShowPlanRef.current = plan;
+    setMagicShowPlan(plan);
+    setAgentLine(`I staged “${plan.title}” from the verified abilities of ${plan.cast.length} character${plan.cast.length === 1 ? "" : "s"}. Only you can start it.`);
+    setNotice("The browser agent staged a Magic Show. Review it, then choose Approve & play or Not yet.");
+    record("BROWSER AGENT", "Staged a Magic Show for human review", `${plan.title} · ${plan.cast.length} cast · ${plan.beats.length} beats · ${worlds.find((candidate) => candidate.id === plan.world)?.label}.`, "stage_magic_show");
+    return {
+      planId: plan.id,
+      status: plan.status,
+      requiresHumanApproval: true,
+      approvalControlVisible: true,
+      validatedCast: plan.cast.map(({ characterIndex, name, role }) => ({ characterIndex, name, role })),
+      validatedBeats: plan.beats.map((beat, index) => ({ index, world: beat.world ?? plan.world, moves: beat.moves })),
+      nextStep: "Wait for the human to press Approve & play in the shared page.",
+      cameraAccessed: false,
+    };
+  }, [currentCharacterCapabilities, parseShowMoves, record]);
+
+  const approveAndPlayMagicShow = useCallback(async () => {
+    const current = magicShowPlanRef.current;
+    if (!current || current.status !== "awaiting-human-approval" || showPlayingRef.current) return;
+    const controller = new AbortController();
+    showAbortRef.current?.abort();
+    showAbortRef.current = controller;
+    showPlayingRef.current = true;
+    setShowPlaying(true);
+    const playing = { ...current, status: "playing" as const };
+    magicShowPlanRef.current = playing;
+    setMagicShowPlan(playing);
+    record("CHILD", "Approved the agent's staged Magic Show", `${current.title} · explicit visible approval.`);
+    changeWorld(current.world, "WALLALIVE");
+    try {
+      for (const beat of current.beats) await directEnsembleBeat(beat, "WALLALIVE", "approved_magic_show", controller.signal);
+      const complete = { ...current, status: "complete" as const };
+      magicShowPlanRef.current = complete;
+      setMagicShowPlan(complete);
+      setStoryCaption(`${current.title} — made together.`);
+      setNotice("Magic Show complete. The plan, approval, and visible performance are recorded in History.");
+      record("WALLALIVE", "Completed the approved Magic Show", `${current.title} · ${current.beats.length} verified beats.`);
+    } catch (error) {
+      if (!(error instanceof DOMException && error.name === "AbortError")) setNotice(error instanceof Error ? error.message : "The Magic Show stopped.");
+    } finally {
+      showPlayingRef.current = false;
+      setShowPlaying(false);
+      setEnsembleActions(null);
+      if (showAbortRef.current === controller) showAbortRef.current = null;
+    }
+  }, [changeWorld, directEnsembleBeat, record]);
+
+  const dismissMagicShow = useCallback(() => {
+    const current = magicShowPlanRef.current;
+    if (!current || current.status !== "awaiting-human-approval") return;
+    const dismissed = { ...current, status: "dismissed" as const };
+    magicShowPlanRef.current = dismissed;
+    setMagicShowPlan(dismissed);
+    setNotice("The staged show was not played. Ask the agent to revise it whenever you want.");
+    record("CHILD", "Declined the staged Magic Show", `${current.title} was left unplayed.`);
+  }, [record]);
+
   useEffect(() => {
     const context = document.modelContext;
     if (!context?.registerTool) return;
@@ -634,17 +806,17 @@ export default function Home() {
     const executionSignal = (options?: { signal?: AbortSignal }) => options?.signal ?? controller.signal;
     const tools: WebMCPTool[] = [
       {
-        name: "inspect_wall_scene",
-        title: "Inspect approved wall drawing",
-        description: "Read semantic details about the human-approved drawing, character, AR capability, and privacy boundary. Never returns camera frames or image data.",
+        name: "inspect_creative_scene",
+        title: "Inspect the shared creative scene",
+        description: "Read the current human-agent workflow phase, approved cast count, worlds, pending staged show, and privacy boundary. Returns no camera frames or image pixels.",
         inputSchema: { ...base, properties: {} },
         annotations: { readOnlyHint: true, untrustedContentHint: true },
-        execute: async (_input, options) => { const signal = executionSignal(options); guard(signal); return ok({ scene: inspectScene() }); },
+        execute: async (_input, options) => { const signal = executionSignal(options); guard(signal); return ok({ scene: inspectCreativeScene(), verification: { observedAt: new Date().toISOString(), cameraDataIncluded: false } }); },
       },
       {
-        name: "reconstruct_rigged_3d_character",
-        title: "Create the approved rigged 3D character",
-        description: "Request a playable 3D character from the reviewed artwork. The tool can surface human approval but can never approve an upload, open the camera, or receive camera frames. A disclosed private on-device volume remains usable if the optional full neural provider is unavailable.",
+        name: "request_rigged_3d_cast",
+        title: "Request a playable 3D cast",
+        description: "Request rigged 3D for the human-reviewed artwork. This can surface the visible reconstruction choice but cannot approve external processing, open the camera, capture a frame, or receive pixels.",
         inputSchema: {
           ...base,
           properties: {
@@ -664,7 +836,7 @@ export default function Home() {
             if (!captureRef.current) throw new Error("No drawing is approved. The child must capture or choose a drawing first.");
             if (!neuralAssetRef.current && localFallbackRef.current && characterRef.current.created) {
               return ok({
-                character: createCharacter(input, "BROWSER AGENT", "reconstruct_rigged_3d_character"),
+                character: createCharacter(input, "BROWSER AGENT", "request_rigged_3d_cast"),
                 reconstructionMode: "local-private",
                 localRig: captureRef.current.rig,
                 generatedAsset: null,
@@ -676,7 +848,7 @@ export default function Home() {
               return ok({ requiresHumanApproval: true, phase: "consent-required", message: "Use the visible approval card to try full neural 3D. If shared GPU capacity is unavailable, WallAlive will continue with an explicitly labeled private local volume." });
             }
             return ok({
-              character: createCharacter(input, "BROWSER AGENT", "reconstruct_rigged_3d_character"),
+              character: createCharacter(input, "BROWSER AGENT", "request_rigged_3d_cast"),
               reconstructionMode: "neural-full",
               localRig: null,
               generatedAsset: riggedAssetInfoRef.current,
@@ -685,90 +857,115 @@ export default function Home() {
         },
       },
       {
-        name: "set_character_personality",
-        title: "Set character personality",
-        description: "Change how the character is described and performed without altering the child's captured artwork.",
-        inputSchema: { ...base, properties: { personality: { type: "string", minLength: 1, maxLength: 120 } }, required: ["personality"] },
-        annotations: { readOnlyHint: false, untrustedContentHint: true },
-        execute: async (input, options) => { const signal = executionSignal(options); try { guard(signal); return ok({ character: setPersonality(stringValue(input.personality), "BROWSER AGENT", "set_character_personality") }); } catch (error) { return fail(error); } },
+        name: "inspect_character_capabilities",
+        title: "Inspect verified character abilities",
+        description: "Read each approved character's semantic part counts, movable branches, supported actions, and blocked actions before directing movement. Returns no image data.",
+        inputSchema: { ...base, properties: {} },
+        annotations: { readOnlyHint: true, untrustedContentHint: true },
+        execute: async (_input, options) => { const signal = executionSignal(options); guard(signal); const capabilities = currentCharacterCapabilities(); return ok({ characterCount: capabilities.length, capabilities, instruction: "Only assign actions listed in availableActions.", cameraDataIncluded: false }); },
       },
       {
-        name: "place_character",
-        title: "Place character in room",
-        description: "Place the created character at a normalized position in the visible AR scene. On WebXR devices the child can tap a real detected surface for final placement.",
+        name: "stage_magic_show",
+        title: "Stage a Magic Show for human approval",
+        description: "Draft a capability-checked multi-character show in the shared page. This changes only the visible proposal; it never starts playback. The human must press Approve & play.",
         inputSchema: {
           ...base,
           properties: {
-            x: { type: "number", minimum: 0, maximum: 1 },
-            y: { type: "number", minimum: 0, maximum: 1 },
-            surface: { type: "string", enum: ["screen", "wall", "floor"] },
-            scale: { type: "number", minimum: 0.55, maximum: 1.55 },
-          },
-          required: ["x", "y", "surface", "scale"],
-        },
-        annotations: { readOnlyHint: false, untrustedContentHint: true },
-        execute: async (input, options) => { const signal = executionSignal(options); try { guard(signal); return ok({ character: placeCharacter(numberValue(input.x, .5), numberValue(input.y, .5), ["wall", "floor"].includes(String(input.surface)) ? input.surface as "wall" | "floor" : "screen", numberValue(input.scale, 1), "BROWSER AGENT", "place_character") }); } catch (error) { return fail(error); } },
-      },
-      {
-        name: "set_scene_world",
-        title: "Change the shared 3D world",
-        description: "Switch the approved character scene between the real room and three original child-safe fantasy environments. Does not navigate, capture, or upload anything.",
-        inputSchema: { ...base, properties: { world: { type: "string", enum: ["studio", "storybook", "wizard", "museum"] } }, required: ["world"] },
-        annotations: { readOnlyHint: false, untrustedContentHint: true },
-        execute: async (input, options) => { const signal = executionSignal(options); try { guard(signal); return ok({ world: changeWorld(stringValue(input.world, "studio", 20) as WorldId, "BROWSER AGENT", "set_scene_world") }); } catch (error) { return fail(error); } },
-      },
-      {
-        name: "animate_character",
-        title: "Animate character",
-        description: "Play one safe visible animation on the created character. Does not navigate, capture, upload, or modify the original drawing.",
-        inputSchema: { ...base, properties: { action: { type: "string", enum: ["idle", "wave", "dance", "hop", "walk", "hide", "spin"] }, caption: { type: "string", maxLength: 120 } }, required: ["action"] },
-        annotations: { readOnlyHint: false, untrustedContentHint: true },
-        execute: async (input, options) => { const signal = executionSignal(options); try { guard(signal); const action = stringValue(input.action, "idle") as CharacterAction; return ok({ character: animateCharacter(action, "BROWSER AGENT", "animate_character", stringValue(input.caption) || undefined) }); } catch (error) { return fail(error); } },
-      },
-      {
-        name: "recolor_character",
-        title: "Recolor generated depth",
-        description: "Change only the generated 3D solid edge accent. The child's original drawing pixels remain unchanged.",
-        inputSchema: { ...base, properties: { accent: { type: "string", pattern: "^#[0-9a-fA-F]{6}$" } }, required: ["accent"] },
-        annotations: { readOnlyHint: false, untrustedContentHint: true },
-        execute: async (input, options) => { const signal = executionSignal(options); try { guard(signal); return ok({ character: recolorCharacter(stringValue(input.accent), "BROWSER AGENT", "recolor_character") }); } catch (error) { return fail(error); } },
-      },
-      {
-        name: "tell_character_story",
-        title: "Perform mini story",
-        description: "Perform a cancellable one-to-four-beat story using safe character animations and short captions in the shared scene.",
-        inputSchema: {
-          ...base,
-          properties: {
-            title: { type: "string", minLength: 1, maxLength: 80 },
-            beats: {
-              type: "array",
-              minItems: 1,
-              maxItems: 4,
+            title: { type: "string", minLength: 1, maxLength: 72 },
+            theme: { type: "string", minLength: 1, maxLength: 72 },
+            tone: { type: "string", enum: ["gentle", "silly", "adventurous", "dreamy"] },
+            world: { type: "string", enum: ["studio", "storybook", "wizard", "museum"] },
+            cast: {
+              type: "array", minItems: 1, maxItems: 6,
               items: {
-                type: "object",
-                additionalProperties: false,
+                type: "object", additionalProperties: false,
                 properties: {
-                  action: { type: "string", enum: ["idle", "wave", "dance", "hop", "walk", "hide", "spin"] },
-                  caption: { type: "string", minLength: 1, maxLength: 120 },
-                  durationMs: { type: "number", minimum: 650, maximum: 2200 },
+                  characterIndex: { type: "integer", minimum: 0, maximum: 5 },
+                  name: { type: "string", minLength: 1, maxLength: 32 },
+                  role: { type: "string", minLength: 1, maxLength: 48 },
+                  personality: { type: "string", minLength: 1, maxLength: 80 },
                 },
-                required: ["action", "caption"],
+                required: ["characterIndex", "name", "role", "personality"],
+              },
+            },
+            beats: {
+              type: "array", minItems: 1, maxItems: 5,
+              items: {
+                type: "object", additionalProperties: false,
+                properties: {
+                  caption: { type: "string", minLength: 1, maxLength: 110 },
+                  durationMs: { type: "integer", minimum: 650, maximum: 2400 },
+                  world: { type: "string", enum: ["studio", "storybook", "wizard", "museum"] },
+                  moves: {
+                    type: "array", minItems: 1, maxItems: 6,
+                    items: {
+                      type: "object", additionalProperties: false,
+                      properties: {
+                        characterIndex: { type: "integer", minimum: 0, maximum: 5 },
+                        action: { type: "string", enum: SAFE_SHOW_ACTIONS },
+                      },
+                      required: ["characterIndex", "action"],
+                    },
+                  },
+                },
+                required: ["caption", "durationMs", "moves"],
               },
             },
           },
-          required: ["title", "beats"],
+          required: ["title", "theme", "tone", "world", "cast", "beats"],
         },
         annotations: { readOnlyHint: false, untrustedContentHint: true },
-        execute: async (input, options) => { const signal = executionSignal(options); try { guard(signal); const beats = Array.isArray(input.beats) ? input.beats.filter(isRecord) : []; return ok({ story: await runStory(stringValue(input.title), beats, "BROWSER AGENT", "tell_character_story", signal), character: characterRef.current }); } catch (error) { return fail(error); } },
+        execute: async (input, options) => { const signal = executionSignal(options); try { guard(signal); return ok(stageMagicShow(input)); } catch (error) { return fail(error); } },
       },
       {
-        name: "list_activity",
-        title: "List human-agent activity",
-        description: "Read recent attributed scene actions. Camera pixels and captured drawing data are intentionally excluded.",
-        inputSchema: { ...base, properties: { limit: { type: "number", minimum: 1, maximum: 30 } } },
+        name: "direct_live_ensemble",
+        title: "Direct one live ensemble moment",
+        description: "Play one short, visible, capability-checked moment across one to six approved characters. Returns exactly what performed and the final idle state. Does not alter the drawing or access the camera.",
+        inputSchema: {
+          ...base,
+          properties: {
+            world: { type: "string", enum: ["studio", "storybook", "wizard", "museum"] },
+            caption: { type: "string", minLength: 1, maxLength: 110 },
+            durationMs: { type: "integer", minimum: 650, maximum: 2400 },
+            moves: {
+              type: "array", minItems: 1, maxItems: 6,
+              items: {
+                type: "object", additionalProperties: false,
+                properties: {
+                  characterIndex: { type: "integer", minimum: 0, maximum: 5 },
+                  action: { type: "string", enum: SAFE_SHOW_ACTIONS },
+                },
+                required: ["characterIndex", "action"],
+              },
+            },
+          },
+          required: ["caption", "durationMs", "moves"],
+        },
+        annotations: { readOnlyHint: false, untrustedContentHint: true },
+        execute: async (input, options) => {
+          const signal = executionSignal(options);
+          try {
+            guard(signal);
+            const requestedWorld = stringValue(input.world, worldRef.current, 20) as WorldId;
+            const world = worlds.some((candidate) => candidate.id === requestedWorld) ? requestedWorld : worldRef.current;
+            const capabilities = currentCharacterCapabilities();
+            const beat: ShowBeat = {
+              world,
+              caption: stringValue(input.caption, "The friends share a magical moment.", 110),
+              durationMs: Math.min(2400, Math.max(650, numberValue(input.durationMs, 1200))),
+              moves: parseShowMoves(input.moves, capabilities),
+            };
+            return ok({ performance: await directEnsembleBeat(beat, "BROWSER AGENT", "direct_live_ensemble", signal) });
+          } catch (error) { return fail(error); }
+        },
+      },
+      {
+        name: "list_collaboration_history",
+        title: "List attributed human-agent history",
+        description: "Read recent staged plans, human approvals, performances, and system actions. Camera pixels and drawing image data are excluded.",
+        inputSchema: { ...base, properties: { limit: { type: "integer", minimum: 1, maximum: 30 } } },
         annotations: { readOnlyHint: true, untrustedContentHint: true },
-        execute: async (input, options) => { const signal = executionSignal(options); guard(signal); const limit = Math.min(30, Math.max(1, numberValue(input.limit, 12))); return ok({ activity: activityRef.current.slice(0, limit), cameraDataIncluded: false }); },
+        execute: async (input, options) => { const signal = executionSignal(options); guard(signal); const limit = Math.min(30, Math.max(1, numberValue(input.limit, 12))); return ok({ activity: activityRef.current.slice(0, limit), cameraDataIncluded: false, currentPlan: magicShowPlanRef.current ? { id: magicShowPlanRef.current.id, title: magicShowPlanRef.current.title, status: magicShowPlanRef.current.status } : null }); },
       },
     ];
 
@@ -777,13 +974,13 @@ export default function Home() {
       setNotice(`${tools.length} WebMCP tools are ready. Camera capture remains human-only.`);
     }).catch(() => setWebMcpReady(false));
     return () => controller.abort();
-  }, [animateCharacter, changeWorld, createCharacter, inspectScene, placeCharacter, recolorCharacter, requestNeuralConsent, runStory, setPersonality]);
+  }, [createCharacter, currentCharacterCapabilities, directEnsembleBeat, inspectCreativeScene, parseShowMoves, requestNeuralConsent, stageMagicShow]);
 
   const runMagicDemo = useCallback(async () => {
     if (demoRunning) return;
     setDemoRunning(true);
     try {
-      setAgentLine("Loading the exact drawing and running all six local recognition graphs…");
+      setAgentLine("Loading the verified drawing and its playable rig…");
       const demoInput = await createAniGenDemoDrawing();
       const demo = await recognizeDrawingParts(demoInput).catch(() => demoInput);
       setDrawing(demo, "demo");
@@ -791,25 +988,29 @@ export default function Home() {
       commitNeuralAsset(bundledAsset);
       externalUploadApprovedRef.current = false;
       setNeuralProgress({ phase: "ready", progress: 1, message: "Verified neural sketch rig loaded." });
-      setAgentLine("1 / 4 · This exact drawing became a smoothed, colored 68,326-vertex neural SkinnedMesh with 7 active bones—not a cut-out or extrusion.");
+      setAgentLine("The browser agent is reading the real cast abilities before it proposes a show.");
       await wait(450);
-      createCharacter({ name: "Pip", personality: "brave on the outside, shy on the inside", accent: "#ce919f", inflation: 1 }, "BROWSER AGENT", "reconstruct_rigged_3d_character");
-      setAgentLine("2 / 4 · Sketch-conditioned neural reconstruction produced ears, feet, side arm, a rounded body, unseen surfaces, and semantic skin weights.");
-      await wait(850);
-      placeCharacter(.68, .53, "wall", 1, "BROWSER AGENT", "place_character");
-      setAgentLine("3 / 4 · WebMCP places Pip and directs bones without receiving camera control.");
-      await wait(650);
-      await runStory("Pip finds their courage", [
-        { action: "hide", caption: "Pip hides at the edge of the wall.", durationMs: 800 },
-        { action: "hop", caption: "One brave hop into the room.", durationMs: 800 },
-        { action: "wave", caption: "A real arm-bone branch waves hello.", durationMs: 1000 },
-        { action: "spin", caption: "A full turn reveals generated back geometry.", durationMs: 1400 },
-      ], "BROWSER AGENT", "tell_character_story");
-      setAgentLine("4 / 4 · The full turn proves real 360° geometry; animation comes from the generated skeleton.");
+      createCharacter({ name: "Pip", personality: "brave on the outside, shy on the inside", accent: "#ce919f", inflation: 1 }, "BROWSER AGENT", "request_rigged_3d_cast");
+      placeCharacter(.68, .53, "wall", 1, "WALLALIVE");
+      await wait(500);
+      stageMagicShow({
+        title: "Pip Finds a Brave Hello",
+        theme: "finding courage with a new friend",
+        tone: "gentle",
+        world: "storybook",
+        cast: [{ characterIndex: 0, name: "Pip", role: "the shy explorer", personality: "shy, curious, and secretly brave" }],
+        beats: [
+          { caption: "Pip peeks from the edge of the kingdom.", durationMs: 900, moves: [{ characterIndex: 0, action: "hide" }] },
+          { caption: "One brave hop brings Pip into the story.", durationMs: 900, moves: [{ characterIndex: 0, action: "hop" }] },
+          { caption: "Pip waves hello with a verified arm branch.", durationMs: 1100, moves: [{ characterIndex: 0, action: "wave" }] },
+          { caption: "A full turn reveals the generated back.", durationMs: 1400, world: "museum", moves: [{ characterIndex: 0, action: "spin" }] },
+        ],
+      });
+      setAgentLine("The agent staged a capability-checked show. The performance cannot begin until you approve it.");
     } finally {
       setDemoRunning(false);
     }
-  }, [commitNeuralAsset, createCharacter, demoRunning, placeCharacter, runStory, setDrawing]);
+  }, [commitNeuralAsset, createCharacter, demoRunning, placeCharacter, setDrawing, stageMagicShow]);
 
   const enterAR = useCallback(async () => {
     const result = await stageRef.current?.enterImmersiveAR();
@@ -874,7 +1075,7 @@ export default function Home() {
       setNotice("Clipboard access is unavailable. The prompt is shown in the agent panel.");
       return;
     }
-    await navigator.clipboard.writeText("Inspect the approved drawing. Turn it into a shy but brave character, place it on the wall, then tell a three-beat story where it hides, hops, and waves.");
+    await navigator.clipboard.writeText("Inspect the creative scene and every character's verified capabilities. Then stage a gentle three-beat Magic Show in the best world. Give each character a role, use only supported actions, and wait for me to approve playback.");
     setNotice("Demo prompt copied.");
   }, []);
 
@@ -1102,12 +1303,20 @@ export default function Home() {
             {capture && cameraState !== "active" && !character.created ? <div className="cutout-review" onPointerDown={(event) => event.stopPropagation()}><img src={capture.textureUrl} alt="Isolated character cutout to review" /><span>{captureEnsemble.length > 1 ? `${captureEnsemble.length} SEPARATE FIGURES FOUND` : "IS THE WHOLE CHARACTER VISIBLE?"}</span><div><button onClick={requestNeuralConsent}>YES · CONTINUE</button><button onClick={() => capture.sourceScope === "camera" ? startCamera() : uploadRef.current?.click()}>NO · TRY AGAIN</button></div></div> : null}
             {step === "camera" ? <><div className="capture-guide"><span /><b>TAP CHARACTER · THEN CAPTURE</b></div><div className="capture-target" style={{ left: `${captureTarget.x * 100}%`, top: `${captureTarget.y * 100}%` }}><i /></div></> : null}
             {character.created ? <Suspense fallback={<div className="three-layer" aria-hidden="true" />}>
-              <ARStage ref={stageRef} characters={localFallbackActive ? captureEnsemble : null} contour={capture?.contour ?? null} skeleton={capture?.skeleton ?? null} textureUrl={capture?.textureUrl ?? null} rig={capture?.rig ?? null} depth={capture?.depthRecognition ?? null} action={character.action} accent={character.accent} inflation={character.inflation} neuralAssetUrl={neuralAsset?.meshUrl ?? null} visible onCapability={handleARCapability} onPlaced={handleARPlaced} onNeuralAssetInfo={handleRiggedAssetInfo} />
+              <ARStage ref={stageRef} characters={localFallbackActive ? captureEnsemble : null} contour={capture?.contour ?? null} skeleton={capture?.skeleton ?? null} textureUrl={capture?.textureUrl ?? null} rig={capture?.rig ?? null} depth={capture?.depthRecognition ?? null} action={character.action} ensembleActions={ensembleActions} accent={character.accent} inflation={character.inflation} neuralAssetUrl={neuralAsset?.meshUrl ?? null} visible onCapability={handleARCapability} onPlaced={handleARPlaced} onNeuralAssetInfo={handleRiggedAssetInfo} />
             </Suspense> : null}
             {neuralConsentVisible ? <div className="neural-consent" role="dialog" aria-modal="true" aria-labelledby="neural-consent-title" onPointerDown={(event) => event.stopPropagation()}>
               <span>CHOOSE THE 3D ENGINE</span><h2 id="neural-consent-title">How should this character come alive?</h2><p>Full neural 3D sends only this reviewed cutout to AniGen. Private 3D keeps every pixel in this tab and builds a closed, rotatable, skinned puppet from the exact outline.</p><div><button onClick={startNeuralReconstruction}>GENERATE REAL 3D</button><button onClick={keepPrivatePreview}>PRIVATE 3D · NO UPLOAD</button></div>
             </div> : null}
             {neuralBusy ? <div className="neural-progress" role="status" onPointerDown={(event) => event.stopPropagation()}><span>ANIGEN · RIGGED 3D</span><b>{neuralProgress.message}</b><div><i style={{ width: `${Math.round(neuralProgress.progress * 100)}%` }} /></div><small>{Math.round(neuralProgress.progress * 100)}% · PUBLIC GPU</small></div> : null}
+            {magicShowPlan?.status === "awaiting-human-approval" ? <div className="magic-show-approval" role="dialog" aria-modal="false" aria-labelledby="magic-show-title" onPointerDown={(event) => event.stopPropagation()}>
+              <div><span>AGENT STAGED · YOU DECIDE</span><b>{magicShowPlan.tone} · {magicShowPlan.beats.length} beats</b></div>
+              <h2 id="magic-show-title">{magicShowPlan.title}</h2>
+              <p>{magicShowPlan.cast.map((member) => `${member.name} · ${member.role}`).join("  /  ")}</p>
+              <div className="show-beat-preview">{magicShowPlan.beats.map((beat, index) => <i key={`${magicShowPlan.id}-${index}`}>{index + 1}<small>{beat.moves.map((move) => move.action).join(" + ")}</small></i>)}</div>
+              <div className="show-approval-actions"><button onClick={approveAndPlayMagicShow}>APPROVE &amp; PLAY <span>▶</span></button><button onClick={dismissMagicShow}>NOT YET</button></div>
+            </div> : null}
+            {showPlaying ? <div className="magic-show-live" role="status"><i /> AGENT PLAN · HUMAN APPROVED · LIVE</div> : null}
             <div className="camera-hud"><span><i /> {cameraState === "active" ? "LIVE CAMERA · LOCAL" : neuralAsset && character.created ? `FULL NEURAL RIG · ${riggedAssetInfo?.bones ?? "…"} BONES` : localFallbackActive && character.created ? captureEnsemble.length > 1 ? `${captureEnsemble.length} RIGGED FIGURES · PRIVATE` : "ON-DEVICE 3D · PRIVATE" : capture ? "CUTOUT REVIEW · LOCAL" : "SAFE DEMO ROOM"}</span><strong>{immersiveAR ? "WEBXR READY" : "CAMERA AR FALLBACK"}</strong></div>
             {character.created && storyCaption ? <div className="story-caption"><span>{character.storyTitle || "LIVE MOMENT"}</span><p>{storyCaption}</p></div> : null}
             {cameraState === "denied" || cameraState === "unavailable" ? <div className="camera-message"><b>CAMERA OPTIONAL</b><p>The demo doodle still proves the complete WebMCP and 3D workflow.</p></div> : null}
@@ -1117,7 +1326,7 @@ export default function Home() {
 
           <div className="action-tray">
             <div><span>CHARACTER ACTIONS</span><small>{character.created ? `${character.name.toUpperCase()} · ${character.personality.toUpperCase()}` : "WAKE A DRAWING TO PLAY"}</small></div>
-            {actions.map((item) => <button key={item.action} disabled={!character.created} className={character.action === item.action ? "active" : ""} onClick={() => animateCharacter(item.action, "CHILD")}><i>{item.glyph}</i>{item.label}</button>)}
+            {actions.map((item) => <button key={item.action} disabled={!character.created || showPlaying} className={character.action === item.action ? "active" : ""} onClick={() => animateCharacter(item.action, "CHILD")}><i>{item.glyph}</i>{item.label}</button>)}
           </div>
           <p className="placement-tip">{neuralAsset && character.created ? "Drag for 360° · Generated back · Actions move the SkinnedMesh bones" : localFallbackActive && character.created ? captureEnsemble.length > 1 ? "Separate figures · Separate skeletons · Wave, Dance, and Walk move verified limbs" : "Drag for 360° · Private closed volume · Retry full neural 3D anytime" : capture ? "Review the transparent cutout before generating real rigged 3D" : "Photograph one or more clear figures—each drawing is separated before rigging"}</p>
         </section>
@@ -1133,16 +1342,16 @@ export default function Home() {
               <div className="agent-status"><div><i /> BROWSER AGENT</div><span>{webMcpReady ? "CONNECTED" : "DEMO MODE"}</span></div>
               <p className="kicker">SHARED IMAGINATION</p>
               <h2>{agentLine}</h2>
-              <p>The agent directs personality, placement, animation, and stories. Camera permission always stays with the child.</p>
-              <div className="agent-call"><span>↳</span><div><b>{latestAgentActivity?.toolName ?? "inspect_wall_scene"}</b><small>{latestAgentActivity?.detail ?? "Drawing state visible · Camera private"}</small></div></div>
-              <blockquote>“Make it shy. Let it hide, take one brave hop, then wave.”</blockquote>
+              <p>The agent reads each real rig, assigns compatible roles, and stages ensemble choreography. The child approves the final performance.</p>
+              <div className="agent-call"><span>↳</span><div><b>{latestAgentActivity?.toolName ?? "inspect_creative_scene"}</b><small>{latestAgentActivity?.detail ?? "Shared state visible · Camera private"}</small></div></div>
+              <blockquote>“Inspect every character, stage a gentle museum show, and wait for me to approve it.”</blockquote>
               <button className="copy-prompt" onClick={copyDemoPrompt}>COPY WINNING DEMO PROMPT <span>⧉</span></button>
             </div>
           ) : null}
 
           {panelTab === "tools" ? (
             <div className="panel-body">
-              <p className="kicker">WEBMCP INSPECTOR</p><h2>Nine tools.<br />Zero camera control.</h2><p>The agent can now direct the character and its world through narrow schemas and shared validation.</p>
+              <p className="kicker">WEBMCP INSPECTOR</p><h2>One shared creative loop.</h2><p>Inspect state → check abilities → stage a show → human approves → perform and verify. Camera authority never crosses into the tool surface.</p>
               <div className="tools-list">{toolNames.map(([name, mode], index) => <div key={name}><span>{String(index + 1).padStart(2, "0")}</span><code>{name}</code><i>{mode}</i></div>)}</div>
             </div>
           ) : null}

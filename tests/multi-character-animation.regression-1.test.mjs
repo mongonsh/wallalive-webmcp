@@ -65,6 +65,9 @@ test("the stage and page carry an ensemble instead of one rigid blob", async () 
   assert.doesNotMatch(stage, /const structuralParts: typeof rig\.parts = \[\]/);
   assert.match(stage, /characters: DrawingExtraction\[\] \| null/);
   assert.match(stage, /articulatedCharacters\.forEach/);
+  assert.match(stage, /ensembleActions\?: CharacterAction\[\] \| null/);
+  assert.match(stage, /const instanceAction = directedActions\?\.\[instanceIndex\] \?\? currentAction/);
+  assert.match(stage, /wallaliveBasePosition/);
   assert.match(recognition, /recognizeDrawingsFromImageUrl/);
   assert.match(recognition, /recognizeDrawingsFromVideo/);
   assert.match(page, /captureEnsembleRef/);
