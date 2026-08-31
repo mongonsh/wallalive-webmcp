@@ -21,7 +21,7 @@ The old contour inflation is retained only as a clearly labeled **rough private 
 
 ## The real 3D loop
 
-1. **Scan and recognize locally:** the child opens the camera, taps the character, and captures. WallAlive separates one drawing from paper edges, text, and foreground clutter in browser memory. WallAlive PartUNet proposes nine visible semantic part classes, TopologyNet v10 decodes variable endpoints, junctions, and branch paths for non-human drawings, and AmateurPose v6 estimates 17 named joints only for applicable humanoids. Semantic masks snap back to original pixel regions, so face position, outline, and sampled color come from the child’s drawing.
+1. **Scan or upload and recognize locally:** the child can capture with the camera or choose an existing drawing photo. WallAlive separates one drawing from paper edges, text, and foreground clutter in browser memory. Uploaded photos use a wider full-character search window so top ears and lower feet are not removed before inference. WallAlive PartUNet proposes nine visible semantic part classes, TopologyNet v10 decodes variable endpoints, junctions, and branch paths for non-human drawings, and AmateurPose v6 estimates 17 named joints only for applicable humanoids. Semantic masks snap back to original pixel regions, so face position, outline, and sampled color come from the child’s drawing.
 2. **Approve minimally:** a second visible approval explains that only the isolated drawing—not the live camera or room frame—will be sent to AniGen.
 3. **Generate jointly:** AniGen’s `ss_flow_solo` + `slat_flow_auto` path predicts full geometry, a skeleton of arbitrary complexity, and smooth skinning weights together.
 4. **Load and play:** the browser downloads the returned GLB into a tab-local Blob URL. Three.js loads its `SkinnedMesh`, classifies arm/leg bone branches, and drives wave, dance, walk, hop, hide, and spin actions.
@@ -105,6 +105,7 @@ rigged GLB → local Blob URL → Three.js GLTFLoader / SkinnedMesh
 - WallAlive local stack: a 288,109-parameter whole-character network, 109,832-parameter 96² and 435,624-parameter 128² face networks, a 402,052-parameter spatial variable-topology network, and a 161,133-parameter optional 17-joint pose network, loaded through `onnxruntime-web`
 - Instance-aware decoding preserves multiple same-side arms/legs and separate facial features; a 22-feature standardized logistic gate judges individual cheek/ear masks from model agreement, probability, size, shape, fill, and position before every accepted region snaps back to high-resolution pixel geometry
 - Raised face meshes and detected contour tubes add real eye/cheek/mouth parallax to the private preview instead of leaving the features flat
+- High-confidence topology endpoints now create actual articulated ear/arm/leg branches with hand/foot children when the fixed humanoid pose gate is not applicable; this is what lets variable non-human drawings drive the preview rig instead of merely displaying a class label
 - Lazy-loaded `@gradio/client` connection to AniGen
 - `document.modelContext.registerTool()` imperative WebMCP integration
 - One canonical action layer shared by UI and tool executors
@@ -119,6 +120,8 @@ On the untouched official ChildlikeSHAPES test set, the body/limb model scores 0
 The independent Amateur Drawings run contains 352 training, 63 validation, and 75 untouched test characters. The baseline browser pipeline already covered 96.31% of visible joints with its body mask but localized named semantic parts poorly—especially ears, hands, and feet. AmateurPose v6 reaches 0.7969 PCK@5%, 0.8643 PCK@10%, and 5.578 mean pixels of error at 96² on the untouched test split. The checked-in ONNX export reproduces those metrics exactly. Its output only refines named joint paths after a part-and-geometry applicability gate; it cannot invent eyes, ears, mouths, or cheeks. Exact segmentation evidence still decides face position, shape, outline, and sampled color. These numbers are regression evidence, not a claim that single-view recognition or an inferred unseen back can be perfect.
 
 `ml/train_topology_v10.py` jointly learns four graph fields from exact procedural graph labels and an eight-family spatial class head from 10,241 real Google Quick, Draw! records. Real strokes supervise class only, never pseudo endpoints or junctions. On disjoint sealed tests it reaches 0.9915 one-pixel-tolerant centerline F1, 0.5600 endpoint IoU, 0.6436 junction IoU, and 0.9587 real-drawing family accuracy; the checked-in ONNX reproduces the report exactly. `ml/prepare_varied_quickdraw_benchmark.py` separately preserves five attributed source records after line 2400—beyond the complete training/validation/test window ending before line 1960—and v10 classifies all five filled cutouts correctly. This benchmark validates recognition and conditioning only; a live AniGen GPU run is still required to validate each newly generated GLB.
+
+For difficult real photos, `ml/evaluate_single_drawing.py` reproduces the browser face ensemble and writes per-part overlay evidence. `ml/prepare_single_drawing_mesh.py` then builds a higher-resolution signed-distance volume from the isolated pixels, retains the exact front texture and sampled palette, and writes semantic/rig metadata. `scripts/build-semantic-glb.py` consumes that evidence in Blender to export a colored, closed, skinned GLB with a plain inferred back and topology-derived appendage bones. `scripts/evaluate-anigen.mjs --inspect` validates geometric closure after welding legitimate UV/normal seams, volume, normalized skin weights, bone count, and color materials.
 
 ## Local development
 
@@ -135,6 +138,15 @@ Validation:
 npm run lint
 npm test
 npm audit --omit=dev
+```
+
+Optional exact-input 3D regression (requires the Python packages in `ml/requirements.txt` and Blender):
+
+```bash
+python ml/evaluate_single_drawing.py --image drawing.png --output /tmp/wallalive-face-evidence
+python ml/prepare_single_drawing_mesh.py --image isolated-drawing.png --output /tmp/wallalive-mesh --resolution 256
+blender --background --python scripts/build-semantic-glb.py -- --input-dir /tmp/wallalive-mesh --output /tmp/wallalive.glb
+node scripts/evaluate-anigen.mjs --inspect /tmp/wallalive.glb
 ```
 
 ## Attribution and license

@@ -37,3 +37,46 @@ test("rejects oversized ear clutter and completes the learned bilateral pair", (
   assert.ok(ears.some((ear) => ear.center.x < 0));
   assert.ok(ears.some((ear) => ear.center.x > 0));
 });
+
+test("keeps small bilateral silhouette ears when the face model finds both eyes but no ear mask", () => {
+  const body = { id: "body", kind: "body", side: "center", parentId: null, center: { x: 0, y: 0, z: 0 }, size: { x: 0.8, y: 1.1, z: 0.46 }, rotation: 0, color: "#f5eee5", confidence: 1, source: "silhouette-branch" };
+  const ear = (side, x) => ({
+    id: `ear-${side}`,
+    kind: "ear",
+    side,
+    parentId: "body",
+    center: { x, y: 0.48, z: 0 },
+    anchor: { x: x * 0.62, y: 0.28, z: 0 },
+    size: { x: 0.11, y: 0.18, z: 0.08 },
+    rotation: 0,
+    color: "#f5eee5",
+    confidence: 0.76,
+    source: "silhouette-branch",
+  });
+  const extraction = {
+    previewUrl: "preview",
+    textureUrl: "texture",
+    contour: [],
+    skeleton: [],
+    semanticRegions: [],
+    analysis: { shapeHint: "tall", dominantColor: "#d64f63", secondaryColor: "#fff", coveragePercent: 8, aspectRatio: 0.8, edgeEnergy: "soft", sourceWidth: 100, sourceHeight: 120, skeletonPoints: 5 },
+    rig: {
+      version: "wallalive-semantic-rig-v2",
+      bodyColor: "#f5eee5",
+      lineColor: "#d64f63",
+      joints: [],
+      detectedKinds: ["body", "ear"],
+      parts: [body, ear("left", -0.28), ear("right", 0.28)],
+    },
+  };
+  const result = mergeLearnedPartHints(extraction, [
+    { kind: "eye", center: { x: 0.41, y: 0.39 }, size: { x: 0.08, y: 0.08 }, rotation: 0, confidence: 0.94 },
+    { kind: "eye", center: { x: 0.59, y: 0.39 }, size: { x: 0.08, y: 0.08 }, rotation: 0, confidence: 0.93 },
+    { kind: "mouth", center: { x: 0.5, y: 0.52 }, size: { x: 0.08, y: 0.04 }, rotation: 0, confidence: 0.84 },
+  ], 11);
+
+  const ears = result.rig.parts.filter((part) => part.kind === "ear");
+  assert.equal(ears.length, 2);
+  assert.ok(ears.every((part) => part.source === "silhouette-branch"));
+  assert.deepEqual(ears.map((part) => part.side).sort(), ["left", "right"]);
+});

@@ -5,6 +5,7 @@ export type ShapeHint = "round" | "tall" | "wide" | "spiky";
 export type ContourPoint = { x: number; y: number };
 export type SkeletonPoint = { x: number; y: number; radius: number };
 export type CaptureTarget = { x: number; y: number };
+export type ExtractionScope = "camera" | "selected-image";
 
 export const POSE_JOINT_NAMES = [
   "nose", "left_eye", "right_eye", "left_ear", "right_ear",
@@ -58,7 +59,7 @@ export type LearnedTopology = {
 
 export type SemanticPartKind = "body" | "eye" | "pupil" | "cheek" | "mouth" | "ear" | "arm" | "hand" | "leg" | "foot" | "marking";
 export type SemanticSide = "left" | "right" | "center";
-export type SemanticPartSource = "image-region" | "silhouette-branch" | "structural-inference" | "learned-model" | "learned-pose";
+export type SemanticPartSource = "image-region" | "silhouette-branch" | "structural-inference" | "learned-model" | "learned-pose" | "learned-topology";
 
 export type LearnedPartHint = {
   kind: Exclude<SemanticPartKind, "body" | "pupil" | "marking">;
@@ -1456,8 +1457,27 @@ export function mergeLearnedPartHints(
   topology?: LearnedTopology,
 ): DrawingExtraction {
   const replaceableFaceKinds = new Set<SemanticPartKind>(["eye", "cheek", "mouth", "ear"]);
+  const accepted = hints.filter((hint) => hint.confidence >= (hint.kind === "cheek" ? 0.18 : hint.kind === "mouth" ? 0.42 : 0.48));
+  const body = extraction.rig.parts.find((part) => part.kind === "body");
+  if (!body) return extraction;
+  const learnedEyeHints = accepted.filter((hint) => hint.kind === "eye");
+  const learnedEyeRigY = learnedEyeHints.length
+    ? learnedEyeHints.reduce((total, eye) => total + (0.5 - eye.center.y) * 1.4, 0) / learnedEyeHints.length
+    : null;
+  const preserveSilhouetteEars = learnedEyeHints.length >= 2 && !accepted.some((hint) => hint.kind === "ear");
+  const isEvidenceBackedEar = (part: SemanticPart) => preserveSilhouetteEars
+    && part.kind === "ear"
+    && part.source === "silhouette-branch"
+    && part.side !== "center"
+    && part.size.x <= body.size.x * 0.24
+    && part.size.y <= body.size.y * 0.3
+    && Math.abs(part.center.x - body.center.x) >= body.size.x * 0.1
+    && learnedEyeRigY !== null
+    && part.center.y >= learnedEyeRigY + body.size.y * 0.035;
   const withoutHeuristicFace = () => {
-    const parts = extraction.rig.parts.filter((part) => !replaceableFaceKinds.has(part.kind) && part.kind !== "pupil");
+    const parts = extraction.rig.parts.filter((part) => (
+      (!replaceableFaceKinds.has(part.kind) || isEvidenceBackedEar(part)) && part.kind !== "pupil"
+    ));
     const joints = parts.filter((part) => part.parentId && parts.some((parent) => parent.id === part.parentId)).map((part) => ({
       id: `joint-${part.id}`,
       parentId: part.parentId!,
@@ -1467,7 +1487,6 @@ export function mergeLearnedPartHints(
     }));
     return { parts, joints, detectedKinds: [...new Set(parts.map((part) => part.kind))] };
   };
-  const accepted = hints.filter((hint) => hint.confidence >= (hint.kind === "cheek" ? 0.18 : hint.kind === "mouth" ? 0.42 : 0.48));
   if (!accepted.length) return {
     ...extraction,
     rig: { ...extraction.rig, ...withoutHeuristicFace() },
@@ -1475,8 +1494,6 @@ export function mergeLearnedPartHints(
     poseRecognition: pose,
     topologyRecognition: topology,
   };
-  const body = extraction.rig.parts.find((part) => part.kind === "body");
-  if (!body) return extraction;
   // Ear masks are especially vulnerable to paper labels above a character.
   // A predicted ear wider than one fifth of the character is almost always
   // surrounding clutter, not the small anatomical part used in training.
@@ -1774,6 +1791,104 @@ export function mergeLearnedPartHints(
     }
   }
 
+  if (topology?.applicable) {
+    const topologyNodes = new Map(topology.nodes.map((node) => [node.id, node]));
+    const rootNode = topology.nodes.find((node) => node.role === "root");
+    const adjacency = new Map<string, Array<{ nodeId: string; points: Array<{ x: number; y: number }> }>>();
+    topology.edges.forEach((edge) => {
+      const forward = edge.path.length ? edge.path : [topologyNodes.get(edge.from)!, topologyNodes.get(edge.to)!];
+      const reverse = [...forward].reverse();
+      adjacency.set(edge.from, [...(adjacency.get(edge.from) ?? []), { nodeId: edge.to, points: forward }]);
+      adjacency.set(edge.to, [...(adjacency.get(edge.to) ?? []), { nodeId: edge.from, points: reverse }]);
+    });
+    const pathToRoot = (startId: string) => {
+      if (!rootNode) return [];
+      const queue: Array<{ id: string; path: Array<{ x: number; y: number }> }> = [{ id: startId, path: [] }];
+      const visited = new Set([startId]);
+      while (queue.length) {
+        const current = queue.shift()!;
+        if (current.id === rootNode.id) return current.path;
+        for (const next of adjacency.get(current.id) ?? []) {
+          if (visited.has(next.nodeId)) continue;
+          visited.add(next.nodeId);
+          queue.push({ id: next.nodeId, path: [...current.path, ...next.points.slice(current.path.length ? 1 : 0)] });
+        }
+      }
+      return [];
+    };
+    const endpointNodes = topology.nodes.filter((node) => node.role === "endpoint")
+      .sort((a, b) => b.confidence - a.confidence);
+    for (const node of endpointNodes) {
+      const endpoint = toRigPoint(node);
+      const dx = endpoint.x - body.center.x;
+      const dy = endpoint.y - body.center.y;
+      const relativeX = Math.abs(dx) / Math.max(0.001, body.size.x);
+      const relativeY = dy / Math.max(0.001, body.size.y);
+      const side = sideFor(endpoint.x);
+      let kind: "ear" | "arm" | "leg" | null = null;
+      if (relativeY > 0.3 && relativeX > 0.08) kind = "ear";
+      else if (relativeY < -0.29) kind = "leg";
+      else if (relativeX > 0.26) kind = "arm";
+      if (!kind) continue;
+      const existing = parts.filter((part) => part.kind === kind && part.side === side)
+        .sort((a, b) => Math.hypot(a.center.x - endpoint.x, a.center.y - endpoint.y)
+          - Math.hypot(b.center.x - endpoint.x, b.center.y - endpoint.y))[0];
+      if (existing && Math.hypot(existing.center.x - endpoint.x, existing.center.y - endpoint.y) <= body.size.x * 0.28) continue;
+      if (kind === "ear") {
+        const width = clamp(body.size.x * 0.12, 0.045, body.size.x * 0.2);
+        const height = clamp(body.size.y * 0.15, 0.055, body.size.y * 0.24);
+        parts.push({
+          id: nextId("ear", side),
+          kind: "ear",
+          side,
+          parentId: "body",
+          center: endpoint,
+          anchor: { x: body.center.x + dx * 0.62, y: body.center.y + dy * 0.62, z: 0 },
+          size: { x: width, y: height, z: Math.min(width, height) * 0.68 },
+          rotation: Math.atan2(-dx, dy),
+          color: extraction.rig.bodyColor,
+          confidence: node.confidence * topology.kindConfidence * 0.74,
+          source: "learned-topology",
+        });
+        continue;
+      }
+      const rootward = pathToRoot(node.id).map(toRigPoint).reverse();
+      const path = rootward.length >= 2 ? rootward : [body.center, endpoint];
+      const anchor = path[0];
+      const thickness = clamp(body.size.x * 0.06, 0.028, body.size.x * 0.13);
+      const length = path.slice(1).reduce((total, point, index) => total + Math.hypot(point.x - path[index].x, point.y - path[index].y), 0);
+      const partId = nextId(kind, side);
+      parts.push({
+        id: partId,
+        kind,
+        side,
+        parentId: "body",
+        center: endpoint,
+        anchor,
+        size: { x: thickness, y: Math.max(thickness * 2.1, length), z: thickness },
+        rotation: Math.atan2(-(endpoint.x - anchor.x), endpoint.y - anchor.y),
+        color: extraction.rig.bodyColor,
+        confidence: node.confidence * topology.kindConfidence * 0.78,
+        source: "learned-topology",
+        path,
+      });
+      const endpointKind = kind === "arm" ? "hand" : "foot";
+      const endpointSize = thickness * 1.3;
+      parts.push({
+        id: nextId(endpointKind, side),
+        kind: endpointKind,
+        side,
+        parentId: partId,
+        center: endpoint,
+        size: { x: endpointSize, y: endpointSize * (endpointKind === "foot" ? 0.82 : 1), z: endpointSize * 0.82 },
+        rotation: 0,
+        color: extraction.rig.bodyColor,
+        confidence: node.confidence * topology.kindConfidence * 0.7,
+        source: "learned-topology",
+      });
+    }
+  }
+
   const joints = parts.filter((part) => part.parentId).map((part) => ({
     id: `joint-${part.id}`,
     parentId: part.parentId!,
@@ -1799,7 +1914,18 @@ function classifyShape(width: number, height: number, coverage: number): ShapeHi
   return "round";
 }
 
-function extractDrawingFromSource(sourceImage: CanvasImageSource, sourceWidth: number, sourceHeight: number, target: CaptureTarget): DrawingExtraction {
+export function extractionSearchWindow(width: number, height: number, scope: ExtractionScope) {
+  const selectedImage = scope === "selected-image";
+  return {
+    scanInsetX: Math.round(width * (selectedImage ? 0.025 : 0.08)),
+    scanInsetTop: Math.round(height * (selectedImage ? 0.025 : 0.09)),
+    scanInsetBottom: Math.round(height * (selectedImage ? 0.035 : 0.16)),
+    focusRadiusX: width * (selectedImage ? 0.46 : 0.27),
+    focusRadiusY: height * (selectedImage ? 0.47 : 0.33),
+  };
+}
+
+function extractDrawingFromSource(sourceImage: CanvasImageSource, sourceWidth: number, sourceHeight: number, target: CaptureTarget, scope: ExtractionScope = "camera"): DrawingExtraction {
   const width = 480;
   const height = Math.round(width * (sourceHeight / sourceWidth));
   const source = document.createElement("canvas");
@@ -1814,13 +1940,9 @@ function extractDrawingFromSource(sourceImage: CanvasImageSource, sourceWidth: n
   const backgroundLightness = (Math.max(background.r, background.g, background.b) + Math.min(background.r, background.g, background.b)) / 2;
   const rawInk = new Uint8Array(width * height);
   const chromaticInk = new Uint8Array(width * height);
-  const scanInsetX = Math.round(width * 0.08);
-  const scanInsetTop = Math.round(height * 0.09);
-  const scanInsetBottom = Math.round(height * 0.16);
+  const { scanInsetX, scanInsetTop, scanInsetBottom, focusRadiusX, focusRadiusY } = extractionSearchWindow(width, height, scope);
   const focusX = target.x * width;
   const focusY = target.y * height;
-  const focusRadiusX = width * 0.27;
-  const focusRadiusY = height * 0.33;
 
   for (let y = scanInsetTop; y < height - scanInsetBottom; y += 1) {
     for (let x = scanInsetX; x < width - scanInsetX; x += 1) {
@@ -1882,15 +2004,30 @@ function extractDrawingFromSource(sourceImage: CanvasImageSource, sourceWidth: n
   const span = Math.max(anchor.maxX - anchor.minX, anchor.maxY - anchor.minY);
   const anchorArea = Math.max(1, (anchor.maxX - anchor.minX + 1) * (anchor.maxY - anchor.minY + 1));
   const anchorColor = componentColor(anchor, frame.data);
-  const selected = useColorInk ? [anchor] : components.filter((component) => {
+  const selected = components.filter((component) => {
     if (component === anchor) return true;
     const componentArea = (component.maxX - component.minX + 1) * (component.maxY - component.minY + 1);
-    const withinCharacterBounds = component.centerX >= anchor.minX - span * 0.035
-      && component.centerX <= anchor.maxX + span * 0.035
-      && component.centerY >= anchor.minY - span * 0.035
-      && component.centerY <= anchor.maxY + span * 0.035;
+    const appendageMargin = useColorInk ? span * 0.18 : span * 0.035;
+    const withinCharacterBounds = component.centerX >= anchor.minX - appendageMargin
+      && component.centerX <= anchor.maxX + appendageMargin
+      && component.centerY >= anchor.minY - appendageMargin
+      && component.centerY <= anchor.maxY + appendageMargin;
+    const gapX = Math.max(component.minX - anchor.maxX - 1, anchor.minX - component.maxX - 1, 0);
+    const gapY = Math.max(component.minY - anchor.maxY - 1, anchor.minY - component.maxY - 1, 0);
+    const touchesCharacter = Math.hypot(gapX, gapY) <= span * (useColorInk ? 0.13 : 0.04);
+    const unionWidth = Math.max(anchor.maxX, component.maxX) - Math.min(anchor.minX, component.minX) + 1;
+    const unionHeight = Math.max(anchor.maxY, component.maxY) - Math.min(anchor.minY, component.minY) + 1;
+    const boundedUnion = unionWidth <= span * 1.36 && unionHeight <= span * 1.36;
     const colorMatches = !useColorInk || hueDistance(componentColor(component, frame.data), anchorColor) < 42;
-    return withinCharacterBounds && colorMatches && componentArea <= anchorArea * 0.22 && component.pixels.length >= 8;
+    // Closed ears, hands, and feet can be separate solid components when a
+    // faint pencil stroke breaks at their attachment. Keep only small nearby
+    // lobes; distant writing and paper labels still fail the spatial contract.
+    return withinCharacterBounds
+      && touchesCharacter
+      && boundedUnion
+      && colorMatches
+      && componentArea <= anchorArea * 0.22
+      && component.pixels.length >= Math.max(8, anchor.pixels.length * 0.0015);
   });
   let minX = Math.min(...selected.map((component) => component.minX));
   let minY = Math.min(...selected.map((component) => component.minY));
@@ -2148,7 +2285,7 @@ export async function extractDrawingFromImageUrl(imageUrl: string, target: Captu
     image.onerror = () => reject(new Error("The drawing image could not be loaded."));
     image.src = imageUrl;
   });
-  return extractDrawingFromSource(image, image.naturalWidth, image.naturalHeight, target);
+  return extractDrawingFromSource(image, image.naturalWidth, image.naturalHeight, target, "selected-image");
 }
 
 export async function createAniGenDemoDrawing(): Promise<DrawingExtraction> {

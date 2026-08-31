@@ -249,31 +249,6 @@ export function buildCharacter(contour: ContourPoint[], skeleton: SkeletonPoint[
     const group = new THREE.Group();
     group.name = `rig-${part.id}`;
     group.position.set(part.center.x, part.center.y, 0);
-    if (part.kind === "eye") {
-      const lensColor = new THREE.Color(rig.bodyColor).lerp(new THREE.Color(0xfffdf4), 0.62);
-      const lens = new THREE.Mesh(
-        new THREE.SphereGeometry(0.5, 28, 18),
-        new THREE.MeshPhysicalMaterial({
-          color: lensColor,
-          roughness: 0.34,
-          metalness: 0,
-          clearcoat: 0.46,
-          clearcoatRoughness: 0.36,
-        }),
-      );
-      lens.name = `${part.id}-raised-lens`;
-      lens.position.z = frontDepthAt(part.center.x, part.center.y) + Math.max(0.012, part.size.z * 0.34);
-      lens.scale.set(part.size.x * 0.94, part.size.y * 0.9, Math.max(0.024, part.size.z * 1.7));
-      lens.castShadow = true;
-      group.add(lens);
-    } else if (part.kind === "pupil") {
-      const pupil = new THREE.Mesh(new THREE.SphereGeometry(0.5, 20, 14), inkMaterial(part.color));
-      pupil.name = `${part.id}-raised-pupil`;
-      pupil.position.z = frontDepthAt(part.center.x, part.center.y) + Math.max(0.02, part.size.z * 0.8);
-      pupil.scale.set(part.size.x, part.size.y, Math.max(0.018, part.size.z));
-      pupil.castShadow = true;
-      group.add(pupil);
-    }
     const outline = part.outline?.length && part.outline.length >= 4
       ? part.outline
       : Array.from({ length: 32 }, (_, index) => {
@@ -284,6 +259,52 @@ export function buildCharacter(contour: ContourPoint[], skeleton: SkeletonPoint[
         const localY = Math.sin(angle) * part.size.y * 0.5;
         return { x: part.center.x + localX * cos - localY * sin, y: part.center.y + localX * sin + localY * cos };
       });
+    if (part.kind === "eye") {
+      const lensColor = new THREE.Color(rig.bodyColor).lerp(new THREE.Color(0xfffdf4), 0.62);
+      const localOutline = outline.map((point) => ({ x: point.x - part.center.x, y: point.y - part.center.y }));
+      const signedArea = localOutline.reduce((total, point, index) => {
+        const next = localOutline[(index + 1) % localOutline.length];
+        return total + point.x * next.y - next.x * point.y;
+      }, 0) * 0.5;
+      const depth = Math.max(0.012, part.size.z * 1.35);
+      let geometry: THREE.BufferGeometry;
+      if (Math.abs(signedArea) >= Math.max(0.00005, part.size.x * part.size.y * 0.08)) {
+        const ordered = signedArea > 0 ? localOutline : [...localOutline].reverse();
+        const shape = new THREE.Shape();
+        shape.moveTo(ordered[0].x, ordered[0].y);
+        ordered.slice(1).forEach((point) => shape.lineTo(point.x, point.y));
+        shape.closePath();
+        geometry = new THREE.ExtrudeGeometry(shape, {
+          depth,
+          steps: 1,
+          bevelEnabled: true,
+          bevelSegments: 3,
+          bevelSize: Math.min(part.size.x, part.size.y) * 0.08,
+          bevelThickness: depth * 0.34,
+        });
+      } else {
+        geometry = new THREE.SphereGeometry(0.5, 28, 18);
+      }
+      const lens = new THREE.Mesh(geometry, new THREE.MeshPhysicalMaterial({
+        color: lensColor,
+        roughness: 0.34,
+        metalness: 0,
+        clearcoat: 0.46,
+        clearcoatRoughness: 0.36,
+      }));
+      lens.name = `${part.id}-raised-lens`;
+      lens.position.z = frontDepthAt(part.center.x, part.center.y) + 0.004;
+      if (geometry instanceof THREE.SphereGeometry) lens.scale.set(part.size.x * 0.94, part.size.y * 0.9, Math.max(0.024, part.size.z * 1.7));
+      lens.castShadow = true;
+      group.add(lens);
+    } else if (part.kind === "pupil") {
+      const pupil = new THREE.Mesh(new THREE.SphereGeometry(0.5, 20, 14), inkMaterial(part.color));
+      pupil.name = `${part.id}-raised-pupil`;
+      pupil.position.z = frontDepthAt(part.center.x, part.center.y) + Math.max(0.02, part.size.z * 0.8);
+      pupil.scale.set(part.size.x, part.size.y, Math.max(0.018, part.size.z));
+      pupil.castShadow = true;
+      group.add(pupil);
+    }
     const points = outline.map((point) => new THREE.Vector3(
       point.x - part.center.x,
       point.y - part.center.y,
@@ -296,20 +317,32 @@ export function buildCharacter(contour: ContourPoint[], skeleton: SkeletonPoint[
     group.add(mesh);
     character.add(group);
   };
-  if (!textureUrl) {
-    addInkFeature({
-      id: "body-ink-outline",
-      kind: "marking",
-      side: "center",
-      parentId: "body",
-      center: { x: 0, y: 0, z: 0 },
-      size: bodyPart?.size ?? { x: 1, y: 1, z: 0.3 },
-      rotation: 0,
-      color: rig.lineColor,
-      confidence: 1,
-      source: "image-region",
-      outline: contour,
-    });
+  // Keep the authored silhouette readable even when the source paper and the
+  // filled body are both pale. The front rim reinforces the exact captured
+  // contour; the rear rim makes the explicitly inferred symmetric back clear
+  // during a 360° turn without copying facial features onto it.
+  addInkFeature({
+    id: "body-ink-outline",
+    kind: "marking",
+    side: "center",
+    parentId: "body",
+    center: { x: 0, y: 0, z: 0 },
+    size: bodyPart?.size ?? { x: 1, y: 1, z: 0.3 },
+    rotation: 0,
+    color: rig.lineColor,
+    confidence: 1,
+    source: "image-region",
+    outline: contour,
+  });
+  if (contour.length >= 6) {
+    const rearPoints = contour.map((point) => new THREE.Vector3(point.x, point.y, -frontDepthAt(point.x, point.y) - 0.009));
+    const rearRim = new THREE.Mesh(
+      new THREE.TubeGeometry(new THREE.CatmullRomCurve3(rearPoints, true, "centripetal", 0.3), Math.max(48, contour.length * 2), 0.0065, 8, true),
+      inkMaterial(rig.lineColor),
+    );
+    rearRim.name = "inferred-back-silhouette-rim";
+    rearRim.castShadow = true;
+    character.add(rearRim);
   }
   // The texture preserves the child's exact artwork, while these shallow
   // semantic meshes give eyes, pupils, cheeks and mouths real parallax and
@@ -322,6 +355,7 @@ export function buildCharacter(contour: ContourPoint[], skeleton: SkeletonPoint[
     texturePlane: false,
     viewableDegrees: 360,
     bodyTopology: "closed",
+    backPrior: "symmetric filled volume with silhouette rim; no invented face marks",
     semanticParts: rig.parts.map((part) => ({ id: part.id, kind: part.kind, confidence: part.confidence, source: part.source })),
     joints: rig.joints,
     accent,
@@ -572,7 +606,10 @@ export const ARStage = forwardRef<ARStageHandle, ARStageProps>(function ARStage(
     rotateBy(yaw: number, pitch: number) {
       rotationRef.current = {
         yaw: rotationRef.current.yaw + yaw,
-        pitch: Math.min(0.62, Math.max(-0.62, rotationRef.current.pitch + pitch)),
+        // Yaw stays unbounded for a genuine full turn. Keep vertical drag to a
+        // presentation-safe tilt so a tall character cannot be tumbled into a
+        // confusing horizontal blob on a phone screen.
+        pitch: Math.min(0.24, Math.max(-0.24, rotationRef.current.pitch + pitch)),
       };
     },
     async enterImmersiveAR() {

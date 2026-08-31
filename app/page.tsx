@@ -3,7 +3,7 @@
 
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ARStageHandle, CharacterAction } from "./components/ARStage";
-import { createAniGenDemoDrawing, createDemoDoodle, extractDrawingFromVideo, POSE_SKELETON_EDGES, type CaptureTarget, type DrawingExtraction } from "./lib/drawing";
+import { createAniGenDemoDrawing, createDemoDoodle, extractDrawingFromImageUrl, extractDrawingFromVideo, POSE_SKELETON_EDGES, type CaptureTarget, type DrawingExtraction } from "./lib/drawing";
 import { recognizeDrawingParts } from "./lib/learned-parts";
 import { createBundledAniGenAsset, disposeNeuralAsset, generateAniGenAsset, type NeuralAsset, type NeuralProgress } from "./lib/anigen";
 import type { RiggedAssetInfo } from "./lib/rigged-model";
@@ -114,6 +114,7 @@ function wait(ms: number, signal?: AbortSignal) {
 
 export default function Home() {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const uploadRef = useRef<HTMLInputElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const stageRef = useRef<ARStageHandle>(null);
   const captureRef = useRef<DrawingExtraction | null>(null);
@@ -212,7 +213,7 @@ export default function Home() {
     }
   }, [record]);
 
-  const setDrawing = useCallback((next: DrawingExtraction, source: "camera" | "demo") => {
+  const setDrawing = useCallback((next: DrawingExtraction, source: "camera" | "upload" | "demo") => {
     neuralAbortRef.current?.abort();
     neuralAbortRef.current = null;
     commitNeuralAsset(null);
@@ -226,14 +227,14 @@ export default function Home() {
     setStep("captured");
     const detected = next.rig.detectedKinds.filter((kind) => kind !== "body").join(", ");
     const learned = next.learnedRecognition;
-    setNotice(source === "camera"
-      ? learned ? `Local ML recognized ${learned.detectedKinds.join(", ") || "the silhouette"} in ${learned.latencyMs} ms. Generate real 3D to infer its back and skinned mesh.` : "Drawing isolated locally. Generate real 3D to infer its back, mesh, skeleton, and skin weights."
+    setNotice(source !== "demo"
+      ? learned ? `Local ML + topology recognized ${detected || "the silhouette"} in ${learned.latencyMs} ms. Generate real 3D to infer its back and skinned mesh.` : "Drawing isolated locally. Generate real 3D to infer its back, mesh, skeleton, and skin weights."
       : "Demo drawing is ready. Generate real 3D—or play the no-wait rigged judge demo.");
     setAgentLine(`The local preview found ${detected || "a body silhouette"}${learned ? " using a trained drawing-part model plus exact pixel geometry" : ""}. AniGen will infer real unseen geometry and a skinned skeleton.`);
     record("WALLALIVE", learned ? "Recognized and isolated the approved drawing" : "Isolated the approved drawing", `${next.rig.parts.length} local preview regions · ${next.analysis.shapeHint} silhouette${learned ? ` · ChildlikeSHAPES face/part ensemble + AmateurPose v6 ${learned.latencyMs} ms` : ""} · no upload yet.`);
   }, [commitCharacter, commitNeuralAsset, handleRiggedAssetInfo, record]);
 
-  const recognizeAndSetDrawing = useCallback(async (next: DrawingExtraction, source: "camera" | "demo") => {
+  const recognizeAndSetDrawing = useCallback(async (next: DrawingExtraction, source: "camera" | "upload" | "demo") => {
     setNotice("Running the local drawing-part model: eyes, cheeks, mouth, ears, hands, and feet stay on this device.");
     try {
       setDrawing(await recognizeDrawingParts(next), source);
@@ -260,6 +261,34 @@ export default function Home() {
       setNotice(error instanceof Error ? error.message : "The demo drawing could not be created.");
     }
   }, [recognizeAndSetDrawing]);
+
+  const uploadDrawing = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const input = event.currentTarget;
+    const file = input.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      setNotice("Choose a photo or image file containing one clear character drawing.");
+      input.value = "";
+      return;
+    }
+    if (file.size > 12 * 1024 * 1024) {
+      setNotice("That image is over 12 MB. Choose a smaller photo so recognition stays responsive on mobile.");
+      input.value = "";
+      return;
+    }
+    const objectUrl = URL.createObjectURL(file);
+    setNotice("Isolating the centered drawing and running the local semantic models. Nothing is uploaded.");
+    try {
+      const drawing = await extractDrawingFromImageUrl(objectUrl, { x: 0.5, y: 0.5 });
+      await recognizeAndSetDrawing(drawing, "upload");
+      record("CHILD", "Chose a drawing photo", `${file.name} was decoded, isolated, and recognized locally. The original file was not uploaded.`);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "The drawing image could not be processed.");
+    } finally {
+      URL.revokeObjectURL(objectUrl);
+      input.value = "";
+    }
+  }, [recognizeAndSetDrawing, record]);
 
   const createCharacter = useCallback((input: Record<string, unknown>, actor: Actor, toolName?: string) => {
     const drawing = captureRef.current;
@@ -718,6 +747,8 @@ export default function Home() {
             <div><b>CAMERA-SAFE BY DESIGN</b><span>◆</span></div>
             <p>Camera and capture stay human-only. Real 3D sends only the isolated drawing after a second visible approval—never live frames.</p>
           </div>
+          <input ref={uploadRef} hidden type="file" accept="image/*" onChange={uploadDrawing} />
+          <button className="demo-doodle upload-drawing" onClick={() => uploadRef.current?.click()}>UPLOAD A DRAWING PHOTO <span>↥</span></button>
           <button className="demo-doodle" onClick={loadDemoDrawing}>NO CAMERA? TRY A DEMO DOODLE <span>＋</span></button>
         </aside>
 
@@ -727,6 +758,7 @@ export default function Home() {
             <div className="stage-ctas">
               {immersiveAR && character.created ? <button className="ar-button" onClick={enterAR}>ENTER REAL AR <span>◎</span></button> : null}
               {cameraState === "active" ? <button className="stop-camera" onClick={stopCamera}>STOP CAMERA</button> : null}
+              {cameraState !== "active" && step === "ready" ? <button className="upload-camera" onClick={() => uploadRef.current?.click()}>UPLOAD PHOTO</button> : null}
               <button className="primary-camera" onClick={primaryButton.action} disabled={cameraState === "requesting" || neuralBusy}>{cameraState === "requesting" ? "OPENING…" : neuralBusy ? "GENERATING…" : primaryButton.label}<span>↗</span></button>
             </div>
           </div>

@@ -98,20 +98,44 @@ function accessorReader(document, binary, accessorIndex) {
   return { accessor, components, read };
 }
 
-function primitiveSurfaceStats(document, binary, primitive) {
-  if (primitive.indices == null || (primitive.mode ?? 4) !== 4) return null;
-  const indices = accessorReader(document, binary, primitive.indices);
+function meshSurfaceStats(document, binary, mesh) {
+  const trianglePrimitives = (mesh.primitives ?? []).filter((primitive) =>
+    primitive.indices != null && (primitive.mode ?? 4) === 4 && primitive.attributes?.POSITION != null);
+  if (!trianglePrimitives.length) return null;
+  const spans = [0, 0, 0];
+  for (const primitive of trianglePrimitives) {
+    const accessor = document.accessors[primitive.attributes.POSITION];
+    if (accessor.min && accessor.max) {
+      for (let axis = 0; axis < 3; axis += 1) spans[axis] = Math.max(spans[axis], accessor.max[axis] - accessor.min[axis]);
+    }
+  }
+  const weldTolerance = Math.max(1e-8, Math.max(...spans, 1) * 1e-6);
+  const geometricVertexIds = new Map();
+  const weldedIndex = (positions, vertexIndex) => {
+    const key = Array.from({ length: Math.min(3, positions.components) }, (_, axis) =>
+      Math.round(positions.read(vertexIndex, axis) / weldTolerance)).join(",");
+    if (!geometricVertexIds.has(key)) geometricVertexIds.set(key, geometricVertexIds.size);
+    return geometricVertexIds.get(key);
+  };
   const edgeCounts = new Map();
-  let maximumIndex = 0;
-  for (let item = 0; item < indices.accessor.count; item += 1) maximumIndex = Math.max(maximumIndex, indices.read(item));
-  const edgeBase = maximumIndex + 1;
-  for (let item = 0; item + 2 < indices.accessor.count; item += 3) {
-    const triangle = [indices.read(item), indices.read(item + 1), indices.read(item + 2)];
-    for (const [left, right] of [[0, 1], [1, 2], [2, 0]]) {
-      const minimum = Math.min(triangle[left], triangle[right]);
-      const maximum = Math.max(triangle[left], triangle[right]);
-      const key = minimum * edgeBase + maximum;
-      edgeCounts.set(key, (edgeCounts.get(key) ?? 0) + 1);
+  let triangles = 0;
+  for (const primitive of trianglePrimitives) {
+    const indices = accessorReader(document, binary, primitive.indices);
+    const positions = accessorReader(document, binary, primitive.attributes.POSITION);
+    for (let item = 0; item + 2 < indices.accessor.count; item += 3) {
+      const triangle = [
+        weldedIndex(positions, indices.read(item)),
+        weldedIndex(positions, indices.read(item + 1)),
+        weldedIndex(positions, indices.read(item + 2)),
+      ];
+      if (new Set(triangle).size < 3) continue;
+      triangles += 1;
+      for (const [left, right] of [[0, 1], [1, 2], [2, 0]]) {
+        const minimum = Math.min(triangle[left], triangle[right]);
+        const maximum = Math.max(triangle[left], triangle[right]);
+        const key = `${minimum}:${maximum}`;
+        edgeCounts.set(key, (edgeCounts.get(key) ?? 0) + 1);
+      }
     }
   }
   let boundaryEdges = 0;
@@ -121,7 +145,7 @@ function primitiveSurfaceStats(document, binary, primitive) {
     if (count > 2) nonManifoldEdges += 1;
   }
   return {
-    triangles: Math.floor(indices.accessor.count / 3),
+    triangles,
     uniqueEdges: edgeCounts.size,
     boundaryEdges,
     nonManifoldEdges,
@@ -168,9 +192,9 @@ function inspectGlb(buffer) {
       if (primitive.attributes?.COLOR_0 != null || material?.pbrMetallicRoughness?.baseColorTexture || material?.pbrMetallicRoughness?.baseColorFactor) {
         coloredPrimitives += 1;
       }
-      const stats = primitiveSurfaceStats(document, binary, primitive);
-      if (stats) for (const key of Object.keys(surface)) surface[key] += stats[key];
     }
+    const stats = meshSurfaceStats(document, binary, mesh);
+    if (stats) for (const key of Object.keys(surface)) surface[key] += stats[key];
   }
 
   const spans = bounds.min.map((minimum, axis) => bounds.max[axis] - minimum);
