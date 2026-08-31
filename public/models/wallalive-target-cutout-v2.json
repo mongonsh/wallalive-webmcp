@@ -1,0 +1,46 @@
+{
+  "model": "wallalive-target-cutout-v2",
+  "architecture": "point-prompted compact U-Net",
+  "input": [
+    1,
+    4,
+    128,
+    128
+  ],
+  "output": [
+    1,
+    1,
+    128,
+    128
+  ],
+  "parameters": 282769,
+  "training_drawings": 350,
+  "validation_drawings": 126,
+  "sealed_test_drawings": 150,
+  "samples_per_epoch": 1152,
+  "epochs": 16,
+  "best_epoch": 16,
+  "threshold": 0.54,
+  "validation": {
+    "iou": 0.6059,
+    "prompt_hit_rate": 0.9524
+  },
+  "official_test": {
+    "iou": 0.6142,
+    "prompt_hit_rate": 0.9933
+  },
+  "test_split_used_for_selection": false,
+  "dataset": "Meta Amateur Drawings Dataset v1.0",
+  "dataset_license": "MIT",
+  "augmentations": [
+    "point prompt",
+    "negative paper boundary",
+    "paper grid",
+    "neighbor strokes",
+    "perspective",
+    "shadow",
+    "blur",
+    "JPEG"
+  ],
+  "seconds": 773.5
+}

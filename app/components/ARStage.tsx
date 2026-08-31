@@ -412,7 +412,7 @@ export function buildCharacter(contour: ContourPoint[], skeleton: SkeletonPoint[
   // The texture preserves the child's exact artwork, while these shallow
   // semantic meshes give eyes, pupils, cheeks and mouths real parallax and
   // animation. They follow the detected outlines; they are not generic decals.
-  rig.parts.filter((part) => part.kind === "eye" || part.kind === "pupil" || part.kind === "cheek" || part.kind === "mouth" || part.kind === "marking")
+  rig.parts.filter((part) => part.kind === "eye" || part.kind === "pupil" || part.kind === "cheek" || part.kind === "nose" || part.kind === "mouth" || part.kind === "marking")
     .forEach(addInkFeature);
 
   character.userData.reconstruction = {

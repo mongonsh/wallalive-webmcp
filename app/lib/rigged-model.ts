@@ -35,7 +35,7 @@ export type NeuralSemanticMap = {
   mouth?: THREE.Group;
 };
 
-const PROJECTED_KINDS = new Set<SemanticPartKind>(["eye", "pupil", "cheek", "mouth"]);
+const PROJECTED_KINDS = new Set<SemanticPartKind>(["eye", "pupil", "cheek", "nose", "mouth"]);
 
 type Hsl = { h: number; s: number; l: number };
 

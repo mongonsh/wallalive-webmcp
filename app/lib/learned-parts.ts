@@ -3,6 +3,7 @@ import {
   POSE_JOINT_NAMES,
   TOPOLOGY_CLASSES,
   type DrawingExtraction,
+  type CaptureTarget,
   type LearnedPartHint,
   type LearnedDepthField,
   type LearnedPose,
@@ -11,6 +12,7 @@ import {
 } from "./drawing.ts";
 import { acceptFaceComponent } from "./face-component-gate.ts";
 import { averageLogitConfidence, sameSemanticInstance, selectDominantInkColor } from "./model-math.ts";
+import { isolateDrawingFromImageUrl, isolateDrawingFromVideo } from "./target-cutout.ts";
 
 const BODY_MODEL_PATH = "/models/wallalive-parts-v3.onnx";
 const FACE_V3_MODEL_PATH = "/models/wallalive-face-v3.onnx";
@@ -900,13 +902,13 @@ export async function recognizeDrawingParts(extraction: DrawingExtraction): Prom
   const partOutput = bodyResults.part_logits ?? Object.values(bodyResults)[0];
   const coarseOutput = bodyResults.coarse_logits ?? Object.values(bodyResults)[1];
   const fullHints = decodeHints(partOutput, BODY_SIZE, PARTS, BODY_THRESHOLDS, prepared.values, prepared.mapPoint, { skipBody: true });
-  const learnedTopology = decodeTopology(
+  let learnedTopology = decodeTopology(
     topologyResults.topology_fields ?? Object.values(topologyResults)[0],
     topologyResults.topology_logits ?? Object.values(topologyResults)[1],
     prepared,
     Math.round(performance.now() - poseStarted),
   );
-  const learnedPose = decodePose(
+  let learnedPose = decodePose(
     poseResults.joint_heatmaps ?? Object.values(poseResults)[0],
     prepared,
     fullHints,
@@ -967,8 +969,49 @@ export async function recognizeDrawingParts(extraction: DrawingExtraction): Prom
     // pair count so they cannot overwhelm unusual v3 multi-part predictions.
     hints = supplementFallbackHints(hints, oldHints);
   }
+
+  // Avoid a self-reinforcing topology error: a few false vertical limb blobs
+  // can make an upright round person read as a quadruped, which would then
+  // authorize four legs and erase its arms. A compact upright silhouette with
+  // a conventional two-eye face and mouth is stronger posture evidence.
+  const uprightFace = extraction.analysis.aspectRatio <= 1.06
+    && hints.filter((hint) => hint.kind === "eye").length >= 2
+    && hints.some((hint) => hint.kind === "mouth");
+  if (learnedTopology.kind === "quadruped" && uprightFace) {
+    learnedTopology = {
+      ...learnedTopology,
+      kind: "biped",
+      kindConfidence: Math.min(learnedTopology.kindConfidence, 0.78),
+      applicable: true,
+    };
+    learnedPose = decodePose(
+      poseResults.joint_heatmaps ?? Object.values(poseResults)[0],
+      prepared,
+      hints,
+      Math.round(performance.now() - poseStarted),
+      learnedTopology,
+    );
+  }
+
+  const instanceLimits: Partial<Record<LearnedPartHint["kind"], number>> = learnedTopology.kind === "biped"
+    ? { eye: 2, cheek: 2, mouth: 1, ear: 2, arm: 2, hand: 2, leg: 2, foot: 2 }
+    : { eye: 2, cheek: 2, mouth: 1, ear: 2 };
+  hints = hints
+    .sort((left, right) => right.confidence - left.confidence)
+    .filter((hint, index, all) => {
+      const limit = instanceLimits[hint.kind];
+      return limit === undefined || all.slice(0, index).filter((candidate) => candidate.kind === hint.kind).length < limit;
+    });
   return {
     ...mergeLearnedPartHints(extraction, hints, Math.round(performance.now() - started), learnedPose, learnedTopology),
     depthRecognition: learnedDepth,
   };
+}
+
+export async function recognizeDrawingFromVideo(video: HTMLVideoElement, target: CaptureTarget): Promise<DrawingExtraction> {
+  return recognizeDrawingParts(await isolateDrawingFromVideo(video, target));
+}
+
+export async function recognizeDrawingFromImageUrl(imageUrl: string, target: CaptureTarget = { x: 0.5, y: 0.5 }): Promise<DrawingExtraction> {
+  return recognizeDrawingParts(await isolateDrawingFromImageUrl(imageUrl, target));
 }

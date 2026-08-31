@@ -28,8 +28,8 @@ test("server-renders the WallAlive product shell and security headers", async ()
 
   const html = await response.text();
   assert.match(html, /<title>WallAlive — Draw it\. Wake it\. Play\.<\/title>/i);
-  assert.match(html, /What if their drawing/);
-  assert.match(html, /jumped off the wall/);
+  assert.match(html, /Draw it/);
+  assert.match(html, /Wake it/);
   assert.match(html, /START CAMERA/);
   assert.match(html, /PLAY JUDGE DEMO/);
   assert.match(html, /CAMERA-SAFE BY DESIGN/);

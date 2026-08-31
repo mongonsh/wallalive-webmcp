@@ -69,7 +69,7 @@ export type LearnedDepthField = {
 };
 
 export type SemanticPartKind =
-  | "body" | "head" | "eye" | "pupil" | "cheek" | "mouth" | "ear" | "beak"
+  | "body" | "head" | "eye" | "pupil" | "cheek" | "nose" | "mouth" | "ear" | "beak"
   | "arm" | "hand" | "leg" | "foot"
   | "wing" | "fin" | "tail" | "tentacle" | "trunk" | "branch" | "canopy" | "segment" | "linkage"
   | "marking";
@@ -157,6 +157,15 @@ export type DrawingExtraction = {
   rig: CharacterRig;
   analysis: DrawingAnalysis;
   semanticRegions?: SemanticRegionCandidate[];
+  sourceTarget?: CaptureTarget;
+  sourceScope?: ExtractionScope;
+  cutoutRecognition?: {
+    model: "wallalive-target-cutout-v2";
+    latencyMs: number;
+    confidence: number;
+    areaPercent: number;
+    cropScale: number;
+  };
   learnedRecognition?: {
     model: "wallalive-v3-v4-gate-v5-pose-v6-topology-v10";
     latencyMs: number;
@@ -1486,7 +1495,7 @@ export function mergeLearnedPartHints(
   pose?: LearnedPose,
   topology?: LearnedTopology,
 ): DrawingExtraction {
-  const replaceableFaceKinds = new Set<SemanticPartKind>(["eye", "cheek", "mouth", "ear"]);
+  const replaceableFaceKinds = new Set<SemanticPartKind>(["eye", "cheek", "nose", "mouth", "ear"]);
   const accepted = hints.filter((hint) => hint.confidence >= (hint.kind === "cheek" ? 0.18 : hint.kind === "mouth" ? 0.42 : 0.48));
   const body = extraction.rig.parts.find((part) => part.kind === "body");
   if (!body) return extraction;
@@ -1549,7 +1558,7 @@ export function mergeLearnedPartHints(
       winged: new Set(["ear", "arm", "hand"]),
       aquatic: new Set(["ear", "arm", "hand", "leg", "foot"]),
       radial: new Set(["ear", "arm", "hand", "leg", "foot"]),
-      branched: new Set(["eye", "pupil", "cheek", "mouth", "ear", "beak", "arm", "hand", "leg", "foot"]),
+      branched: new Set(["eye", "pupil", "cheek", "nose", "mouth", "ear", "beak", "arm", "hand", "leg", "foot"]),
       machine: new Set(["ear", "arm", "hand", "leg", "foot"]),
       chain: new Set(["ear", "arm", "hand", "leg", "foot"]),
     };
@@ -1642,6 +1651,39 @@ export function mergeLearnedPartHints(
       source: "learned-model",
       outline: hint.outline ?? region?.outline,
     });
+  }
+
+  // The pose model is trained with an explicit nose landmark even though the
+  // mask models predate that class. Promote only a well-supported landmark
+  // inside a detected two-eye face; this is safer than inventing a central
+  // bump for trees, vehicles, or one-eyed creatures.
+  if (pose?.applicable && learnedEyes.length === 2) {
+    const noseJoint = pose.joints.find((joint) => joint.name === "nose");
+    const leftEye = learnedEyes[0];
+    const rightEye = learnedEyes[1];
+    const eyeSpacing = Math.abs(leftEye.center.x - rightEye.center.x);
+    const averageEyeY = (leftEye.center.y + rightEye.center.y) / 2;
+    if (noseJoint && noseJoint.confidence >= 0.48) {
+      const nose = toRigPoint(noseJoint);
+      const faceAligned = Math.abs(nose.y - averageEyeY) <= body.size.y * 0.22
+        && Math.abs(nose.x - (leftEye.center.x + rightEye.center.x) / 2) <= Math.max(body.size.x * 0.18, eyeSpacing * 0.68);
+      if (faceAligned) {
+        const width = clamp(eyeSpacing * 0.16, body.size.x * 0.018, body.size.x * 0.075);
+        const height = clamp(width * 0.72, body.size.y * 0.014, body.size.y * 0.065);
+        parts.push({
+          id: nextId("nose", "center"),
+          kind: "nose",
+          side: "center",
+          parentId: "body",
+          center: nose,
+          size: { x: width, y: height, z: Math.max(0.012, width * 0.24) },
+          rotation: 0,
+          color: extraction.rig.lineColor,
+          confidence: noseJoint.confidence * 0.88,
+          source: "learned-pose",
+        });
+      }
+    }
   }
 
   for (const hint of learned.filter((candidate) => candidate.kind === "ear" || candidate.kind === "arm" || candidate.kind === "leg")) {
@@ -1970,7 +2012,7 @@ export function mergeLearnedPartHints(
       winged: new Set(["ear", "arm", "hand"]),
       aquatic: new Set(["ear", "arm", "hand", "leg", "foot"]),
       radial: new Set(["ear", "arm", "hand", "leg", "foot"]),
-      branched: new Set(["eye", "pupil", "cheek", "mouth", "ear", "beak", "arm", "hand", "leg", "foot"]),
+      branched: new Set(["eye", "pupil", "cheek", "nose", "mouth", "ear", "beak", "arm", "hand", "leg", "foot"]),
       machine: new Set(["ear", "arm", "hand", "leg", "foot"]),
       chain: new Set(["ear", "arm", "hand", "leg", "foot"]),
     };
@@ -1979,7 +2021,7 @@ export function mergeLearnedPartHints(
   }
 
   if (topology?.applicable && ["biped", "quadruped", "winged", "aquatic", "radial"].includes(topology.kind)) {
-    const faceCore = parts.filter((part) => part.kind === "eye" || part.kind === "cheek" || part.kind === "mouth");
+    const faceCore = parts.filter((part) => part.kind === "eye" || part.kind === "cheek" || part.kind === "nose" || part.kind === "mouth");
     const eyes = faceCore.filter((part) => part.kind === "eye");
     if (eyes.length && !parts.some((part) => part.kind === "head")) {
       const minX = Math.min(...faceCore.map((part) => part.center.x - part.size.x * 0.5));
@@ -2051,6 +2093,28 @@ export function mergeLearnedPartHints(
       confidence: topology.kindConfidence * 0.78,
       source: "structural-inference",
     });
+  }
+
+  if (topology?.applicable && topology.kind === "biped") {
+    const bipedLimits: Partial<Record<SemanticPartKind, number>> = {
+      eye: 2, pupil: 2, cheek: 2, nose: 1, mouth: 1, ear: 2,
+      arm: 2, hand: 2, leg: 2, foot: 2,
+    };
+    const keep = new Set<string>();
+    for (const [kind, limit] of Object.entries(bipedLimits) as Array<[SemanticPartKind, number]>) {
+      const candidates = parts.filter((part) => part.kind === kind);
+      const sideWinners = (["left", "right", "center"] as const)
+        .map((side) => candidates.filter((part) => part.side === side).sort((left, right) => right.confidence - left.confidence)[0])
+        .filter((part): part is SemanticPart => Boolean(part));
+      const selected = sideWinners
+        .sort((left, right) => {
+          const bilateralBonus = (part: SemanticPart) => part.side === "center" && limit > 1 ? 0 : 0.08;
+          return right.confidence + bilateralBonus(right) - left.confidence - bilateralBonus(left);
+        })
+        .slice(0, limit);
+      selected.forEach((part) => keep.add(part.id));
+    }
+    parts = parts.filter((part) => bipedLimits[part.kind] === undefined || keep.has(part.id));
   }
 
   const joints = parts.filter((part) => part.parentId).map((part) => ({
@@ -2317,6 +2381,8 @@ function extractDrawingFromSource(sourceImage: CanvasImageSource, sourceWidth: n
     skeleton,
     rig,
     semanticRegions: semantic.regions,
+    sourceTarget: target,
+    sourceScope: scope,
     analysis: {
       dominantColor: toHex(dominant),
       secondaryColor: toHex(background),
@@ -2344,8 +2410,12 @@ export function extractDrawingFromVideo(video: HTMLVideoElement, target: Capture
   return extractDrawingFromSource(video, video.videoWidth, video.videoHeight, sourceTarget);
 }
 
-export function extractDrawingFromCanvas(canvas: HTMLCanvasElement, target: CaptureTarget = { x: 0.5, y: 0.48 }): DrawingExtraction {
-  return extractDrawingFromSource(canvas, canvas.width, canvas.height, target);
+export function extractDrawingFromCanvas(
+  canvas: HTMLCanvasElement,
+  target: CaptureTarget = { x: 0.5, y: 0.48 },
+  scope: ExtractionScope = "camera",
+): DrawingExtraction {
+  return extractDrawingFromSource(canvas, canvas.width, canvas.height, target, scope);
 }
 
 export function createDemoDoodle(): DrawingExtraction {

@@ -3,8 +3,8 @@
 
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ARStageHandle, CharacterAction } from "./components/ARStage";
-import { createAniGenDemoDrawing, createDemoDoodle, extractDrawingFromImageUrl, extractDrawingFromVideo, POSE_SKELETON_EDGES, type CaptureTarget, type DrawingExtraction } from "./lib/drawing";
-import { recognizeDrawingParts } from "./lib/learned-parts";
+import { createAniGenDemoDrawing, createDemoDoodle, POSE_SKELETON_EDGES, type CaptureTarget, type DrawingExtraction, type SemanticPart, type SemanticPartKind, type SemanticSide } from "./lib/drawing";
+import { recognizeDrawingFromImageUrl, recognizeDrawingFromVideo, recognizeDrawingParts } from "./lib/learned-parts";
 import { createBundledAniGenAsset, disposeNeuralAsset, generateAniGenAsset, type NeuralAsset, type NeuralProgress } from "./lib/anigen";
 import type { RiggedAssetInfo } from "./lib/rigged-model";
 
@@ -35,6 +35,8 @@ type Activity = {
   detail: string;
   toolName?: string;
 };
+
+type PendingUpload = { url: string; fileName: string };
 
 type WebMCPTool = {
   name: string;
@@ -85,6 +87,12 @@ const actions: Array<{ action: CharacterAction; label: string; glyph: string }> 
   { action: "spin", label: "Spin", glyph: "↻" },
 ];
 
+const anatomyKinds = ["eye", "cheek", "nose", "mouth", "ear", "arm", "hand", "leg", "foot"] as const satisfies readonly SemanticPartKind[];
+const anatomyLabel: Record<(typeof anatomyKinds)[number], string> = {
+  eye: "Eye", cheek: "Cheek", nose: "Nose", mouth: "Mouth", ear: "Ear",
+  arm: "Arm", hand: "Hand", leg: "Leg", foot: "Foot",
+};
+
 const actionProgressive: Record<CharacterAction, string> = {
   idle: "resting",
   wave: "waving",
@@ -97,6 +105,7 @@ const actionProgressive: Record<CharacterAction, string> = {
 
 const stringValue = (value: unknown, fallback = "", max = 180) => typeof value === "string" ? value.trim().slice(0, max) || fallback : fallback;
 const numberValue = (value: unknown, fallback: number) => typeof value === "number" && Number.isFinite(value) ? value : fallback;
+const clamp01 = (value: number) => Math.min(1, Math.max(0, value));
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
 const makeId = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
 const timeLabel = () => new Date().toLocaleTimeString([], { minute: "2-digit", second: "2-digit" });
@@ -125,6 +134,8 @@ export default function Home() {
   const riggedAssetInfoRef = useRef<RiggedAssetInfo | null>(null);
   const externalUploadApprovedRef = useRef(false);
   const rotateGestureRef = useRef<{ pointerId: number; lastX: number; lastY: number; moved: boolean } | null>(null);
+  const partDragRef = useRef<{ pointerId: number; partId: string } | null>(null);
+  const pendingUploadRef = useRef<PendingUpload | null>(null);
 
   const [step, setStep] = useState<AppStep>("ready");
   const [cameraState, setCameraState] = useState<CameraState>("idle");
@@ -143,6 +154,11 @@ export default function Home() {
   const [neuralProgress, setNeuralProgress] = useState<NeuralProgress>({ phase: "idle", progress: 0, message: "" });
   const [neuralConsentVisible, setNeuralConsentVisible] = useState(false);
   const [riggedAssetInfo, setRiggedAssetInfo] = useState<RiggedAssetInfo | null>(null);
+  const [inspectorOpen, setInspectorOpen] = useState(false);
+  const [partEditorOpen, setPartEditorOpen] = useState(false);
+  const [selectedPartId, setSelectedPartId] = useState<string | null>(null);
+  const [pendingPartKind, setPendingPartKind] = useState<(typeof anatomyKinds)[number] | null>(null);
+  const [pendingUpload, setPendingUpload] = useState<PendingUpload | null>(null);
 
   const record = useCallback((actor: Actor, action: string, detail: string, toolName?: string) => {
     const item: Activity = { id: makeId(), time: timeLabel(), actor, action, detail, toolName };
@@ -182,6 +198,7 @@ export default function Home() {
     streamRef.current?.getTracks().forEach((track) => track.stop());
     neuralAbortRef.current?.abort();
     disposeNeuralAsset(neuralAssetRef.current);
+    if (pendingUploadRef.current) URL.revokeObjectURL(pendingUploadRef.current.url);
   }, []);
 
   const startCamera = useCallback(async () => {
@@ -224,6 +241,8 @@ export default function Home() {
     commitCharacter({ ...initialCharacter, created: true, name: "Pip", accent: next.analysis.secondaryColor });
     captureRef.current = next;
     setCapture(next);
+    setSelectedPartId(null);
+    setPendingPartKind(null);
     setStep("alive");
     const detected = next.rig.detectedKinds.filter((kind) => kind !== "body").join(", ");
     const learned = next.learnedRecognition;
@@ -246,12 +265,13 @@ export default function Home() {
 
   const captureDrawing = useCallback(async () => {
     if (!videoRef.current) return;
+    setNotice("Separating the tapped character, then checking its face and limbs locally…");
     try {
-      await recognizeAndSetDrawing(extractDrawingFromVideo(videoRef.current, captureTarget), "camera");
+      setDrawing(await recognizeDrawingFromVideo(videoRef.current, captureTarget), "camera");
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "The drawing could not be separated from the wall.");
     }
-  }, [captureTarget, recognizeAndSetDrawing]);
+  }, [captureTarget, setDrawing]);
 
   const loadDemoDrawing = useCallback(async () => {
     try {
@@ -262,7 +282,7 @@ export default function Home() {
     }
   }, [recognizeAndSetDrawing]);
 
-  const uploadDrawing = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
+  const uploadDrawing = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
     const input = event.currentTarget;
     const file = input.files?.[0];
     if (!file) return;
@@ -277,19 +297,38 @@ export default function Home() {
       return;
     }
     const objectUrl = URL.createObjectURL(file);
-    setNotice("Isolating the centered drawing and running the local semantic models. Nothing is uploaded.");
+    if (pendingUploadRef.current) URL.revokeObjectURL(pendingUploadRef.current.url);
+    const next = { url: objectUrl, fileName: file.name };
+    pendingUploadRef.current = next;
+    setPendingUpload(next);
+    setNotice("Tap the character in your photo. The point prompt keeps nearby drawings out.");
+    input.value = "";
+  }, []);
+
+  const processUploadedDrawing = useCallback(async (target: CaptureTarget) => {
+    const pending = pendingUploadRef.current;
+    if (!pending) return;
+    setPendingUpload(null);
+    setNotice("Separating the tapped character, then checking its face and limbs locally…");
     try {
-      const drawing = await extractDrawingFromImageUrl(objectUrl, { x: 0.5, y: 0.5 });
-      await recognizeAndSetDrawing(drawing, "upload");
-      record("CHILD", "Chose a drawing photo", `${file.name} was decoded, isolated, and recognized locally. The original file was not uploaded.`);
+      const drawing = await recognizeDrawingFromImageUrl(pending.url, target);
+      setDrawing(drawing, "upload");
+      record("CHILD", "Chose a drawing photo", `${pending.fileName} was point-selected, isolated, and recognized locally. The original file was not uploaded.`);
     } catch (error) {
       console.error("WallAlive local upload recognition failed", error);
       setNotice(error instanceof Error ? error.message : "The drawing image could not be processed.");
     } finally {
-      URL.revokeObjectURL(objectUrl);
-      input.value = "";
+      URL.revokeObjectURL(pending.url);
+      pendingUploadRef.current = null;
     }
-  }, [recognizeAndSetDrawing, record]);
+  }, [record, setDrawing]);
+
+  const cancelPendingUpload = useCallback(() => {
+    if (pendingUploadRef.current) URL.revokeObjectURL(pendingUploadRef.current.url);
+    pendingUploadRef.current = null;
+    setPendingUpload(null);
+    setNotice("Photo closed. Choose another image or start the camera.");
+  }, []);
 
   const createCharacter = useCallback((input: Record<string, unknown>, actor: Actor, toolName?: string) => {
     const drawing = captureRef.current;
@@ -719,6 +758,123 @@ export default function Home() {
     setNotice("Demo prompt copied.");
   }, []);
 
+  const commitRigEdit = useCallback((parts: SemanticPart[], message: string) => {
+    const current = captureRef.current;
+    if (!current) return;
+    const validIds = new Set(parts.map((part) => part.id));
+    const normalized = parts.map((part) => part.parentId && !validIds.has(part.parentId) ? { ...part, parentId: "body" } : part);
+    const next: DrawingExtraction = {
+      ...current,
+      rig: {
+        ...current.rig,
+        parts: normalized,
+        joints: normalized.filter((part) => part.parentId && validIds.has(part.parentId)).map((part) => ({
+          id: `joint-${part.id}`,
+          parentId: part.parentId!,
+          childId: part.id,
+          x: part.anchor?.x ?? part.center.x,
+          y: part.anchor?.y ?? part.center.y,
+        })),
+        detectedKinds: [...new Set(normalized.map((part) => part.kind))],
+      },
+    };
+    captureRef.current = next;
+    setCapture(next);
+    setNotice(message);
+  }, []);
+
+  const partSide = useCallback((x: number): SemanticSide => {
+    const bodyX = captureRef.current?.rig.parts.find((part) => part.kind === "body")?.center.x ?? 0;
+    return x < bodyX - 0.04 ? "left" : x > bodyX + 0.04 ? "right" : "center";
+  }, []);
+
+  const moveRigPart = useCallback((partId: string, x: number, y: number) => {
+    const current = captureRef.current;
+    if (!current) return;
+    const parts = current.rig.parts.map((part) => {
+      if (part.id !== partId) return part;
+      const dx = x - part.center.x;
+      const dy = y - part.center.y;
+      return {
+        ...part,
+        side: part.kind === "mouth" || part.kind === "nose" ? "center" as const : partSide(x),
+        center: { ...part.center, x, y },
+        outline: part.outline?.map((point) => ({ x: point.x + dx, y: point.y + dy })),
+        path: part.path?.map((point) => ({ ...point, x: point.x + dx, y: point.y + dy })),
+      };
+    });
+    commitRigEdit(parts, "Part position updated. The 3D rig changed with it.");
+  }, [commitRigEdit, partSide]);
+
+  const editorPoint = useCallback((svg: SVGSVGElement, clientX: number, clientY: number) => {
+    const bounds = svg.getBoundingClientRect();
+    const normalizedX = clamp01((clientX - bounds.left) / Math.max(1, bounds.width));
+    const normalizedY = clamp01((clientY - bounds.top) / Math.max(1, bounds.height));
+    return { x: (normalizedX - 0.5) * 1.4, y: (0.5 - normalizedY) * 1.4 };
+  }, []);
+
+  const addRigPart = useCallback((kind: (typeof anatomyKinds)[number], x: number, y: number) => {
+    const current = captureRef.current;
+    if (!current) return;
+    const body = current.rig.parts.find((part) => part.kind === "body");
+    if (!body) return;
+    const side = kind === "mouth" || kind === "nose" ? "center" : partSide(x);
+    const siblings = current.rig.parts.filter((part) => part.kind === kind);
+    const dimensions: Record<(typeof anatomyKinds)[number], [number, number, number]> = {
+      eye: [0.12, 0.09, 0.035], cheek: [0.1, 0.055, 0.018], nose: [0.06, 0.045, 0.018], mouth: [0.17, 0.06, 0.018], ear: [0.13, 0.18, 0.09],
+      arm: [0.075, 0.28, 0.075], hand: [0.1, 0.1, 0.07], leg: [0.085, 0.3, 0.085], foot: [0.13, 0.09, 0.075],
+    };
+    const [width, height, depth] = dimensions[kind];
+    const parentKind = kind === "hand" ? "arm" : kind === "foot" ? "leg" : null;
+    const parent = parentKind ? current.rig.parts.filter((part) => part.kind === parentKind)
+      .sort((left, right) => Math.hypot(left.center.x - x, left.center.y - y) - Math.hypot(right.center.x - x, right.center.y - y))[0] : null;
+    const id = `manual-${kind}-${siblings.length + 1}-${Date.now().toString(36)}`;
+    const structural = kind === "arm" || kind === "leg";
+    const part: SemanticPart = {
+      id,
+      kind,
+      side,
+      parentId: parent?.id ?? "body",
+      center: { x, y, z: 0 },
+      anchor: structural ? { ...body.center } : undefined,
+      size: { x: width, y: height, z: depth },
+      rotation: structural ? Math.atan2(-(x - body.center.x), y - body.center.y) : 0,
+      color: kind === "eye" || kind === "cheek" || kind === "nose" || kind === "mouth" ? current.rig.lineColor : current.rig.bodyColor,
+      confidence: 1,
+      source: "structural-inference",
+    };
+    commitRigEdit([...current.rig.parts, part], `${anatomyLabel[kind]} added exactly where you tapped.`);
+    setSelectedPartId(id);
+    setPendingPartKind(null);
+  }, [commitRigEdit, partSide]);
+
+  const resizeSelectedPart = useCallback((amount: number) => {
+    const current = captureRef.current;
+    if (!current || !selectedPartId) return;
+    const parts = current.rig.parts.map((part) => {
+      if (part.id !== selectedPartId) return part;
+      const scale = Math.min(1.5, Math.max(0.5, amount));
+      return {
+        ...part,
+        size: { x: part.size.x * scale, y: part.size.y * scale, z: part.size.z * scale },
+        outline: part.outline?.map((point) => ({
+          x: part.center.x + (point.x - part.center.x) * scale,
+          y: part.center.y + (point.y - part.center.y) * scale,
+        })),
+      };
+    });
+    commitRigEdit(parts, "Part size updated.");
+  }, [commitRigEdit, selectedPartId]);
+
+  const deleteSelectedPart = useCallback(() => {
+    const current = captureRef.current;
+    if (!current || !selectedPartId) return;
+    const selected = current.rig.parts.find((part) => part.id === selectedPartId);
+    if (!selected || selected.kind === "body") return;
+    commitRigEdit(current.rig.parts.filter((part) => part.id !== selectedPartId), `${selected.kind} removed from the rig.`);
+    setSelectedPartId(null);
+  }, [commitRigEdit, selectedPartId]);
+
   const latestAgentActivity = useMemo(() => activity.find((item) => item.actor === "BROWSER AGENT"), [activity]);
   const neuralBusy = ["connecting", "preparing", "queued", "generating", "downloading"].includes(neuralProgress.phase);
   const primaryButton = cameraState === "active"
@@ -732,9 +888,10 @@ export default function Home() {
     <main className="alive-shell">
       <header className="alive-header">
         <a className="alive-brand" href="#play"><span>WALL</span>ALIVE<i>●</i></a>
-        <p>YOUR DRAWING. YOUR ROOM. YOUR STORY.</p>
+        <div className="mini-steps" aria-label="Three steps"><span className={stepIndex >= 1 ? "done" : "active"}>1 Scan</span><span className={stepIndex >= 2 ? "done" : ""}>2 Check</span><span className={stepIndex >= 3 ? "done" : ""}>3 Play</span></div>
         <div className="header-actions">
           <div className={`ready-pill ${webMcpReady ? "is-ready" : ""}`}><i /> {webMcpReady ? "8 WEBMCP TOOLS" : "INTERACTIVE DEMO"}</div>
+          <button className="inspector-toggle" onClick={() => setInspectorOpen(true)}>WEBMCP</button>
           <button className="judge-demo" onClick={runMagicDemo} disabled={demoRunning}>{demoRunning ? "PLAYING…" : "PLAY JUDGE DEMO"}</button>
         </div>
       </header>
@@ -785,7 +942,7 @@ export default function Home() {
 
         <section className="magic-stage">
           <div className="stage-copy">
-            <div><p className="kicker">LIVE CAMERA PLAYGROUND</p><h1>What if their drawing<br /><em>jumped off the wall?</em></h1></div>
+            <div><p className="kicker">CAMERA · PAPER · MAGIC</p><h1>Draw it.<br /><em>Wake it.</em></h1></div>
             <div className="stage-ctas">
               {immersiveAR && character.created ? <button className="ar-button" onClick={enterAR}>ENTER REAL AR <span>◎</span></button> : null}
               {cameraState === "active" ? <button className="stop-camera" onClick={stopCamera}>STOP CAMERA</button> : null}
@@ -793,6 +950,16 @@ export default function Home() {
               <button className="primary-camera" onClick={primaryButton.action} disabled={cameraState === "requesting" || neuralBusy}>{cameraState === "requesting" ? "OPENING…" : neuralBusy ? "GENERATING…" : primaryButton.label}<span>↗</span></button>
             </div>
           </div>
+          <div className="notice" role="status" aria-live="polite"><i />{notice}</div>
+
+          {capture ? <div className="anatomy-summary">
+            <div>
+              <span className="summary-spark">✦</span>
+              <p><b>{capture.rig.parts.filter((part) => part.kind !== "body" && part.kind !== "pupil" && part.kind !== "marking").length} parts found</b><small>{capture.cutoutRecognition ? `${Math.round(capture.cutoutRecognition.confidence * 100)}% clean cutout` : "local 3D rig"}</small></p>
+            </div>
+            <div className="anatomy-pills">{anatomyKinds.filter((kind) => capture.rig.parts.some((part) => part.kind === kind)).map((kind) => <span key={kind}>{anatomyLabel[kind]} {capture.rig.parts.filter((part) => part.kind === kind).length}</span>)}</div>
+            <button onClick={() => setPartEditorOpen(true)}>CHECK PARTS</button>
+          </div> : null}
 
           <div className={`camera-frame step-${step}`} onPointerDown={handleStagePointerDown} onPointerMove={handleStagePointerMove} onPointerUp={handleStagePointerUp} onPointerCancel={() => { rotateGestureRef.current = null; }}>
             <video ref={videoRef} className={cameraState === "active" ? "camera-video visible" : "camera-video"} autoPlay muted playsInline aria-label="Live local camera preview" />
@@ -818,7 +985,8 @@ export default function Home() {
           <p className="placement-tip">{character.created ? neuralAsset ? "Drag for 360° · Generated back · Actions move the SkinnedMesh bones" : `Drag for 360° · Distinct learned front/back depth · ${capture?.topologyRecognition?.nodes.length ?? capture?.rig.joints.length ?? 0} graph joints · ${capture?.rig.parts.length ?? 0} semantic regions · Local ONNX` : "Photograph any clear single character—local ML builds learned-depth 3D first"}</p>
         </section>
 
-        <aside className="agent-panel">
+        <aside className={`agent-panel ${inspectorOpen ? "is-open" : ""}`} aria-hidden={!inspectorOpen}>
+          <button className="inspector-close" onClick={() => setInspectorOpen(false)} aria-label="Close WebMCP inspector">×</button>
           <div className="right-tabs" role="tablist" aria-label="WallAlive inspector">
             {(["agent", "tools", "privacy", "history"] as const).map((tab) => <button key={tab} role="tab" aria-selected={panelTab === tab} className={panelTab === tab ? "active" : ""} onClick={() => setPanelTab(tab)}>{tab}</button>)}
           </div>
@@ -858,7 +1026,78 @@ export default function Home() {
           <footer className="agent-footer"><span>THE AGENT DIRECTS</span><b>THE CHILD DECIDES</b></footer>
         </aside>
       </section>
-      <div className="notice" role="status" aria-live="polite"><i />{notice}</div>
+      {pendingUpload ? <div className="paper-picker-backdrop" role="dialog" aria-modal="true" aria-labelledby="paper-picker-title">
+        <section className="paper-picker">
+          <header><div><span>ONE QUICK TAP</span><h2 id="paper-picker-title">Which drawing?</h2></div><button onClick={cancelPendingUpload} aria-label="Close photo">×</button></header>
+          <button
+            className="paper-picker-image"
+            onClick={(event) => {
+              const image = event.currentTarget.querySelector("img");
+              const bounds = image?.getBoundingClientRect() ?? event.currentTarget.getBoundingClientRect();
+              processUploadedDrawing({ x: clamp01((event.clientX - bounds.left) / bounds.width), y: clamp01((event.clientY - bounds.top) / bounds.height) });
+            }}
+          ><img src={pendingUpload.url} alt="Choose one character from the uploaded sheet" /><span><i /> TAP INSIDE THE CHARACTER</span></button>
+          <p>Paper edges, labels, grid lines, and nearby doodles will be treated as background.</p>
+        </section>
+      </div> : null}
+      {partEditorOpen && capture ? <div className="part-editor-backdrop" role="dialog" aria-modal="true" aria-labelledby="part-editor-title">
+        <section className="part-editor">
+          <header><div><span>ANATOMY CHECK</span><h2 id="part-editor-title">Make it match.</h2></div><button onClick={() => { setPartEditorOpen(false); setPendingPartKind(null); }}>×</button></header>
+          <div className="part-editor-workspace">
+            <svg
+              className={pendingPartKind ? "is-adding" : ""}
+              viewBox="0 0 100 100"
+              onPointerDown={(event) => {
+                if (!pendingPartKind) return;
+                const point = editorPoint(event.currentTarget, event.clientX, event.clientY);
+                addRigPart(pendingPartKind, point.x, point.y);
+              }}
+            >
+              <image href={capture.textureUrl} x="0" y="0" width="100" height="100" preserveAspectRatio="xMidYMid meet" />
+              {capture.rig.parts.filter((part) => anatomyKinds.includes(part.kind as (typeof anatomyKinds)[number])).map((part) => {
+                const x = (part.center.x / 1.4 + 0.5) * 100;
+                const y = (0.5 - part.center.y / 1.4) * 100;
+                const width = Math.max(4, part.size.x / 1.4 * 100);
+                const height = Math.max(4, part.size.y / 1.4 * 100);
+                const showMaskOutline = part.kind === "eye" || part.kind === "cheek" || part.kind === "nose" || part.kind === "mouth";
+                const polygon = showMaskOutline ? part.outline?.map((point) => `${(point.x / 1.4 + 0.5) * 100},${(0.5 - point.y / 1.4) * 100}`).join(" ") : undefined;
+                return <g
+                  key={part.id}
+                  className={`part-marker ${selectedPartId === part.id ? "selected" : ""}`}
+                  onPointerDown={(event) => {
+                    event.stopPropagation();
+                    setSelectedPartId(part.id);
+                    setPendingPartKind(null);
+                    partDragRef.current = { pointerId: event.pointerId, partId: part.id };
+                    event.currentTarget.setPointerCapture(event.pointerId);
+                  }}
+                  onPointerMove={(event) => {
+                    if (partDragRef.current?.pointerId !== event.pointerId || partDragRef.current.partId !== part.id) return;
+                    const svg = event.currentTarget.ownerSVGElement;
+                    if (!svg) return;
+                    const point = editorPoint(svg, event.clientX, event.clientY);
+                    moveRigPart(part.id, point.x, point.y);
+                  }}
+                  onPointerUp={(event) => {
+                    partDragRef.current = null;
+                    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+                  }}
+                >
+                  {polygon ? <polygon points={polygon} /> : <ellipse cx={x} cy={y} rx={width / 2} ry={height / 2} />}
+                  <circle cx={x} cy={y} r="1.4" />
+                  {selectedPartId === part.id ? <text x={x} y={y - Math.max(3, height / 2 + 1.5)}>{part.kind}</text> : null}
+                </g>;
+              })}
+            </svg>
+            {pendingPartKind ? <div className="editor-hint">Tap where the {anatomyLabel[pendingPartKind].toLowerCase()} belongs</div> : <div className="editor-hint">Tap a part, then drag it</div>}
+          </div>
+          <div className="part-editor-tools">
+            <p><b>Add missing</b><small>Then tap the drawing</small></p>
+            <div>{anatomyKinds.map((kind) => <button key={kind} className={pendingPartKind === kind ? "active" : ""} onClick={() => { setPendingPartKind(kind); setSelectedPartId(null); }}>{anatomyLabel[kind]}</button>)}</div>
+            <footer><button disabled={!selectedPartId} onClick={() => resizeSelectedPart(0.86)}>− SIZE</button><button disabled={!selectedPartId} onClick={() => resizeSelectedPart(1.16)}>＋ SIZE</button><button className="remove-part" disabled={!selectedPartId} onClick={deleteSelectedPart}>REMOVE</button><button className="editor-done" onClick={() => { setPartEditorOpen(false); setPendingPartKind(null); }}>LOOKS GOOD</button></footer>
+          </div>
+        </section>
+      </div> : null}
     </main>
   );
 }

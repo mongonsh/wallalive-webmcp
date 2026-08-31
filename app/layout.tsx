@@ -26,13 +26,13 @@ export const metadata: Metadata = {
     type: "website",
     url: "/",
     siteName: "WallAlive",
-    images: [{ url: "/wallalive-og.png", width: 1536, height: 1024, alt: "A child’s wall doodle becoming a dimensional AR character in WallAlive" }],
+    images: [{ url: "/wallalive-og-v27.png", width: 1536, height: 1024, alt: "A coral crayon creature lifting off graph paper as a tactile 3D WallAlive character" }],
   },
   twitter: {
     card: "summary_large_image",
     title: "WallAlive — Draw it. Wake it. Play.",
     description: "Turn an approved wall drawing into a 3D character a browser agent can animate through WebMCP.",
-    images: ["/wallalive-og.png"],
+    images: ["/wallalive-og-v27.png"],
   },
 };
 
