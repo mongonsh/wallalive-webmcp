@@ -2,10 +2,9 @@
 
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import * as THREE from "three";
-import { DecalGeometry } from "three/addons/geometries/DecalGeometry.js";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { MarchingCubes } from "three/addons/objects/MarchingCubes.js";
-import type { CharacterRig, ContourPoint, LearnedDepthField, SemanticPart, SkeletonPoint } from "../lib/drawing";
+import type { CharacterRig, ContourPoint, LearnedDepthField, SkeletonPoint } from "../lib/drawing";
 import { disposeObject, prepareNeuralCharacter, type NeuralRigMap, type NeuralSemanticMap, type RiggedAssetInfo } from "../lib/rigged-model";
 
 export type CharacterAction = "idle" | "wave" | "dance" | "hop" | "walk" | "hide" | "spin";
@@ -83,16 +82,6 @@ function distanceToContour(x: number, y: number, contour: ContourPoint[]) {
   return distance;
 }
 
-function inkMaterial(color: string) {
-  return new THREE.MeshStandardMaterial({
-    color,
-    roughness: 0.48,
-    metalness: 0,
-    emissive: new THREE.Color(color),
-    emissiveIntensity: 0.16,
-  });
-}
-
 function sampleLearnedDepth(field: Float32Array, depth: LearnedDepthField, x: number, y: number) {
   const modelX = Math.min(depth.size - 1, Math.max(0, (x / 1.4 + 0.5) * (depth.size - 1)));
   const modelY = Math.min(depth.size - 1, Math.max(0, (0.5 - y / 1.4) * (depth.size - 1)));
@@ -111,15 +100,34 @@ export function buildCharacter(contour: ContourPoint[], skeleton: SkeletonPoint[
   const character = new THREE.Group();
   character.name = "wallalive-semantic-character";
 
-  const volumeMaterial = new THREE.MeshPhysicalMaterial({
+  const artworkTexture = textureUrl ? new THREE.TextureLoader().load(textureUrl) : null;
+  if (artworkTexture) {
+    artworkTexture.colorSpace = THREE.SRGBColorSpace;
+    artworkTexture.anisotropy = 8;
+  }
+  const sideMaterial = new THREE.MeshPhysicalMaterial({
     color: rig.bodyColor,
-    roughness: 0.68,
+    roughness: 0.76,
     metalness: 0,
-    clearcoat: 0.18,
-    clearcoatRoughness: 0.72,
+    clearcoat: 0.08,
+    clearcoatRoughness: 0.8,
     side: THREE.DoubleSide,
   });
-  const volume = new MarchingCubes(VOLUME_RESOLUTION, volumeMaterial, false, false, 200_000);
+  const frontMaterial = artworkTexture ? new THREE.MeshStandardMaterial({
+    map: artworkTexture,
+    transparent: true,
+    alphaTest: 0.035,
+    roughness: 0.82,
+    metalness: 0,
+    side: THREE.FrontSide,
+  }) : sideMaterial;
+  const backMaterial = new THREE.MeshStandardMaterial({
+    color: new THREE.Color(rig.bodyColor).lerp(new THREE.Color(0xfff7e4), 0.12),
+    roughness: 0.86,
+    metalness: 0,
+    side: THREE.DoubleSide,
+  });
+  const volume = new MarchingCubes(VOLUME_RESOLUTION, sideMaterial, false, false, 200_000);
   volume.name = "silhouette-distance-lens";
   volume.isolation = 0;
   volume.field.fill(-1);
@@ -141,26 +149,32 @@ export function buildCharacter(contour: ContourPoint[], skeleton: SkeletonPoint[
       if (inside) maximumInteriorDistance = Math.max(maximumInteriorDistance, edgeDistance);
     }
   }
-  const bodyHalfDepth = Math.min(0.48, Math.max(0.12, (bodyPart?.size.z ?? 0.34) * 0.58 * inflation));
+  // The learned depth prior was trained on analytic ellipsoids. Used without
+  // an envelope it can turn an uncertain photo mask into a face-like sphere.
+  // Keep the model's front/back asymmetry, but constrain it inside a shallow
+  // signed-distance relief whose silhouette and artwork stay authoritative.
+  const bodyHalfDepth = Math.min(0.16, Math.max(0.075, (bodyPart?.size.z ?? 0.28) * 0.42 * inflation));
   const fallbackDepthAt = (x: number, y: number) => {
     if (!pointInsideContour(x, y, contour)) return 0;
     const normalizedDistance = Math.min(1, distanceToContour(x, y, contour) / maximumInteriorDistance);
     return Math.max(cell * 0.7, bodyHalfDepth * Math.sqrt(normalizedDistance));
   };
+  const clampDepth = (learnedValue: number, envelope: number, envelopeScale: number) => Math.max(
+    cell * 0.7,
+    Math.min(bodyHalfDepth * 1.12, envelope * envelopeScale, Math.max(envelope * 0.72, learnedValue)),
+  );
   const frontDepthAt = (x: number, y: number) => {
     if (!pointInsideContour(x, y, contour)) return 0;
-    return depth
-      ? Math.max(cell * 0.7, sampleLearnedDepth(depth.front, depth, x, y) * inflation)
-      : fallbackDepthAt(x, y);
+    const envelope = fallbackDepthAt(x, y);
+    if (!depth) return envelope;
+    return clampDepth(sampleLearnedDepth(depth.front, depth, x, y) * inflation, envelope, 1.12);
   };
   const backDepthAt = (x: number, y: number) => {
     if (!pointInsideContour(x, y, contour)) return 0;
-    return depth
-      ? Math.max(cell * 0.7, sampleLearnedDepth(depth.back, depth, x, y) * inflation)
-      : fallbackDepthAt(x, y);
+    const envelope = fallbackDepthAt(x, y);
+    if (!depth) return envelope;
+    return clampDepth(sampleLearnedDepth(depth.back, depth, x, y) * inflation, envelope, 1.04);
   };
-  let maximumFrontDepth = cell;
-  let maximumBackDepth = cell;
   const frontDepthField = new Float32Array(VOLUME_RESOLUTION * VOLUME_RESOLUTION);
   const backDepthField = new Float32Array(VOLUME_RESOLUTION * VOLUME_RESOLUTION);
   for (let y = 1; y < VOLUME_RESOLUTION - 1; y += 1) {
@@ -171,8 +185,6 @@ export function buildCharacter(contour: ContourPoint[], skeleton: SkeletonPoint[
       const fieldX = (x - half) / half;
       frontDepthField[planeIndex] = frontDepthAt(fieldX, fieldY);
       backDepthField[planeIndex] = backDepthAt(fieldX, fieldY);
-      maximumFrontDepth = Math.max(maximumFrontDepth, frontDepthField[planeIndex]);
-      maximumBackDepth = Math.max(maximumBackDepth, backDepthField[planeIndex]);
     }
   }
   for (let z = 1; z < VOLUME_RESOLUTION - 1; z += 1) {
@@ -190,10 +202,8 @@ export function buildCharacter(contour: ContourPoint[], skeleton: SkeletonPoint[
   }
   volume.blur(0.08);
   volume.update();
-  // MarchingCubes allocates its maximum vertex budget up front. DecalGeometry
-  // iterates attribute.count rather than drawRange, so passing that oversized
-  // buffer would project hundreds of thousands of unused zero vertices on a
-  // phone. Compact to the actual polygonized surface before skinning/decaling.
+  // MarchingCubes allocates its maximum vertex budget up front. Compact to the
+  // actual polygonized surface before adding UVs and skinning.
   const activeVertexCount = volume.geometry.drawRange.count;
   const sourcePositions = volume.geometry.getAttribute("position") as THREE.BufferAttribute;
   const sourceNormals = volume.geometry.getAttribute("normal") as THREE.BufferAttribute;
@@ -204,11 +214,30 @@ export function buildCharacter(contour: ContourPoint[], skeleton: SkeletonPoint[
   compactGeometry.setAttribute("normal", new THREE.Float32BufferAttribute(
     new Float32Array((sourceNormals.array as Float32Array).subarray(0, activeVertexCount * 3)), 3,
   ));
+  const compactPositions = compactGeometry.getAttribute("position") as THREE.BufferAttribute;
+  const compactNormals = compactGeometry.getAttribute("normal") as THREE.BufferAttribute;
+  const uvs = new Float32Array(compactPositions.count * 2);
+  for (let vertex = 0; vertex < compactPositions.count; vertex += 1) {
+    uvs[vertex * 2] = Math.min(1, Math.max(0, compactPositions.getX(vertex) / 1.4 + 0.5));
+    uvs[vertex * 2 + 1] = Math.min(1, Math.max(0, compactPositions.getY(vertex) / 1.4 + 0.5));
+  }
+  compactGeometry.setAttribute("uv", new THREE.BufferAttribute(uvs, 2));
+  compactGeometry.clearGroups();
+  for (let first = 0; first + 2 < compactPositions.count; first += 3) {
+    const normalZ = (compactNormals.getZ(first) + compactNormals.getZ(first + 1) + compactNormals.getZ(first + 2)) / 3;
+    const positionZ = (compactPositions.getZ(first) + compactPositions.getZ(first + 1) + compactPositions.getZ(first + 2)) / 3;
+    const materialIndex = normalZ > 0.42 && positionZ >= 0 ? 1 : normalZ < -0.42 && positionZ <= 0 ? 2 : 0;
+    compactGeometry.addGroup(first, 3, materialIndex);
+  }
   compactGeometry.setDrawRange(0, activeVertexCount);
   compactGeometry.computeBoundingBox();
   compactGeometry.computeBoundingSphere();
   volume.geometry.dispose();
-  const structuralParts = rig.parts.filter((part) => GRAPH_APPENDAGE_KINDS.has(part.kind));
+  // Unreviewed semantic labels are useful annotations, not geometry authority.
+  // A false arm/eye prediction must never warp a child's artwork. The local
+  // preview therefore uses one safe root bone; generated AniGen assets retain
+  // their full authored skeleton for articulated actions.
+  const structuralParts: typeof rig.parts = [];
   const rootBone = new THREE.Bone();
   rootBone.name = "rig-body";
   const branchBones = structuralParts.map((part) => {
@@ -259,21 +288,23 @@ export function buildCharacter(contour: ContourPoint[], skeleton: SkeletonPoint[
   }
   compactGeometry.setAttribute("skinIndex", new THREE.Uint16BufferAttribute(skinIndices, 4));
   compactGeometry.setAttribute("skinWeight", new THREE.Float32BufferAttribute(skinWeights, 4));
-  const skinnedVolume = new THREE.SkinnedMesh(compactGeometry, volumeMaterial);
+  const skinnedVolume = new THREE.SkinnedMesh(compactGeometry, [sideMaterial, frontMaterial, backMaterial]);
   skinnedVolume.name = "silhouette-distance-lens";
   skinnedVolume.add(rootBone);
   skinnedVolume.bind(new THREE.Skeleton([rootBone, ...branchBones.map(({ bone }) => bone)]));
   skinnedVolume.castShadow = true;
   skinnedVolume.receiveShadow = true;
   skinnedVolume.userData.reconstruction = {
-    method: depth ? "learned distinct front/back depth fields" : "silhouette-preserving signed-distance lens fallback",
+    method: "identity-preserving constrained 3D relief",
     polygonizer: "Marching Cubes",
     resolution: VOLUME_RESOLUTION,
     topology: "closed",
     contourPoints: contour.length,
     skeletonPoints: skeleton.length,
     semanticRig: rig.version,
-    skinning: `${branchBones.length + 1} variable graph bones over one continuous surface`,
+    skinning: "one safe root bone over one continuous surface; unreviewed anatomy cannot deform geometry",
+    maximumHalfDepth: bodyHalfDepth * 1.12,
+    projectedSemanticFeatures: false,
     learnedDepth: depth ? {
       model: depth.model,
       meanThickness: depth.meanThickness,
@@ -283,144 +314,15 @@ export function buildCharacter(contour: ContourPoint[], skeleton: SkeletonPoint[
   };
   character.add(skinnedVolume);
 
-  if (textureUrl) {
-    skinnedVolume.updateMatrixWorld(true);
-    const artworkTexture = new THREE.TextureLoader().load(textureUrl);
-    artworkTexture.colorSpace = THREE.SRGBColorSpace;
-    artworkTexture.anisotropy = 8;
-    const decal = new THREE.Mesh(
-      new DecalGeometry(
-        skinnedVolume,
-        new THREE.Vector3(0, 0, maximumFrontDepth * 0.82),
-        new THREE.Euler(0, 0, 0),
-        new THREE.Vector3(1.4, 1.4, Math.max(0.2, (maximumFrontDepth + maximumBackDepth) * 1.4)),
-      ),
-      new THREE.MeshStandardMaterial({
-        map: artworkTexture,
-        transparent: true,
-        alphaTest: 0.04,
-        roughness: 0.7,
-        metalness: 0,
-        polygonOffset: true,
-        polygonOffsetFactor: -4,
-        polygonOffsetUnits: -4,
-      }),
-    );
-    decal.name = "curved-artwork-skin";
-    character.add(decal);
-  }
-
-  const addInkFeature = (part: SemanticPart) => {
-    const group = new THREE.Group();
-    group.name = `rig-${part.id}`;
-    group.position.set(part.center.x, part.center.y, 0);
-    const outline = part.outline?.length && part.outline.length >= 4
-      ? part.outline
-      : Array.from({ length: 32 }, (_, index) => {
-        const angle = index / 32 * Math.PI * 2;
-        const cos = Math.cos(part.rotation);
-        const sin = Math.sin(part.rotation);
-        const localX = Math.cos(angle) * part.size.x * 0.5;
-        const localY = Math.sin(angle) * part.size.y * 0.5;
-        return { x: part.center.x + localX * cos - localY * sin, y: part.center.y + localX * sin + localY * cos };
-      });
-    if (part.kind === "eye") {
-      const lensColor = new THREE.Color(rig.bodyColor).lerp(new THREE.Color(0xfffdf4), 0.62);
-      const localOutline = outline.map((point) => ({ x: point.x - part.center.x, y: point.y - part.center.y }));
-      const signedArea = localOutline.reduce((total, point, index) => {
-        const next = localOutline[(index + 1) % localOutline.length];
-        return total + point.x * next.y - next.x * point.y;
-      }, 0) * 0.5;
-      const depth = Math.max(0.012, part.size.z * 1.35);
-      let geometry: THREE.BufferGeometry;
-      if (Math.abs(signedArea) >= Math.max(0.00005, part.size.x * part.size.y * 0.08)) {
-        const ordered = signedArea > 0 ? localOutline : [...localOutline].reverse();
-        const shape = new THREE.Shape();
-        shape.moveTo(ordered[0].x, ordered[0].y);
-        ordered.slice(1).forEach((point) => shape.lineTo(point.x, point.y));
-        shape.closePath();
-        geometry = new THREE.ExtrudeGeometry(shape, {
-          depth,
-          steps: 1,
-          bevelEnabled: true,
-          bevelSegments: 3,
-          bevelSize: Math.min(part.size.x, part.size.y) * 0.08,
-          bevelThickness: depth * 0.34,
-        });
-      } else {
-        geometry = new THREE.SphereGeometry(0.5, 28, 18);
-      }
-      const lens = new THREE.Mesh(geometry, new THREE.MeshPhysicalMaterial({
-        color: lensColor,
-        roughness: 0.34,
-        metalness: 0,
-        clearcoat: 0.46,
-        clearcoatRoughness: 0.36,
-      }));
-      lens.name = `${part.id}-raised-lens`;
-      lens.position.z = frontDepthAt(part.center.x, part.center.y) + 0.004;
-      if (geometry instanceof THREE.SphereGeometry) lens.scale.set(part.size.x * 0.94, part.size.y * 0.9, Math.max(0.024, part.size.z * 1.7));
-      lens.castShadow = true;
-      group.add(lens);
-    } else if (part.kind === "pupil") {
-      const pupil = new THREE.Mesh(new THREE.SphereGeometry(0.5, 20, 14), inkMaterial(part.color));
-      pupil.name = `${part.id}-raised-pupil`;
-      pupil.position.z = frontDepthAt(part.center.x, part.center.y) + Math.max(0.02, part.size.z * 0.8);
-      pupil.scale.set(part.size.x, part.size.y, Math.max(0.018, part.size.z));
-      pupil.castShadow = true;
-      group.add(pupil);
-    }
-    const points = outline.map((point) => new THREE.Vector3(
-      point.x - part.center.x,
-      point.y - part.center.y,
-      frontDepthAt(point.x, point.y) + 0.012,
-    ));
-    const curve = new THREE.CatmullRomCurve3(points, true, "centripetal", 0.3);
-    const radius = Math.min(0.014, Math.max(0.0055, Math.min(part.size.x, part.size.y) * 0.075));
-    const mesh = new THREE.Mesh(new THREE.TubeGeometry(curve, Math.max(24, points.length * 2), radius, 8, true), inkMaterial(rig.lineColor));
-    mesh.castShadow = true;
-    group.add(mesh);
-    character.add(group);
-  };
-  // Keep the authored silhouette readable even when the source paper and the
-  // filled body are both pale. The front rim reinforces the exact captured
-  // contour; the rear rim makes the separately learned hidden surface clear
-  // during a 360° turn without copying facial features onto it.
-  addInkFeature({
-    id: "body-ink-outline",
-    kind: "marking",
-    side: "center",
-    parentId: "body",
-    center: { x: 0, y: 0, z: 0 },
-    size: bodyPart?.size ?? { x: 1, y: 1, z: 0.3 },
-    rotation: 0,
-    color: rig.lineColor,
-    confidence: 1,
-    source: "image-region",
-    outline: contour,
-  });
-  if (contour.length >= 6) {
-    const rearPoints = contour.map((point) => new THREE.Vector3(point.x, point.y, -backDepthAt(point.x, point.y) - 0.009));
-    const rearRim = new THREE.Mesh(
-      new THREE.TubeGeometry(new THREE.CatmullRomCurve3(rearPoints, true, "centripetal", 0.3), Math.max(48, contour.length * 2), 0.0065, 8, true),
-      inkMaterial(rig.lineColor),
-    );
-    rearRim.name = "inferred-back-silhouette-rim";
-    rearRim.castShadow = true;
-    character.add(rearRim);
-  }
-  // The texture preserves the child's exact artwork, while these shallow
-  // semantic meshes give eyes, pupils, cheeks and mouths real parallax and
-  // animation. They follow the detected outlines; they are not generic decals.
-  rig.parts.filter((part) => part.kind === "eye" || part.kind === "pupil" || part.kind === "cheek" || part.kind === "nose" || part.kind === "mouth" || part.kind === "marking")
-    .forEach(addInkFeature);
-
   character.userData.reconstruction = {
-    method: depth ? "learned variable topology graph + learned asymmetric front/back depth volume" : "variable topology graph + symmetric emergency depth fallback",
+    method: "identity-preserving constrained 3D relief",
     texturePlane: false,
     viewableDegrees: 360,
     bodyTopology: "closed",
-    backPrior: depth ? "sketch-depth-v1 learned hidden surface; no copied face marks" : "symmetric emergency fallback; no invented face marks",
+    backPrior: "bounded hidden-surface relief; the original artwork appears only on the front",
+    maximumHalfDepth: bodyHalfDepth * 1.12,
+    projectedSemanticFeatures: false,
+    unreviewedAnatomyDeformsGeometry: false,
     depthModel: depth?.model ?? null,
     meanDepthAsymmetry: depth?.meanAsymmetry ?? 0,
     semanticParts: rig.parts.map((part) => ({ id: part.id, kind: part.kind, confidence: part.confidence, source: part.source })),

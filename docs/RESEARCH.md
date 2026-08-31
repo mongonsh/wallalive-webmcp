@@ -2,16 +2,19 @@
 
 This note records what WallAlive actually does, why the previous silhouette method was insufficient, and the boundary between local privacy work and neural reconstruction.
 
-## Root cause of the previous result
+## Root cause of the frightening result
 
-The broken renderer combined a full-silhouette volume with separate generic sphere and capsule appendages. Limbs were therefore doubled, detached, and forced through a humanoid endpoint classifier. Thick centerline probabilities also merged nearby branches before graph decoding. The result in the reported screenshot was a real bug, not an acceptable artistic choice.
+The failure had three independent causes. First, the target cutout checkpoint had only 350 Meta Amateur Drawings and roughly 0.61 sealed-test IoU, so it was not a reliable primary segmenter for printed books, painted faces, textured paper, faint pencil, and cluttered phone photos. Second, the analytic-ellipsoid depth prior was allowed to inflate uncertain silhouettes into face-like eggs. Third, guessed eyes, pupils, cheeks, mouths, and markings were converted into raised spheres and contour tubes. A false semantic label therefore became frightening visible anatomy. The interface then made the problem worse by displaying uncalibrated “clean cutout,” part-count, and topology claims.
 
-The private renderer now thins the learned centerline, decodes a variable graph, names branches by learned topology family, predicts distinct front and hidden-surface depth fields, builds one closed Marching Cubes surface between them, and assigns normalized graph-bone weights directly to that continuous surface. Generic capsule appendages and the mirrored-depth back are gone. The hidden local surface is still a learned plausible prior; the optional neural path generates a richer full volume.
+The repaired pipeline uses MediaPipe MagicTouch as the primary positive/negative point-prompted object segmenter. A point-local line-art extractor and the compact cutout checkpoint remain fallbacks; results with one percent or less visible ink are rejected with a move-closer message instead of being rendered. The local 3D path is now deliberately identity-preserving: learned depth is clamped inside a shallow signed-distance envelope, the exact transparent artwork is mapped only to front-facing triangles, sides and back use neutral sampled color, and semantic suggestions cannot add geometry or deformation bones. This is a closed, 360-degree relief, not a claim that one photo reveals the true unseen back.
+
+The optional AniGen path remains the route to generated unseen geometry, skeleton, and skin weights. Its public GPU quota is not a reliable production service, so the local fallback must remain safe and honest when full generation is unavailable.
 
 ## Systems evaluated
 
 | System | What it provides | Why it is or is not the main path |
 | --- | --- | --- |
+| [MediaPipe Interactive Segmenter / MagicTouch](https://github.com/google-ai-edge/mediapipe/tree/master/mediapipe/tasks/web/vision) | Browser-ready positive/negative point and stroke segmentation | Selected as the primary cutout proposal model. It runs locally after cached model/WASM delivery, handles far more photo domains than the 350-drawing checkpoint, and is still quality-gated because a general segmenter cannot guarantee faint or incomplete line art. |
 | [Meta Animated Drawings](https://github.com/facebookresearch/AnimatedDrawings) | Detector, segmentation, pose estimation, and 2D character animation | Excellent precedent for children’s drawings, but its output is a 2D articulated deformation rather than 360° geometry. |
 | [ChildlikeSHAPES / CharSegNet](https://arxiv.org/abs/2504.08022) | 16,075 annotated drawings and hierarchical parsing with 25 semantic categories | Selected as the real-data source for v3. WallAlive trains its own browser-sized student because the research architecture/checkpoint is not a mobile WebAssembly artifact. |
 | [EdgeTAM](https://github.com/facebookresearch/EdgeTAM) | Promptable mobile image/video masks | A strong local proposal model, but it needs a point or box and does not name eyes, cheeks, or limbs. Raw masks also selected paper/clutter in drawing tests, so it is not allowed to replace target-aware drawing extraction blindly. |

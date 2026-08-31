@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile, stat } from "node:fs/promises";
 import test from "node:test";
 
-test("ships a point-prompted paper-scene model with sealed clean and hard-negative evaluation", async () => {
+test("uses general point-guided segmentation first and keeps the compact paper model as fallback", async () => {
   const report = JSON.parse(await readFile(new URL("../public/models/wallalive-target-cutout-v2.json", import.meta.url), "utf8"));
   const model = await stat(new URL("../public/models/wallalive-target-cutout-v2.onnx", import.meta.url));
   const runtime = await readFile(new URL("../app/lib/target-cutout.ts", import.meta.url), "utf8");
@@ -17,11 +17,23 @@ test("ships a point-prompted paper-scene model with sealed clean and hard-negati
   assert.ok(report.official_test.prompt_hit_rate >= 0.9);
   assert.ok(model.size > 900_000 && model.size < 1_300_000, `expected a substantive compact target model, got ${model.size} bytes`);
   assert.match(runtime, /wallalive-target-cutout-v2\.onnx/);
+  assert.match(runtime, /interactive_segmenter_v2\/magic_touch/);
+  assert.match(runtime, /InteractiveSegmenter\.createFromModelPath/);
+  assert.match(runtime, /brushMode: 1 as import/);
+  assert.match(runtime, /brushMode: 2 as import/);
+  assert.doesNotMatch(runtime, /vision\.BrushMode/);
+  assert.match(runtime, /mediapipe-magic-touch-v2/);
+  assert.match(runtime, /targeted-local-extraction-v3/);
+  assert.match(runtime, /for \(const scale of \[0\.42, 0\.56\]/);
+  assert.match(runtime, /coveragePercent <= 1/);
+  assert.match(runtime, /maximumValue <= 1 \? 1 : 128/);
   assert.match(runtime, /promptedComponent/);
   assert.match(runtime, /confidence < 0\.56/);
   assert.match(trainer, /negative paper boundary/);
   assert.match(trainer, /compose_paper_scene/);
-  assert.match(page, /CHECK PARTS/);
+  assert.match(page, /REVIEW RIG/);
+  assert.match(page, /Artwork preserved/);
+  assert.doesNotMatch(page, /% clean cutout/);
   assert.match(page, /Add missing/);
   assert.match(page, /TAP INSIDE THE CHARACTER/);
 });

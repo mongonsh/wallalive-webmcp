@@ -160,7 +160,7 @@ export type DrawingExtraction = {
   sourceTarget?: CaptureTarget;
   sourceScope?: ExtractionScope;
   cutoutRecognition?: {
-    model: "wallalive-target-cutout-v2";
+    model: "mediapipe-magic-touch-v2" | "targeted-local-extraction-v3" | "wallalive-target-cutout-v2";
     latencyMs: number;
     confidence: number;
     areaPercent: number;

@@ -14,6 +14,7 @@
   },
   "dependencies": {
     "@gradio/client": "^2.5.1",
+    "@mediapipe/tasks-vision": "^1.0.1",
     "@types/three": "^0.185.4",
     "@types/webxr": "^0.5.24",
     "onnxruntime-web": "^1.24.3",

@@ -92,16 +92,17 @@ test("implements local drawing extraction and real WebXR hit testing", async () 
   assert.match(stage, /silhouette-distance-lens/);
   assert.match(stage, /pointInsideContour/);
   assert.match(stage, /distanceToContour/);
-  assert.match(stage, /DecalGeometry/);
-  assert.match(stage, /curved-artwork-skin/);
+  assert.doesNotMatch(stage, /DecalGeometry/);
+  assert.match(stage, /identity-preserving constrained 3D relief/);
+  assert.match(stage, /frontMaterial/);
+  assert.match(stage, /backMaterial/);
   assert.match(stage, /volume\.field\.fill/);
   assert.match(stage, /wallalive-semantic-character/);
-  assert.match(stage, /SphereGeometry/);
   assert.match(stage, /SkinnedMesh/);
   assert.match(stage, /skinIndex/);
   assert.match(stage, /skinWeight/);
   assert.doesNotMatch(stage, /CapsuleGeometry/);
-  assert.match(stage, /TubeGeometry/);
+  assert.doesNotMatch(stage, /TubeGeometry/);
   assert.match(stage, /texturePlane: false/);
   assert.match(stage, /viewableDegrees: 360/);
   assert.match(stage, /GLTFLoader/);
@@ -114,9 +115,8 @@ test("implements local drawing extraction and real WebXR hit testing", async () 
   assert.match(stage, /requestSession\("immersive-ar"/);
   assert.match(stage, /requiredFeatures: \["hit-test"\]/);
   assert.match(stage, /getHitTestResults/);
-  assert.match(stage, /raised-lens/);
-  assert.match(stage, /raised-pupil/);
-  assert.match(stage, /TubeGeometry/);
+  assert.doesNotMatch(stage, /raised-lens|raised-pupil|addInkFeature/);
+  assert.match(stage, /projectedSemanticFeatures: false/);
 });
 
 test("ships validation-calibrated same-origin drawing, pose, and variable-topology models", async () => {
