@@ -1,4 +1,6 @@
 import {
+  discoverCharacterTargetsFromImageUrl,
+  discoverCharacterTargetsFromVideo,
   mergeLearnedPartHints,
   POSE_JOINT_NAMES,
   TOPOLOGY_CLASSES,
@@ -1015,4 +1017,45 @@ export async function recognizeDrawingFromVideo(video: HTMLVideoElement, target:
 
 export async function recognizeDrawingFromImageUrl(imageUrl: string, target: CaptureTarget = { x: 0.5, y: 0.5 }): Promise<DrawingExtraction> {
   return recognizeDrawingParts(await isolateDrawingFromImageUrl(imageUrl, target));
+}
+
+async function recognizeTargetEnsemble(
+  targets: CaptureTarget[],
+  recognize: (target: CaptureTarget) => Promise<DrawingExtraction>,
+) {
+  const recognized: DrawingExtraction[] = [];
+  let firstError: unknown;
+  for (const target of targets) {
+    try {
+      const drawing = await recognize(target);
+      const sourceTarget = drawing.sourceTarget ?? target;
+      const duplicate = recognized.some((existing) => {
+        const existingTarget = existing.sourceTarget ?? { x: 0.5, y: 0.5 };
+        return Math.hypot(sourceTarget.x - existingTarget.x, sourceTarget.y - existingTarget.y) < 0.065;
+      });
+      if (!duplicate) recognized.push({ ...drawing, sourceTarget });
+    } catch (error) {
+      firstError ??= error;
+    }
+  }
+  if (!recognized.length) throw firstError instanceof Error ? firstError : new Error("No complete drawn characters were verified in this image.");
+  return recognized;
+}
+
+export async function recognizeDrawingsFromVideo(
+  video: HTMLVideoElement,
+  primary: CaptureTarget,
+  maximum = 4,
+): Promise<DrawingExtraction[]> {
+  const targets = discoverCharacterTargetsFromVideo(video, primary, maximum);
+  return recognizeTargetEnsemble(targets, (target) => recognizeDrawingFromVideo(video, target));
+}
+
+export async function recognizeDrawingsFromImageUrl(
+  imageUrl: string,
+  primary: CaptureTarget = { x: 0.5, y: 0.5 },
+  maximum = 4,
+): Promise<DrawingExtraction[]> {
+  const targets = await discoverCharacterTargetsFromImageUrl(imageUrl, primary, maximum);
+  return recognizeTargetEnsemble(targets, (target) => recognizeDrawingFromImageUrl(imageUrl, target));
 }

@@ -184,6 +184,12 @@ export type DrawingExtraction = {
   };
 };
 
+export type CharacterTargetCandidate = {
+  target: CaptureTarget;
+  score: number;
+  span: number;
+};
+
 type RGB = { r: number; g: number; b: number };
 type Component = { pixels: number[]; minX: number; minY: number; maxX: number; maxY: number; centerX: number; centerY: number };
 
@@ -203,6 +209,49 @@ const boostInkColor = (color: RGB): RGB => {
     b: clamp(average + (color.b - average) * 2.35, 0, 255),
   };
 };
+
+/**
+ * Keeps the child's point prompt first, removes prompts that would select the
+ * same figure, and preserves spatially separate figures from one sheet.
+ */
+export function chooseCharacterTargets(
+  candidates: CharacterTargetCandidate[],
+  primary: CaptureTarget,
+  maximum = 4,
+): CaptureTarget[] {
+  const selected: Array<{ target: CaptureTarget; span: number }> = [{ target: primary, span: 0.2 }];
+  candidates
+    .slice()
+    .sort((left, right) => right.score - left.score)
+    .forEach((candidate) => {
+      if (selected.length >= maximum) return;
+      const duplicate = selected.some((existing) => {
+        const separation = Math.hypot(candidate.target.x - existing.target.x, candidate.target.y - existing.target.y);
+        return separation < Math.max(0.055, Math.min(candidate.span, existing.span) * 0.34);
+      });
+      if (!duplicate) selected.push({ target: candidate.target, span: candidate.span });
+    });
+  return selected.map((candidate) => candidate.target);
+}
+
+/**
+ * Only model-supported limb paths may deform a child's drawing. Heuristic
+ * labels remain review annotations and cannot become animation bones.
+ */
+export function selectAnimatableRigParts(
+  rig: CharacterRig,
+  applicability: { poseApplicable: boolean; topologyApplicable: boolean },
+) {
+  const movableKinds = new Set<SemanticPartKind>([
+    "arm", "leg", "wing", "fin", "tail", "tentacle", "trunk", "branch", "segment", "linkage",
+  ]);
+  return rig.parts.filter((part) => {
+    if (!movableKinds.has(part.kind) || !part.path || part.path.length < 2 || part.confidence < 0.48) return false;
+    if (part.source === "learned-pose") return applicability.poseApplicable;
+    if (part.source === "learned-topology") return applicability.topologyApplicable;
+    return false;
+  });
+}
 
 export function mapCoverTargetToSource(
   target: CaptureTarget,
@@ -2424,6 +2473,118 @@ export function extractDrawingFromCanvas(
   scope: ExtractionScope = "camera",
 ): DrawingExtraction {
   return extractDrawingFromSource(canvas, canvas.width, canvas.height, target, scope);
+}
+
+function discoverCharacterTargetsFromSource(
+  sourceImage: CanvasImageSource,
+  sourceWidth: number,
+  sourceHeight: number,
+  primary: CaptureTarget,
+  maximum = 4,
+) {
+  const width = 480;
+  const height = Math.max(1, Math.round(width * sourceHeight / Math.max(1, sourceWidth)));
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  if (!context) return [primary];
+  context.drawImage(sourceImage, 0, 0, width, height);
+  const frame = context.getImageData(0, 0, width, height);
+  const background = averageBorder(frame.data, width, height);
+  const backgroundLightness = (Math.max(background.r, background.g, background.b) + Math.min(background.r, background.g, background.b)) / 2;
+  const backgroundChroma = Math.max(background.r, background.g, background.b) - Math.min(background.r, background.g, background.b);
+  const ink = new Uint8Array(width * height);
+  const inset = Math.max(3, Math.round(Math.min(width, height) * 0.012));
+  for (let y = inset; y < height - inset; y += 1) {
+    for (let x = inset; x < width - inset; x += 1) {
+      const offset = (y * width + x) * 4;
+      if (frame.data[offset + 3] < 24) continue;
+      const pixel = { r: frame.data[offset], g: frame.data[offset + 1], b: frame.data[offset + 2] };
+      const lightness = (Math.max(pixel.r, pixel.g, pixel.b) + Math.min(pixel.r, pixel.g, pixel.b)) / 2;
+      const chroma = Math.max(pixel.r, pixel.g, pixel.b) - Math.min(pixel.r, pixel.g, pixel.b);
+      const distance = colorDistance(pixel, background);
+      const drawnStroke = distance >= 24 && (
+        lightness <= backgroundLightness - 18
+        || chroma >= backgroundChroma + 8
+        || distance >= 58
+      );
+      if (drawnStroke) ink[y * width + x] = 1;
+    }
+  }
+  const closeRadius = clamp(Math.round(Math.min(width, height) * 0.008), 2, 5);
+  const connected = erode(dilate(ink, width, height, closeRadius), width, height, Math.max(1, closeRadius - 1));
+  const imageArea = width * height;
+  const primaryPx = { x: primary.x * width, y: primary.y * height };
+  const candidates: CharacterTargetCandidate[] = [];
+  connectedComponents(connected, width, height).forEach((component) => {
+    const boxWidth = component.maxX - component.minX + 1;
+    const boxHeight = component.maxY - component.minY + 1;
+    const boxArea = boxWidth * boxHeight;
+    const boxFraction = boxArea / imageArea;
+    const density = component.pixels.length / Math.max(1, boxArea);
+    const aspect = boxWidth / Math.max(1, boxHeight);
+    const centerDistance = Math.hypot(component.centerX - primaryPx.x, component.centerY - primaryPx.y) / Math.hypot(width, height);
+    if (boxFraction < 0.003 || boxFraction > 0.34 || density < 0.025 || density > 0.86) return;
+    if (aspect < 0.22 || aspect > 4.5 || centerDistance > 0.68) return;
+    const target = { x: component.centerX / width, y: component.centerY / height };
+    const span = Math.max(boxWidth / width, boxHeight / height);
+    const shapeScore = 1 - Math.min(1, Math.abs(Math.log(Math.max(0.01, aspect))) / 2.1);
+    const score = Math.sqrt(boxFraction) * 2.1 + Math.min(0.3, density * 0.48) + shapeScore * 0.22 + (1 - centerDistance) * 0.18;
+    candidates.push({ target, score, span });
+
+    // Touching figures sometimes form one wide connected component. Seed one
+    // point per vertical ink cluster so point-guided segmentation can still
+    // return separate instance masks.
+    if (aspect > 1.18 && boxFraction > 0.035) {
+      const slices = clamp(Math.round(aspect), 2, maximum);
+      for (let slice = 0; slice < slices; slice += 1) {
+        const sliceMin = component.minX + boxWidth * slice / slices;
+        const sliceMax = component.minX + boxWidth * (slice + 1) / slices;
+        const pixels = component.pixels.filter((index) => {
+          const x = index % width;
+          return x >= sliceMin && x < sliceMax;
+        });
+        if (pixels.length < component.pixels.length / slices * 0.24) continue;
+        const centerX = pixels.reduce((sum, index) => sum + index % width, 0) / pixels.length;
+        const centerY = pixels.reduce((sum, index) => sum + Math.floor(index / width), 0) / pixels.length;
+        candidates.push({
+          target: { x: centerX / width, y: centerY / height },
+          score: score * 0.92,
+          span: Math.max(boxHeight / height, boxWidth / width / slices),
+        });
+      }
+    }
+  });
+  return chooseCharacterTargets(candidates, primary, maximum);
+}
+
+export function discoverCharacterTargetsFromVideo(video: HTMLVideoElement, primary: CaptureTarget, maximum = 4) {
+  if (!video.videoWidth || !video.videoHeight) return [primary];
+  const bounds = video.getBoundingClientRect();
+  const displayWidth = Math.max(1, Math.round(bounds.width || video.clientWidth || video.videoWidth));
+  const displayHeight = Math.max(1, Math.round(bounds.height || video.clientHeight || video.videoHeight));
+  const canvas = document.createElement("canvas");
+  canvas.width = displayWidth;
+  canvas.height = displayHeight;
+  const context = canvas.getContext("2d");
+  if (!context) return [primary];
+  const scale = Math.max(displayWidth / video.videoWidth, displayHeight / video.videoHeight);
+  const drawnWidth = video.videoWidth * scale;
+  const drawnHeight = video.videoHeight * scale;
+  context.drawImage(video, (displayWidth - drawnWidth) / 2, (displayHeight - drawnHeight) / 2, drawnWidth, drawnHeight);
+  return discoverCharacterTargetsFromSource(canvas, displayWidth, displayHeight, primary, maximum);
+}
+
+export async function discoverCharacterTargetsFromImageUrl(imageUrl: string, primary: CaptureTarget, maximum = 4) {
+  const image = new Image();
+  image.decoding = "async";
+  await new Promise<void>((resolve, reject) => {
+    image.onload = () => resolve();
+    image.onerror = () => reject(new Error("The drawing image could not be loaded."));
+    image.src = imageUrl;
+  });
+  return discoverCharacterTargetsFromSource(image, image.naturalWidth, image.naturalHeight, primary, maximum);
 }
 
 export function createDemoDoodle(): DrawingExtraction {

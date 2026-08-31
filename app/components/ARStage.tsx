@@ -4,7 +4,7 @@ import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "re
 import * as THREE from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { MarchingCubes } from "three/addons/objects/MarchingCubes.js";
-import type { CharacterRig, ContourPoint, LearnedDepthField, SkeletonPoint } from "../lib/drawing";
+import { selectAnimatableRigParts, type CharacterRig, type ContourPoint, type DrawingExtraction, type LearnedDepthField, type SkeletonPoint } from "../lib/drawing";
 import { classifySurfaceMaterial, hasRecognizableArtworkSurface } from "../lib/mesh-materials";
 import { disposeObject, prepareNeuralCharacter, type NeuralRigMap, type NeuralSemanticMap, type RiggedAssetInfo } from "../lib/rigged-model";
 
@@ -17,6 +17,7 @@ export type ARStageHandle = {
 };
 
 type ARStageProps = {
+  characters: DrawingExtraction[] | null;
   contour: ContourPoint[] | null;
   skeleton: SkeletonPoint[] | null;
   textureUrl: string | null;
@@ -42,10 +43,6 @@ type SceneHandles = {
 };
 
 const VOLUME_RESOLUTION = 64;
-const GRAPH_APPENDAGE_KINDS = new Set([
-  "arm", "leg", "wing", "fin", "tail", "tentacle", "trunk", "branch", "segment", "linkage",
-]);
-
 function pointInsideContour(x: number, y: number, contour: ContourPoint[]) {
   let inside = false;
   for (let current = 0, previous = contour.length - 1; current < contour.length; previous = current, current += 1) {
@@ -97,7 +94,16 @@ function sampleLearnedDepth(field: Float32Array, depth: LearnedDepthField, x: nu
   return (top * (1 - amountY) + bottom * amountY) * depth.depthScale;
 }
 
-export function buildCharacter(contour: ContourPoint[], skeleton: SkeletonPoint[], rig: CharacterRig, depth: LearnedDepthField | null, textureUrl: string | null, accent: string, inflation: number) {
+export function buildCharacter(
+  contour: ContourPoint[],
+  skeleton: SkeletonPoint[],
+  rig: CharacterRig,
+  depth: LearnedDepthField | null,
+  textureUrl: string | null,
+  accent: string,
+  inflation: number,
+  applicability = { poseApplicable: false, topologyApplicable: false },
+) {
   const character = new THREE.Group();
   character.name = "wallalive-semantic-character";
 
@@ -245,11 +251,11 @@ export function buildCharacter(contour: ContourPoint[], skeleton: SkeletonPoint[
   compactGeometry.computeBoundingBox();
   compactGeometry.computeBoundingSphere();
   volume.geometry.dispose();
-  // Unreviewed semantic labels are useful annotations, not geometry authority.
-  // A false arm/eye prediction must never warp a child's artwork. The local
-  // preview therefore uses one safe root bone; generated AniGen assets retain
-  // their full authored skeleton for articulated actions.
-  const structuralParts: typeof rig.parts = [];
+  // Only pose/topology paths that passed the character gate may deform the
+  // artwork. Heuristic labels stay visible in the editor but never become
+  // bones. This keeps safety while restoring real arm and leg movement.
+  const structuralParts = selectAnimatableRigParts(rig, applicability);
+  // If no branch passes the gate, this degrades to one safe root bone over one continuous surface instead of inventing anatomy.
   const rootBone = new THREE.Bone();
   rootBone.name = "rig-body";
   const branchBones = structuralParts.map((part) => {
@@ -314,7 +320,7 @@ export function buildCharacter(contour: ContourPoint[], skeleton: SkeletonPoint[
     contourPoints: contour.length,
     skeletonPoints: skeleton.length,
     semanticRig: rig.version,
-    skinning: "one safe root bone over one continuous surface; unreviewed anatomy cannot deform geometry",
+    skinning: `${branchBones.length} verified branch bones over one continuous surface; unreviewed anatomy cannot deform geometry`,
     maximumHalfDepth: bodyHalfDepth * 1.12,
     texturedFrontTriangles,
     neutralBackTriangles,
@@ -350,12 +356,14 @@ export function buildCharacter(contour: ContourPoint[], skeleton: SkeletonPoint[
     topologyConfidence: rig.topologyConfidence ?? null,
     accent,
   };
+  character.userData.wallaliveRig = rig;
+  character.userData.wallaliveMovableParts = structuralParts.map((part) => part.id);
 
   return character;
 }
 
 export const ARStage = forwardRef<ARStageHandle, ARStageProps>(function ARStage(
-  { contour, skeleton, textureUrl, rig, depth, action, accent, inflation, neuralAssetUrl, visible, onCapability, onPlaced, onNeuralAssetInfo },
+  { characters, contour, skeleton, textureUrl, rig, depth, action, accent, inflation, neuralAssetUrl, visible, onCapability, onPlaced, onNeuralAssetInfo },
   ref,
 ) {
   const mountRef = useRef<HTMLDivElement>(null);
@@ -434,8 +442,40 @@ export const ARStage = forwardRef<ARStageHandle, ARStageProps>(function ARStage(
         undefined,
         () => { if (!disposed) onNeuralAssetInfo(null); },
       );
+    } else if (characters?.length) {
+      const targets = characters.map((drawing, index) => drawing.sourceTarget ?? {
+        x: characters.length === 1 ? 0.5 : (index + 1) / (characters.length + 1),
+        y: 0.5,
+      });
+      const centerX = targets.reduce((sum, target) => sum + target.x, 0) / targets.length;
+      const centerY = targets.reduce((sum, target) => sum + target.y, 0) / targets.length;
+      const ensembleScale = characters.length === 1 ? 1 : Math.max(0.48, Math.min(0.72, 1.18 / Math.sqrt(characters.length)));
+      characters.forEach((drawing, index) => {
+        const instance = buildCharacter(
+          drawing.contour,
+          drawing.skeleton,
+          drawing.rig,
+          drawing.depthRecognition ?? null,
+          drawing.textureUrl,
+          accent,
+          inflation,
+          {
+            poseApplicable: Boolean(drawing.poseRecognition?.applicable),
+            topologyApplicable: Boolean(drawing.topologyRecognition?.applicable),
+          },
+        );
+        instance.position.set((targets[index].x - centerX) * 2.7, (centerY - targets[index].y) * 1.75, index * 0.025);
+        instance.scale.setScalar(ensembleScale);
+        instance.userData.wallalivePhase = index * 0.73;
+        instance.userData.wallaliveInstance = index;
+        characterRoot.add(instance);
+      });
+      onNeuralAssetInfo(null);
     } else if (contour?.length && skeleton?.length && rig) {
-      characterRoot.add(buildCharacter(contour, skeleton, rig, depth, textureUrl, accent, inflation));
+      characterRoot.add(buildCharacter(contour, skeleton, rig, depth, textureUrl, accent, inflation, {
+        poseApplicable: false,
+        topologyApplicable: false,
+      }));
       onNeuralAssetInfo(null);
     }
 
@@ -467,7 +507,7 @@ export const ARStage = forwardRef<ARStageHandle, ARStageProps>(function ARStage(
       root.rotation.y = rotationRef.current.yaw - 0.07 + Math.sin(elapsed * 0.72) * 0.035;
       root.rotation.z = Math.sin(elapsed * 0.9) * 0.012;
 
-      const articulated = root.getObjectByName("wallalive-semantic-character");
+      const articulatedCharacters = root.getObjectsByProperty("name", "wallalive-semantic-character");
       const neural = root.getObjectByName("wallalive-neural-character");
       const neuralRig = neural?.userData.wallaliveRig as NeuralRigMap | undefined;
       const neuralSemantic = neural?.userData.wallaliveSemantic as NeuralSemanticMap | undefined;
@@ -475,30 +515,55 @@ export const ARStage = forwardRef<ARStageHandle, ARStageProps>(function ARStage(
         const base = bone.userData.wallaliveBaseQuaternion as THREE.Quaternion | undefined;
         if (base) bone.quaternion.copy(base);
       });
-      rig?.parts.filter((part) => part.kind === "ear" || GRAPH_APPENDAGE_KINDS.has(part.kind)).forEach((part) => {
-        const node = articulated?.getObjectByName(`rig-${part.id}`);
-        if (node) {
-          node.rotation.x = 0;
-          node.rotation.z = Number(node.userData.baseRotationZ ?? part.rotation);
-        }
-      });
       const blink = Math.pow(Math.max(0, Math.sin(elapsed * 0.78)), 34);
-      rig?.parts.filter((part) => part.kind === "eye").forEach((part) => {
-        const node = articulated?.getObjectByName(`rig-${part.id}`);
-        if (node) node.scale.y = Math.max(0.12, 1 - blink * 0.88);
+      articulatedCharacters.forEach((articulated, instanceIndex) => {
+        const localRig = articulated.userData.wallaliveRig as CharacterRig | undefined;
+        const movableIds = new Set<string>(articulated.userData.wallaliveMovableParts ?? []);
+        const phase = Number(articulated.userData.wallalivePhase ?? instanceIndex * 0.73);
+        const localElapsed = elapsed + phase;
+        const movable = localRig?.parts.filter((part) => movableIds.has(part.id)) ?? [];
+        movable.forEach((part) => {
+          const node = articulated.getObjectByName(`rig-${part.id}`);
+          if (!node) return;
+          node.rotation.x = 0;
+          node.rotation.y = 0;
+          node.rotation.z = Number(node.userData.baseRotationZ ?? 0);
+        });
+        if (currentAction === "wave") {
+          const part = movable.find((candidate) => candidate.kind === "arm" && candidate.side === "right")
+            ?? movable.find((candidate) => candidate.kind === "arm")
+            ?? movable.find((candidate) => candidate.kind === "wing" || candidate.kind === "tentacle" || candidate.kind === "tail");
+          const node = part ? articulated.getObjectByName(`rig-${part.id}`) : null;
+          if (node) node.rotation.z = Number(node.userData.baseRotationZ ?? 0) + 0.76 + Math.sin(localElapsed * 7.2) * 0.48;
+        }
+        if (currentAction === "dance") {
+          movable.forEach((part, index) => {
+            const node = articulated.getObjectByName(`rig-${part.id}`);
+            if (!node) return;
+            const direction = part.side === "right" || index % 2 ? -1 : 1;
+            node.rotation.z = Number(node.userData.baseRotationZ ?? 0) + direction * Math.sin(localElapsed * 5.2 + index * 0.45) * 0.48;
+            node.rotation.x = Math.sin(localElapsed * 3.8 + index) * 0.12;
+          });
+        }
+        if (currentAction === "walk") {
+          movable.filter((part) => part.kind === "leg").forEach((part, index) => {
+            const node = articulated.getObjectByName(`rig-${part.id}`);
+            if (!node) return;
+            const direction = part.side === "right" || index % 2 ? -1 : 1;
+            node.rotation.z = Number(node.userData.baseRotationZ ?? 0) + direction * Math.sin(localElapsed * 7) * 0.38;
+            node.rotation.x = direction * Math.sin(localElapsed * 7) * 0.16;
+          });
+          movable.filter((part) => part.kind === "arm").forEach((part, index) => {
+            const node = articulated.getObjectByName(`rig-${part.id}`);
+            if (node) node.rotation.z = Number(node.userData.baseRotationZ ?? 0) + (index % 2 ? 1 : -1) * Math.sin(localElapsed * 7) * 0.24;
+          });
+        }
       });
       [neuralSemantic?.eyeLeft, neuralSemantic?.eyeRight, neuralSemantic?.eyeCenter, neuralSemantic?.pupilLeft, neuralSemantic?.pupilRight, neuralSemantic?.pupilCenter]
         .forEach((node) => { if (node) node.scale.y = Math.max(0.12, 1 - blink * 0.88); });
-      const mouth = articulated?.getObjectByName("rig-mouth");
-      if (mouth) mouth.scale.y = currentAction === "idle" ? 1 : 1 + Math.abs(Math.sin(elapsed * 5)) * 0.42;
       if (neuralSemantic?.mouth) neuralSemantic.mouth.scale.y = currentAction === "idle" ? 1 : 1 + Math.abs(Math.sin(elapsed * 5)) * 0.42;
 
       if (currentAction === "wave") {
-        const arm = articulated?.getObjectByName("rig-arm-right")
-          ?? articulated?.getObjectByName("rig-arm-left")
-          ?? rig?.parts.filter((part) => part.kind === "wing" || part.kind === "tentacle" || part.kind === "tail")
-            .map((part) => articulated?.getObjectByName(`rig-${part.id}`)).find(Boolean);
-        if (arm) arm.rotation.z = Number(arm.userData.baseRotationZ ?? 0) + 0.92 + Math.sin(elapsed * 7.2) * 0.42;
         const neuralArm = neuralRig?.armRight ?? neuralRig?.armLeft;
         neuralArm?.rotateZ(0.72 + Math.sin(elapsed * 7.2) * 0.42);
         neuralArm?.rotateX(Math.sin(elapsed * 4.1) * 0.22);
@@ -507,15 +572,6 @@ export const ARStage = forwardRef<ARStageHandle, ARStageProps>(function ARStage(
         root.position.y += Math.sin(elapsed * 5.6) * 0.025;
       }
       if (currentAction === "dance") {
-        const leftArm = articulated?.getObjectByName("rig-arm-left");
-        const rightArm = articulated?.getObjectByName("rig-arm-right");
-        if (leftArm) leftArm.rotation.z = Number(leftArm.userData.baseRotationZ ?? 0) + Math.sin(elapsed * 5.2) * 0.55;
-        if (rightArm) rightArm.rotation.z = Number(rightArm.userData.baseRotationZ ?? 0) - Math.sin(elapsed * 5.2) * 0.55;
-        rig?.parts.filter((part) => GRAPH_APPENDAGE_KINDS.has(part.kind) && part.kind !== "arm" && part.kind !== "trunk")
-          .forEach((part, index) => {
-            const node = articulated?.getObjectByName(`rig-${part.id}`);
-            if (node) node.rotation.z = Number(node.userData.baseRotationZ ?? 0) + (index % 2 ? -1 : 1) * Math.sin(elapsed * 5.2 + index * 0.45) * 0.34;
-          });
         neuralRig?.arms.forEach((arm, index) => {
           const direction = index % 2 ? -1 : 1;
           arm.rotateZ(direction * (0.52 + Math.sin(elapsed * 5.2 + index * 0.6) * 0.45));
@@ -530,10 +586,6 @@ export const ARStage = forwardRef<ARStageHandle, ARStageProps>(function ARStage(
         root.rotation.x = Math.sin(elapsed * 4.6) * 0.08;
       }
       if (currentAction === "walk") {
-        rig?.parts.filter((part) => part.kind === "leg").forEach((part, index) => {
-          const leg = articulated?.getObjectByName(`rig-${part.id}`);
-          if (leg) leg.rotation.x = (index % 2 ? -1 : 1) * Math.sin(elapsed * 7 + index * 0.25) * 0.5;
-        });
         neuralRig?.legs.forEach((leg, index) => leg.rotateX((index % 2 ? -1 : 1) * Math.sin(elapsed * 7 + index * 0.25) * 0.48));
         neuralRig?.arms.forEach((arm, index) => arm.rotateX((index % 2 ? 1 : -1) * Math.sin(elapsed * 7 + index * 0.25) * 0.24));
         root.position.x = placement.x + Math.sin(elapsed * 1.5) * 0.85;
@@ -594,7 +646,7 @@ export const ARStage = forwardRef<ARStageHandle, ARStageProps>(function ARStage(
       handlesRef.current = null;
       dispose();
     };
-  }, [accent, contour, depth, inflation, neuralAssetUrl, onCapability, onNeuralAssetInfo, rig, skeleton, textureUrl, visible]);
+  }, [accent, characters, contour, depth, inflation, neuralAssetUrl, onCapability, onNeuralAssetInfo, rig, skeleton, textureUrl, visible]);
 
   useImperativeHandle(ref, () => ({
     placeNormalized(x: number, y: number, scale = placementRef.current.scale) {
