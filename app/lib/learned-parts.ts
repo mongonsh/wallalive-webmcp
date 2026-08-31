@@ -13,6 +13,7 @@ import {
 import { acceptFaceComponent } from "./face-component-gate.ts";
 import { averageLogitConfidence, sameSemanticInstance, selectDominantInkColor } from "./model-math.ts";
 import { isolateDrawingFromImageUrl, isolateDrawingFromVideo } from "./target-cutout.ts";
+import { requireCharacterExtraction } from "./character-quality.ts";
 
 const BODY_MODEL_PATH = "/models/wallalive-parts-v3.onnx";
 const FACE_V3_MODEL_PATH = "/models/wallalive-face-v3.onnx";
@@ -1002,10 +1003,10 @@ export async function recognizeDrawingParts(extraction: DrawingExtraction): Prom
       const limit = instanceLimits[hint.kind];
       return limit === undefined || all.slice(0, index).filter((candidate) => candidate.kind === hint.kind).length < limit;
     });
-  return {
+  return requireCharacterExtraction({
     ...mergeLearnedPartHints(extraction, hints, Math.round(performance.now() - started), learnedPose, learnedTopology),
     depthRecognition: learnedDepth,
-  };
+  });
 }
 
 export async function recognizeDrawingFromVideo(video: HTMLVideoElement, target: CaptureTarget): Promise<DrawingExtraction> {

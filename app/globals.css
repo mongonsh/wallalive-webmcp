@@ -106,6 +106,12 @@ button:disabled { cursor: not-allowed; opacity: 0.45; }
 .plant::after { content: ""; position: absolute; left: 42%; top: 12%; width: 100%; height: 80%; background: #89a66a; border-radius: 15% 60% 15% 55%; transform: rotate(32deg); }
 .baseboard { position: absolute; left: 0; right: 0; bottom: 0; height: 14%; background: #98785c; border-top: 8px solid #6b5440; }
 .captured-room { position: absolute; inset: 0; z-index: 2; width: 100%; height: 100%; object-fit: cover; pointer-events: none; }
+.cutout-review { position: absolute; z-index: 5; left: 50%; top: 48%; width: min(46%, 330px); height: min(76%, 470px); padding: 16px 16px 12px; translate: -50% -50%; display: grid; grid-template-rows: minmax(0, 1fr) auto auto; place-items: center; gap: 10px; border: 1px solid rgba(255, 250, 240, .68); border-radius: 22px; background: radial-gradient(circle at 50% 35%, rgba(255, 250, 240, .98), rgba(247, 240, 223, .9)); box-shadow: 0 24px 70px rgba(24, 49, 46, .3), 7px 7px 0 var(--lime); touch-action: auto; }
+.cutout-review img { display: block; width: 100%; height: 100%; min-height: 0; object-fit: contain; filter: drop-shadow(0 12px 16px rgba(24, 49, 46, .18)); }
+.cutout-review span { color: var(--ink); text-align: center; font: 850 7px var(--mono); letter-spacing: .11em; }
+.cutout-review > div { width: 100%; display: grid; grid-template-columns: 1.2fr 1fr; gap: 6px; }
+.cutout-review button { min-height: 38px; padding: 7px; border: 1px solid var(--ink); background: var(--ink); color: var(--cream); cursor: pointer; font: 850 6px var(--mono); letter-spacing: .06em; }
+.cutout-review button:last-child { background: transparent; color: var(--ink); }
 .three-layer { position: absolute; inset: 0; z-index: 4; pointer-events: none; }
 .three-layer canvas { width: 100%; height: 100%; display: block; }
 .renderer-fallback { position: absolute; inset: 0; display: grid; place-content: center; gap: 6px; padding: 28px; background: rgba(24, 49, 46, 0.88); color: var(--cream); text-align: center; }
@@ -542,6 +548,8 @@ body::before {
   .primary-camera { flex: 1 1 58% !important; }
   .camera-hud strong { display: none; }
   .story-caption { width: calc(100% - 28px); }
+  .cutout-review { width: min(70%, 290px); height: min(72%, 390px); padding: 12px; }
+  .cutout-review > div { grid-template-columns: 1fr; }
   .anatomy-summary { gap: 8px; }
   .summary-spark { width: 30px; height: 30px; }
   .anatomy-summary > button { padding: 0 10px; font-size: 7px; }

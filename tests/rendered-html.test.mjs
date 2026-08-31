@@ -63,11 +63,12 @@ test("registers eight strict WebMCP tools without camera authority", async () =>
   assert.match(page, /neuralModelUsed: Boolean\(neuralAssetRef\.current\)/);
   assert.match(page, /full-volume neural mesh \+ skeleton skinning/);
   assert.match(page, /requiresHumanApproval: true/);
-  assert.match(page, /GENERATE FULL 3D/);
+  assert.match(page, /GENERATE REAL 3D/);
   assert.match(page, /externalUploadApproved/);
   assert.match(page, /FULL NEURAL RIG \+ DRAWING PARTS/);
   assert.match(page, /COLOR MATCHED/);
-  assert.match(page, /viewableDegrees: 360/);
+  assert.match(page, /viewableDegrees: neuralAssetRef\.current \? 360 : 0/);
+  assert.match(page, /No fake 3D model was created/);
   assert.match(page, /topologyRecognition/);
   assert.match(page, /variable graph decoded from learned centerline, endpoints, and junction fields/);
 });

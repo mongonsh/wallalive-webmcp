@@ -174,6 +174,14 @@ export type DrawingExtraction = {
   poseRecognition?: LearnedPose;
   topologyRecognition?: LearnedTopology;
   depthRecognition?: LearnedDepthField;
+  characterValidation?: {
+    accepted: boolean;
+    score: number;
+    rectangularity: number;
+    axisAlignedEdgeFraction: number;
+    evidence: string[];
+    reason: string;
+  };
 };
 
 type RGB = { r: number; g: number; b: number };

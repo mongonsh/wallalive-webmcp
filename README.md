@@ -6,7 +6,7 @@
 
 **Public source:** https://github.com/mongonsh/wallalive-webmcp
 
-WallAlive turns one human-approved drawing into a colored, 360° **3D character** in the camera view. Google MediaPipe MagicTouch first performs point-guided object isolation, with local drawing-specific fallbacks for line art. The private first result is an identity-preserving, shallow closed relief: the exact artwork appears only on the front, the hidden side is bounded, and uncertain eye/limb labels cannot create or deform visible geometry. [AniGen](https://github.com/VAST-AI-Research/AniGen) remains the visibly approved upgrade for jointly generated unseen surfaces, skeleton, and skinning weights. WebMCP can inspect, name, place, animate, recolor, and direct either result without receiving camera authority.
+WallAlive turns one human-approved drawing into a colored, 360° **rigged 3D character** in the camera view. Drawing-specific point extraction runs before the compact drawing mask; general MediaPipe MagicTouch is only a gated last resort. Six local ONNX graphs then look for facial, pose, articulated-part, or variable-topology evidence. A rectangular paper/screen patch or unverified mask is rejected, and every accepted transparent cutout stops for a visible human review. [AniGen](https://github.com/VAST-AI-Research/AniGen) is the live path for jointly generated unseen surfaces, skeleton, and skinning weights. WallAlive no longer presents its shallow Marching Cubes research relief as a finished character. WebMCP can request generation and, after a real skinned GLB succeeds, name, place, animate, recolor, and direct it without receiving camera authority.
 
 ## Why this needs WebMCP
 
@@ -19,11 +19,11 @@ WallAlive turns one human-approved drawing into a colored, 360° **3D character*
 
 ## The real 3D loop
 
-1. **Scan or upload and isolate locally:** the child can capture with the camera or choose an existing drawing photo. MediaPipe MagicTouch uses the child’s tap as a positive prompt and the frame corners as negative prompts. A point-local line extractor and the compact WallAlive cutout model remain fallbacks. Tiny/faint results are rejected instead of being displayed as the wrong character.
-2. **Build private 3D immediately:** WallAlive maps the exact transparent artwork to the front triangles of one shallow, closed Marching Cubes relief. Learned depth is clamped inside the silhouette distance envelope with a 0.16 maximum half-depth. The back and sides use neutral sampled body color. Semantic labels remain review-only and never add raised face meshes or local deformation bones.
-3. **Play or upgrade:** the private result is rotatable and actionable without an upload. A separate approval can send only the isolated drawing—not the live camera or room frame—to AniGen.
-4. **Generate jointly when approved:** AniGen’s `ss_flow_solo` + `slat_flow_auto` path predicts full geometry, a skeleton of arbitrary complexity, and smooth skinning weights together. Three.js loads the returned GLB into a tab-local Blob URL.
-5. **Enter AR:** Android/WebXR devices can place either result with surface hit testing; iPhone and other browsers use the camera-overlay experience.
+1. **Scan or upload and isolate locally:** the child can capture with the camera or choose an existing drawing photo. Point-local closed-line extraction and the compact drawing-specific cutout model run first. MagicTouch uses the child’s tap only as a final proposal if both drawing paths fail.
+2. **Prove that the mask is a character:** local models require evidence from a face, articulated parts, a plausible pose, or a variable topology graph. Rectangularity, axis-aligned edges, oversized coverage, and weak semantic evidence can reject a high-confidence generic mask.
+3. **Review the transparent cutout:** the child sees the exact isolated pixels with **Yes · Continue** and **No · Try Again** controls. No 3D renderer or animation starts in this state.
+4. **Generate jointly after approval:** AniGen’s `ss_flow_solo` + `slat_flow_auto` path predicts full geometry, a skeleton of arbitrary complexity, and smooth skinning weights together. Three.js loads the returned GLB into a tab-local Blob URL. A capacity or inference failure leaves the safe cutout review in place instead of substituting a slab.
+5. **Enter AR:** Android/WebXR devices can place the rigged GLB with surface hit testing; iPhone and other browsers use the camera-overlay experience.
 
 **Play Judge Demo** loads the supplied drawing and its precomputed full neural reconstruction immediately, without spending public GPU quota. An identity-preserving orthographic sketch-to-render pass supplied a 3D-aware condition, TripoSR reconstructed a watertight surface at 256³ extraction resolution, and WallAlive smoothed it, restored approved front colors without copying marks onto the rear, and transferred the learned variable drawing graph into semantic skin weights. The exact fixture is a 68,326-vertex, 136,648-triangle `SkinnedMesh` with seven active bones, 70.8% depth-to-height, normalized weights, and zero boundary or non-manifold edges. The older official AniGen fixture remains as a separate reference test.
 
@@ -32,7 +32,7 @@ WallAlive turns one human-approved drawing into a colored, 360° **3D character*
 | Tool | Mode | Purpose |
 | --- | --- | --- |
 | `inspect_wall_scene` | Read | Returns approved drawing state, actual reconstruction provider/type/counts, AR capability, and privacy boundary. |
-| `reconstruct_rigged_3d_character` | Write | Creates the identity-safe local closed relief immediately, or requests `neural-full` and surfaces human approval. It cannot upload or approve by itself. |
+| `reconstruct_rigged_3d_character` | Write | Surfaces human approval for real rigged-GLB generation. It cannot approve, upload, or substitute a fake local slab by itself. |
 | `set_character_personality` | Write | Changes performance intent without modifying the original drawing. |
 | `place_character` | Write | Places and scales the character in the visible scene. |
 | `animate_character` | Write | Drives one safe action on the generated skeleton. |
@@ -45,7 +45,7 @@ All tools use strict schemas, `additionalProperties: false`, cancellation signal
 ## Privacy boundary
 
 - Camera start and capture are human-only UI gestures.
-- Point-guided segmentation, optional semantic suggestions, and closed-relief reconstruction happen locally.
+- Drawing-aware segmentation, semantic suggestions, character validation, and cutout review happen locally.
 - The 5.72 MiB six-model primary ONNX stack is served from WallAlive’s own origin and runs with WebAssembly; it does not send the image to an inference API. Body parts, the 96²/128² face ensemble, variable topology, optional 17-joint pose, and front/back depth run concurrently. A learned closed-form component gate rejects false cheek/ear islands without another model download. Older fallback checkpoints load only when the primary stack misses a basic eye, mouth, or limb anchor.
 - The agent never receives live frames or raw image pixels.
 - Neural generation requires a separate visible human approval.
@@ -57,7 +57,7 @@ All tools use strict schemas, `additionalProperties: false`, cancellation signal
 | Capability | Support |
 | --- | --- |
 | Camera capture + 3D overlay | Modern mobile/desktop browsers over HTTPS with WebGL |
-| Private identity-safe closed 3D | In-browser MediaPipe/ONNX/WASM + Three.js, no image upload |
+| Private verified cutout review | In-browser MediaPipe/ONNX/WASM, no image upload and no 3D claim |
 | Generative unseen geometry | Optional AniGen public Space; dedicated AniGen GPU recommended for production |
 | Immersive room placement | WebXR `immersive-ar` + `hit-test`, usually compatible Android Chrome devices |
 | iPhone/iPad and non-WebXR browsers | Camera overlay; immersive hit testing is not claimed |
@@ -71,7 +71,9 @@ The public Hugging Face ZeroGPU service is capacity-limited and can reject or qu
 human camera gesture + tap
         │
         ▼
-MediaPipe point-guided drawing isolation
+drawing-aware closed-line extraction
+        ├── compact point-prompted drawing mask
+        └── MediaPipe MagicTouch gated last resort
         │
         ▼
 WallAlive ChildlikeSHAPES local ONNX/WASM stack
@@ -86,9 +88,8 @@ WallAlive ChildlikeSHAPES local ONNX/WASM stack
                 └── learned cheek/ear component confidence gate
         │
         ├── exact pixel snap: position + outline + color
-        ├── joint paths: variable graph branches or applicable humanoid chains
-        └── bounded signed-distance relief → Marching Cubes → one continuous local SkinnedMesh
-                └────────────────────────────────────► private identity-safe 360° character
+        ├── character gate: face / pose / articulated parts / variable graph
+        └── human cutout review: continue or try again
         │
         ├── visible isolated-image approval (human only)
         ▼
@@ -105,12 +106,12 @@ rigged GLB → local Blob URL → Three.js GLTFLoader / SkinnedMesh
 - Three.js `GLTFLoader`, `SkinnedMesh`, procedural bone actions, and WebXR hit testing
 - WallAlive local stack: a 288,109-parameter whole-character network, 109,832-parameter 96² and 435,624-parameter 128² face networks, a 402,052-parameter spatial variable-topology network, a 161,133-parameter optional 17-joint pose network, and an 80,486-parameter compact U-Net front/back depth prior, loaded through `onnxruntime-web`
 - Instance-aware decoding preserves multiple same-side arms/legs and separate facial features; a 22-feature standardized logistic gate judges individual cheek/ear masks from model agreement, probability, size, shape, fill, and position before every accepted region snaps back to high-resolution pixel geometry
-- Original eyes, cheeks, mouth, color, and line quality stay in the front texture. The local renderer deliberately adds no raised semantic face geometry.
-- Semantic and topology outputs remain inspectable and manually editable, but only the full neural asset uses generated articulation. This prevents false anatomy from warping a child’s drawing.
+- Original eyes, cheeks, mouth, color, and line quality remain in the reviewed transparent cutout. The old local relief code is retained only for offline regression research and is not displayed as a finished character.
+- Semantic and topology outputs remain inspectable and manually editable, but only a full neural asset becomes playable. This prevents false anatomy or a wrong mask from turning into frightening geometry.
 - Lazy-loaded `@gradio/client` connection to AniGen
 - `document.modelContext.registerTool()` imperative WebMCP integration
 - One canonical action layer shared by UI and tool executors
-- Deterministic contour preview remains available when the user declines upload
+- Deterministic transparent cutout review remains available when the user declines upload
 
 ## Local model training
 

@@ -497,24 +497,7 @@ function isolateWithTargetedLocalExtraction(frame: SourceFrame, started: number)
   throw lastError instanceof Error ? lastError : new Error("The tapped line art could not be isolated locally.");
 }
 
-async function isolate(frame: SourceFrame): Promise<DrawingExtraction> {
-  const started = performance.now();
-  if (frame.scope === "selected-image") {
-    const context = frame.canvas.getContext("2d", { willReadFrequently: true });
-    if (context && hasMeaningfulSelectedAlpha(context.getImageData(0, 0, frame.canvas.width, frame.canvas.height).data, frame.scope)) {
-      return extractDrawingFromCanvas(frame.canvas, frame.target, "selected-image");
-    }
-  }
-  try {
-    return await isolateWithMagicTouch(frame);
-  } catch (error) {
-    console.warn("WallAlive MagicTouch segmentation fell back to point-local line extraction", error);
-  }
-  try {
-    return isolateWithTargetedLocalExtraction(frame, started);
-  } catch (error) {
-    console.warn("WallAlive point-local line extraction fell back to the compact drawing model", error);
-  }
+async function isolateWithCompactDrawingModel(frame: SourceFrame, started: number): Promise<DrawingExtraction> {
   const candidates = CROP_SCALES.map((scale) => prepareCandidate(frame.canvas, frame.target, scale));
   const area = MODEL_SIZE * MODEL_SIZE;
   const values = new Float32Array(candidates.length * area * 4);
@@ -556,6 +539,35 @@ async function isolate(frame: SourceFrame): Promise<DrawingExtraction> {
       cropScale: decoded.candidate.scale,
     },
   };
+}
+
+async function isolate(frame: SourceFrame): Promise<DrawingExtraction> {
+  const started = performance.now();
+  if (frame.scope === "selected-image") {
+    const context = frame.canvas.getContext("2d", { willReadFrequently: true });
+    if (context && hasMeaningfulSelectedAlpha(context.getImageData(0, 0, frame.canvas.width, frame.canvas.height).data, frame.scope)) {
+      return extractDrawingFromCanvas(frame.canvas, frame.target, "selected-image");
+    }
+  }
+  // Drawing-aware extraction goes first. General object segmentation is a
+  // last resort because it can confidently select paper, a monitor, or an
+  // arbitrary coherent camera patch instead of the character drawn on it.
+  try {
+    return isolateWithTargetedLocalExtraction(frame, started);
+  } catch (error) {
+    console.warn("WallAlive point-local line extraction fell back to the compact drawing model", error);
+  }
+  try {
+    return await isolateWithCompactDrawingModel(frame, started);
+  } catch (error) {
+    console.warn("WallAlive compact drawing segmentation fell back to MagicTouch", error);
+  }
+  try {
+    return await isolateWithMagicTouch(frame);
+  } catch (error) {
+    console.warn("WallAlive general segmentation was safely rejected", error);
+    throw new Error("I can’t verify one complete character yet. Move closer, tap inside its body, and keep other drawings outside the guide.");
+  }
 }
 
 export async function isolateDrawingFromVideo(video: HTMLVideoElement, target: CaptureTarget): Promise<DrawingExtraction> {

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile, stat } from "node:fs/promises";
 import test from "node:test";
 
-test("uses general point-guided segmentation first and keeps the compact paper model as fallback", async () => {
+test("uses drawing-specific segmentation before general point-guided fallback", async () => {
   const report = JSON.parse(await readFile(new URL("../public/models/wallalive-target-cutout-v2.json", import.meta.url), "utf8"));
   const model = await stat(new URL("../public/models/wallalive-target-cutout-v2.onnx", import.meta.url));
   const runtime = await readFile(new URL("../app/lib/target-cutout.ts", import.meta.url), "utf8");
@@ -24,6 +24,7 @@ test("uses general point-guided segmentation first and keeps the compact paper m
   assert.doesNotMatch(runtime, /vision\.BrushMode/);
   assert.match(runtime, /mediapipe-magic-touch-v2/);
   assert.match(runtime, /targeted-local-extraction-v3/);
+  assert.ok(runtime.indexOf("isolateWithTargetedLocalExtraction(frame, started)") < runtime.lastIndexOf("isolateWithMagicTouch(frame)"));
   assert.match(runtime, /for \(const scale of \[0\.42, 0\.56\]/);
   assert.match(runtime, /coveragePercent <= 1/);
   assert.match(runtime, /maximumValue <= 1 \? 1 : 128/);
