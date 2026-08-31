@@ -5,6 +5,7 @@ import * as THREE from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { MarchingCubes } from "three/addons/objects/MarchingCubes.js";
 import type { CharacterRig, ContourPoint, LearnedDepthField, SkeletonPoint } from "../lib/drawing";
+import { classifySurfaceMaterial, hasRecognizableArtworkSurface } from "../lib/mesh-materials";
 import { disposeObject, prepareNeuralCharacter, type NeuralRigMap, type NeuralSemanticMap, type RiggedAssetInfo } from "../lib/rigged-model";
 
 export type CharacterAction = "idle" | "wave" | "dance" | "hop" | "walk" | "hide" | "spin";
@@ -223,11 +224,22 @@ export function buildCharacter(contour: ContourPoint[], skeleton: SkeletonPoint[
   }
   compactGeometry.setAttribute("uv", new THREE.BufferAttribute(uvs, 2));
   compactGeometry.clearGroups();
+  let texturedFrontTriangles = 0;
+  let neutralBackTriangles = 0;
   for (let first = 0; first + 2 < compactPositions.count; first += 3) {
+    const normalX = (compactNormals.getX(first) + compactNormals.getX(first + 1) + compactNormals.getX(first + 2)) / 3;
+    const normalY = (compactNormals.getY(first) + compactNormals.getY(first + 1) + compactNormals.getY(first + 2)) / 3;
     const normalZ = (compactNormals.getZ(first) + compactNormals.getZ(first + 1) + compactNormals.getZ(first + 2)) / 3;
     const positionZ = (compactPositions.getZ(first) + compactPositions.getZ(first + 1) + compactPositions.getZ(first + 2)) / 3;
-    const materialIndex = normalZ > 0.42 && positionZ >= 0 ? 1 : normalZ < -0.42 && positionZ <= 0 ? 2 : 0;
+    const materialIndex = classifySurfaceMaterial(normalX, normalY, normalZ, positionZ);
+    if (materialIndex === 1) texturedFrontTriangles += 1;
+    if (materialIndex === 2) neutralBackTriangles += 1;
     compactGeometry.addGroup(first, 3, materialIndex);
+  }
+  const totalTriangles = compactPositions.count / 3;
+  const artworkSurfaceCoverage = texturedFrontTriangles / Math.max(1, totalTriangles);
+  if (!hasRecognizableArtworkSurface(texturedFrontTriangles, totalTriangles, Boolean(artworkTexture))) {
+    throw new Error("The private 3D preview could not preserve the drawing texture, so WallAlive refused to show it.");
   }
   compactGeometry.setDrawRange(0, activeVertexCount);
   compactGeometry.computeBoundingBox();
@@ -304,6 +316,9 @@ export function buildCharacter(contour: ContourPoint[], skeleton: SkeletonPoint[
     semanticRig: rig.version,
     skinning: "one safe root bone over one continuous surface; unreviewed anatomy cannot deform geometry",
     maximumHalfDepth: bodyHalfDepth * 1.12,
+    texturedFrontTriangles,
+    neutralBackTriangles,
+    artworkSurfaceCoverage,
     projectedSemanticFeatures: false,
     learnedDepth: depth ? {
       model: depth.model,
@@ -321,6 +336,10 @@ export function buildCharacter(contour: ContourPoint[], skeleton: SkeletonPoint[
     bodyTopology: "closed",
     backPrior: "bounded hidden-surface relief; the original artwork appears only on the front",
     maximumHalfDepth: bodyHalfDepth * 1.12,
+    texturedFrontTriangles,
+    neutralBackTriangles,
+    artworkSurfaceCoverage,
+    artworkPreservedOnFront: true,
     projectedSemanticFeatures: false,
     unreviewedAnatomyDeformsGeometry: false,
     depthModel: depth?.model ?? null,
