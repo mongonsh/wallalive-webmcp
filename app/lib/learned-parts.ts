@@ -1031,7 +1031,12 @@ async function recognizeTargetEnsemble(
       const sourceTarget = drawing.sourceTarget ?? target;
       const duplicate = recognized.some((existing) => {
         const existingTarget = existing.sourceTarget ?? { x: 0.5, y: 0.5 };
-        return Math.hypot(sourceTarget.x - existingTarget.x, sourceTarget.y - existingTarget.y) < 0.065;
+        // A wide connected drawing can generate a center prompt plus one
+        // prompt per horizontal slice. Compare the resulting transparent
+        // artwork as well as prompt positions so one real figure is never
+        // counted twice merely because it was reached from two seeds.
+        return existing.textureUrl === drawing.textureUrl
+          || Math.hypot(sourceTarget.x - existingTarget.x, sourceTarget.y - existingTarget.y) < 0.065;
       });
       if (!duplicate) recognized.push({ ...drawing, sourceTarget });
     } catch (error) {

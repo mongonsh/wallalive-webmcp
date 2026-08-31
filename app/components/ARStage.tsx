@@ -42,6 +42,7 @@ type SceneHandles = {
   camera: THREE.PerspectiveCamera;
   character: THREE.Group;
   reticle: THREE.Mesh;
+  setWorld: (world: ARWorld) => void;
   dispose: () => void;
 };
 
@@ -351,6 +352,7 @@ export const ARStage = forwardRef<ARStageHandle, ARStageProps>(function ARStage(
   const [rendererError, setRendererError] = useState(false);
   const actionRef = useRef(action);
   const ensembleActionsRef = useRef<CharacterAction[] | null>(ensembleActions);
+  const worldStateRef = useRef<ARWorld>(world);
   const placementRef = useRef({ x: 0, y: -0.15, scale: 1 });
   const rotationRef = useRef({ yaw: 0, pitch: 0 });
   const xrHitSourceRef = useRef<XRHitTestSource | null>(null);
@@ -366,15 +368,26 @@ export const ARStage = forwardRef<ARStageHandle, ARStageProps>(function ARStage(
 
     const width = Math.max(1, mount.clientWidth);
     const height = Math.max(1, mount.clientHeight);
-    let renderer: THREE.WebGLRenderer;
-    try {
-      renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: "high-performance" });
-      setRendererError(false);
-    } catch {
+    let renderer: THREE.WebGLRenderer | null = null;
+    const rendererOptions: THREE.WebGLRendererParameters[] = [
+      { antialias: true, alpha: true, powerPreference: "high-performance" },
+      { antialias: false, alpha: true, powerPreference: "default" },
+      { antialias: false, alpha: false, powerPreference: "low-power" },
+    ];
+    for (const options of rendererOptions) {
+      try {
+        renderer = new THREE.WebGLRenderer(options);
+        break;
+      } catch (error) {
+        console.warn("WallAlive WebGL renderer profile was unavailable", options, error);
+      }
+    }
+    if (!renderer) {
       setRendererError(true);
       onCapability(false);
       return;
     }
+    setRendererError(false);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.setSize(width, height);
     renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -387,7 +400,7 @@ export const ARStage = forwardRef<ARStageHandle, ARStageProps>(function ARStage(
     mount.appendChild(renderer.domElement);
 
     const scene = new THREE.Scene();
-    const environment = buildWorldEnvironment(world);
+    let environment = buildWorldEnvironment(worldStateRef.current);
     scene.add(environment.group);
     scene.background = environment.background;
     scene.fog = environment.fog;
@@ -534,19 +547,24 @@ export const ARStage = forwardRef<ARStageHandle, ARStageProps>(function ARStage(
           node.rotation.z = Number(node.userData.baseRotationZ ?? 0);
         });
         if (instanceAction === "wave") {
-          const part = movable.find((candidate) => candidate.kind === "arm" && candidate.side === "right")
+          const quadruped = localRig?.topologyKind === "quadruped";
+          const part = (quadruped ? movable.find((candidate) => candidate.kind === "tail") : null)
+            ?? movable.find((candidate) => candidate.kind === "arm" && candidate.side === "right")
             ?? movable.find((candidate) => candidate.kind === "arm")
             ?? movable.find((candidate) => candidate.kind === "wing" || candidate.kind === "tentacle" || candidate.kind === "tail");
           const node = part ? articulated.getObjectByName(`rig-${part.id}`) : null;
-          if (node) node.rotation.z = Number(node.userData.baseRotationZ ?? 0) + 0.76 + Math.sin(localElapsed * 7.2) * 0.48;
+          if (node) {
+            const amplitude = quadruped || part?.kind !== "arm" ? 0.2 : 0.3;
+            node.rotation.z = Number(node.userData.baseRotationZ ?? 0) + amplitude + Math.sin(localElapsed * 7.2) * amplitude;
+          }
         }
         if (instanceAction === "dance") {
           movable.forEach((part, index) => {
             const node = articulated.getObjectByName(`rig-${part.id}`);
             if (!node) return;
             const direction = part.side === "right" || index % 2 ? -1 : 1;
-            node.rotation.z = Number(node.userData.baseRotationZ ?? 0) + direction * Math.sin(localElapsed * 5.2 + index * 0.45) * 0.48;
-            node.rotation.x = Math.sin(localElapsed * 3.8 + index) * 0.12;
+            node.rotation.z = Number(node.userData.baseRotationZ ?? 0) + direction * Math.sin(localElapsed * 5.2 + index * 0.45) * 0.24;
+            node.rotation.x = Math.sin(localElapsed * 3.8 + index) * 0.08;
           });
         }
         if (instanceAction === "walk") {
@@ -554,8 +572,8 @@ export const ARStage = forwardRef<ARStageHandle, ARStageProps>(function ARStage(
             const node = articulated.getObjectByName(`rig-${part.id}`);
             if (!node) return;
             const direction = part.side === "right" || index % 2 ? -1 : 1;
-            node.rotation.z = Number(node.userData.baseRotationZ ?? 0) + direction * Math.sin(localElapsed * 7) * 0.38;
-            node.rotation.x = direction * Math.sin(localElapsed * 7) * 0.16;
+            node.rotation.z = Number(node.userData.baseRotationZ ?? 0) + direction * Math.sin(localElapsed * 7) * 0.26;
+            node.rotation.x = direction * Math.sin(localElapsed * 7) * 0.12;
           });
           movable.filter((part) => part.kind === "arm").forEach((part, index) => {
             const node = articulated.getObjectByName(`rig-${part.id}`);
@@ -643,16 +661,28 @@ export const ARStage = forwardRef<ARStageHandle, ARStageProps>(function ARStage(
     const observer = new ResizeObserver(resize);
     observer.observe(mount);
 
+    const setStageWorld = (nextWorld: ARWorld) => {
+      scene.remove(environment.group);
+      disposeObject(environment.group);
+      environment = buildWorldEnvironment(nextWorld);
+      scene.add(environment.group);
+      if (!renderer.xr.isPresenting) {
+        scene.background = environment.background;
+        scene.fog = environment.fog;
+      }
+    };
+
     const dispose = () => {
       disposed = true;
       observer.disconnect();
       renderer.setAnimationLoop(null);
       disposeObject(scene);
       renderer.dispose();
+      renderer.forceContextLoss();
       if (renderer.domElement.parentNode === mount) mount.removeChild(renderer.domElement);
     };
 
-    handlesRef.current = { renderer, scene, camera, character: characterRoot, reticle, dispose };
+    handlesRef.current = { renderer, scene, camera, character: characterRoot, reticle, setWorld: setStageWorld, dispose };
     if (navigator.xr) navigator.xr.isSessionSupported("immersive-ar").then(onCapability).catch(() => onCapability(false));
     else onCapability(false);
 
@@ -660,7 +690,12 @@ export const ARStage = forwardRef<ARStageHandle, ARStageProps>(function ARStage(
       handlesRef.current = null;
       dispose();
     };
-  }, [accent, characters, contour, depth, inflation, neuralAssetUrl, onCapability, onNeuralAssetInfo, rig, skeleton, textureUrl, visible, world]);
+  }, [accent, characters, contour, depth, inflation, neuralAssetUrl, onCapability, onNeuralAssetInfo, rig, skeleton, textureUrl, visible]);
+
+  useEffect(() => {
+    worldStateRef.current = world;
+    handlesRef.current?.setWorld(world);
+  }, [world]);
 
   useImperativeHandle(ref, () => ({
     placeNormalized(x: number, y: number, scale = placementRef.current.scale) {

@@ -47,6 +47,83 @@ let interactiveSegmenterPromise: Promise<{
 const clamp = (value: number, minimum: number, maximum: number) => Math.min(maximum, Math.max(minimum, value));
 const sigmoid = (value: number) => 1 / (1 + Math.exp(-value));
 
+/**
+ * Removes only canvas background pixels that are connected to an outer edge.
+ * White details enclosed by ink (eyes, teeth, clothing, highlights) remain
+ * opaque, so authored drawings arrive at recognition with exact alpha instead
+ * of an opaque paper rectangle.
+ */
+export function makeTransparentArtworkPixels(
+  source: Uint8ClampedArray,
+  width: number,
+  height: number,
+  tolerance = 24,
+) {
+  const area = width * height;
+  if (width < 1 || height < 1 || source.length < area * 4) {
+    throw new Error("Artwork pixels do not match the canvas dimensions.");
+  }
+  const border: number[] = [];
+  for (let x = 0; x < width; x += 1) {
+    border.push(x, (height - 1) * width + x);
+  }
+  for (let y = 1; y < height - 1; y += 1) {
+    border.push(y * width, y * width + width - 1);
+  }
+  const buckets = new Map<string, { count: number; red: number; green: number; blue: number }>();
+  for (const pixel of border) {
+    const offset = pixel * 4;
+    if (source[offset + 3] < 16) continue;
+    const key = `${source[offset] >> 4}:${source[offset + 1] >> 4}:${source[offset + 2] >> 4}`;
+    const bucket = buckets.get(key) ?? { count: 0, red: 0, green: 0, blue: 0 };
+    bucket.count += 1;
+    bucket.red += source[offset];
+    bucket.green += source[offset + 1];
+    bucket.blue += source[offset + 2];
+    buckets.set(key, bucket);
+  }
+  const background = [...buckets.values()].sort((left, right) => right.count - left.count)[0]
+    ?? { count: 1, red: 255, green: 255, blue: 255 };
+  const backgroundColor = {
+    red: background.red / background.count,
+    green: background.green / background.count,
+    blue: background.blue / background.count,
+  };
+  const isBackground = (pixel: number) => {
+    const offset = pixel * 4;
+    if (source[offset + 3] < 16) return true;
+    const red = source[offset] - backgroundColor.red;
+    const green = source[offset + 1] - backgroundColor.green;
+    const blue = source[offset + 2] - backgroundColor.blue;
+    return Math.max(Math.abs(red), Math.abs(green), Math.abs(blue)) <= tolerance
+      && red * red + green * green + blue * blue <= tolerance * tolerance * 2.25;
+  };
+  const exterior = new Uint8Array(area);
+  const queue = new Int32Array(area);
+  let head = 0;
+  let tail = 0;
+  const enqueue = (pixel: number) => {
+    if (exterior[pixel] || !isBackground(pixel)) return;
+    exterior[pixel] = 1;
+    queue[tail++] = pixel;
+  };
+  border.forEach(enqueue);
+  while (head < tail) {
+    const pixel = queue[head++];
+    const x = pixel % width;
+    const y = Math.floor(pixel / width);
+    if (x > 0) enqueue(pixel - 1);
+    if (x + 1 < width) enqueue(pixel + 1);
+    if (y > 0) enqueue(pixel - width);
+    if (y + 1 < height) enqueue(pixel + width);
+  }
+  const result = new Uint8ClampedArray(source);
+  for (let pixel = 0; pixel < area; pixel += 1) {
+    if (exterior[pixel]) result[pixel * 4 + 3] = 0;
+  }
+  return result;
+}
+
 function loadSession() {
   if (!sessionPromise) {
     runtimePromise ??= import("onnxruntime-web/wasm");
@@ -485,7 +562,10 @@ function isolateWithTargetedLocalExtraction(frame: SourceFrame, started: number)
         cutoutRecognition: {
           model: "targeted-local-extraction-v3",
           latencyMs: Math.round(performance.now() - started),
-          confidence: 0.62,
+          // This heuristic has no learned probability. Keep it below the 3D
+          // readiness gate so it can offer a reviewable cutout, never silently
+          // authorize a malformed mesh.
+          confidence: 0.5,
           areaPercent: extraction.analysis.coveragePercent,
           cropScale: scale,
         },
@@ -512,17 +592,10 @@ async function isolateWithCompactDrawingModel(frame: SourceFrame, started: numbe
   if (!decoded || decoded.confidence < 0.56 || decoded.score < 0.5) {
     throw new Error("I can’t separate one complete character yet. Move closer, tap inside its body, and keep other drawings outside the frame.");
   }
-  // The learned mask decides which scale contains the prompted character. On
-  // line drawings, rerun the exact closed-outline extractor inside that tight
-  // crop first: disconnected labels and neighboring doodles then cannot ride
-  // a soft neural bridge into the silhouette. Filled/painted characters fall
-  // back to the learned alpha mask.
-  let extraction: DrawingExtraction;
-  try {
-    extraction = extractDrawingFromCanvas(sourceCrop(frame, decoded, false), decoded.candidate.prompt, "camera");
-  } catch {
-    extraction = extractDrawingFromCanvas(sourceCrop(frame, decoded, true), decoded.candidate.prompt, "selected-image");
-  }
+  // The prompt mask is authoritative. Running classical extraction on the
+  // unmasked crop can select the paper, monitor, or nearby drawing even after
+  // the network found the intended figure correctly.
+  const extraction = extractDrawingFromCanvas(sourceCrop(frame, decoded, true), decoded.candidate.prompt, "selected-image");
   if (extraction.analysis.coveragePercent <= 1) {
     throw new Error("That drawing is too faint or too far away for a safe reconstruction. Move closer so the character fills more of the frame.");
   }
@@ -549,14 +622,9 @@ async function isolate(frame: SourceFrame): Promise<DrawingExtraction> {
       return extractDrawingFromCanvas(frame.canvas, frame.target, "selected-image");
     }
   }
-  // Drawing-aware extraction goes first. General object segmentation is a
-  // last resort because it can confidently select paper, a monitor, or an
-  // arbitrary coherent camera patch instead of the character drawn on it.
-  try {
-    return isolateWithTargetedLocalExtraction(frame, started);
-  } catch (error) {
-    console.warn("WallAlive point-local line extraction fell back to the compact drawing model", error);
-  }
+  // Prompted models decide the foreground before the low-confidence local
+  // rescue. The rescue is useful for faint line art, but must never overrule a
+  // learned mask or claim that a rectangular paper patch is reconstruction-ready.
   try {
     return await isolateWithCompactDrawingModel(frame, started);
   } catch (error) {
@@ -565,7 +633,12 @@ async function isolate(frame: SourceFrame): Promise<DrawingExtraction> {
   try {
     return await isolateWithMagicTouch(frame);
   } catch (error) {
-    console.warn("WallAlive general segmentation was safely rejected", error);
+    console.warn("WallAlive prompt segmentation fell back to review-only local extraction", error);
+  }
+  try {
+    return isolateWithTargetedLocalExtraction(frame, started);
+  } catch (error) {
+    console.warn("WallAlive drawing segmentation was safely rejected", error);
     throw new Error("I can’t verify one complete character yet. Move closer, tap inside its body, and keep other drawings outside the guide.");
   }
 }

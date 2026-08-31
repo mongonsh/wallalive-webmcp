@@ -418,27 +418,32 @@ export default function Home() {
     if (!drawing) throw new Error("No drawing is approved. The child must capture or choose a drawing first.");
     const ensemble = captureEnsembleRef.current.length ? captureEnsembleRef.current : [drawing];
     const neural = neuralAssetRef.current;
-    if (!neural) throw new Error("A playable character requires a generated rigged GLB. WallAlive will not substitute a rounded 2D shell.");
     const next: CharacterState = {
       ...characterRef.current,
       created: true,
       name: stringValue(input.name, ensemble.length > 1 ? "Wall Crew" : "Pip", 40),
       personality: stringValue(input.personality, "curious and kind", 120),
       accent: stringValue(input.accent, drawing.analysis.secondaryColor, 20),
-      inflation: Math.min(1.35, Math.max(0.7, numberValue(input.inflation, 1))),
+      inflation: Math.min(1.35, Math.max(0.7, numberValue(input.inflation, neural ? 1 : 0.82))),
       action: "idle",
       storyTitle: "",
     };
-    commitCharacter(next, `${next.name} is now a generated rigged 3D character.`);
+    commitCharacter(next, neural
+      ? `${next.name} is now a generated rigged 3D character.`
+      : `${next.name} is now an articulated closed-mesh 3D storybook puppet.`);
     setStep("alive");
     const graphNodes = ensemble.reduce((sum, figure) => sum + (figure.topologyRecognition?.nodes.length ?? figure.rig.joints.length), 0);
     const graphEdges = ensemble.reduce((sum, figure) => {
       const nodes = figure.topologyRecognition?.nodes.length ?? figure.rig.joints.length;
       return sum + (figure.topologyRecognition?.edges.length ?? Math.max(0, nodes - 1));
     }, 0);
-    setAgentLine(`${next.name} has generated surfaces, colors, bones, and skin weights. The agent can now direct the rig.`);
+    setAgentLine(neural
+      ? `${next.name} has generated surfaces, colors, bones, and skin weights. The agent can now direct the rig.`
+      : `${ensemble.length} artwork-preserving 3D puppet${ensemble.length === 1 ? " is" : "s are"} ready. Each figure keeps its own contour, texture, branches, and motion rig.`);
     setStoryCaption(`${next.name} lifts away from the wall for the first time.`);
-    record(actor, "Loaded a rigged neural 3D character", `${next.name} · ${neural.provider} · glTF SkinnedMesh · generated mesh, skeleton, and skin weights · ${graphNodes} semantic nodes · ${graphEdges} branches.`, toolName);
+    record(actor, neural ? "Loaded a rigged neural 3D character" : "Built an articulated local 3D cast", neural
+      ? `${next.name} · ${neural.provider} · glTF SkinnedMesh · generated mesh, skeleton, and skin weights · ${graphNodes} semantic nodes · ${graphEdges} branches.`
+      : `${ensemble.length} independent closed meshes · exact textured fronts · neutral filled backs · ${graphNodes} rig nodes · ${graphEdges} branches · no upload.`, toolName);
     return next;
   }, [commitCharacter, record]);
 
@@ -455,21 +460,39 @@ export default function Home() {
       record("WALLALIVE", "Blocked an unsafe 3D reconstruction", `Figure ${blockedIndex + 1} · readiness ${report.score} · ${report.blockers.join(" · ")}`);
       return;
     }
-    if (ensemble.length > 1) {
-      setNeuralConsentVisible(false);
-      setPartEditorOpen(true);
-      setNotice(`${ensemble.length} figures are separated, but live neural 3D must generate them one at a time. Choose one complete figure instead of mixing them into one model.`);
-      record("WALLALIVE", "Kept multiple figures separate", `${ensemble.length} reviewed masks · no merged shell · generate one figure per neural job.`);
-      return;
-    }
     setNeuralConsentVisible(true);
-    setNeuralProgress({ phase: "consent-required", progress: 0, message: "Human approval is required before the isolated drawing leaves this tab." });
-    setNotice("Review the isolated-image approval. The live camera is never uploaded.");
+    setNeuralProgress({ phase: "consent-required", progress: 0, message: ensemble.length > 1
+      ? "Choose instant local 3D for the complete cast. Full AI sculpt supports one figure at a time."
+      : "Choose instant private 3D or approve a full external AI sculpt." });
+    setNotice(ensemble.length > 1
+      ? `All ${ensemble.length} figures passed the cutout gate. Wake them together as separate local 3D puppets.`
+      : "Choose a private instant puppet or approve full AI reconstruction. The live camera is never uploaded.");
   }, [record]);
+
+  const startLocalReconstruction = useCallback(() => {
+    const drawing = captureRef.current;
+    if (!drawing) return;
+    const ensemble = captureEnsembleRef.current.length ? captureEnsembleRef.current : [drawing];
+    setNeuralConsentVisible(false);
+    setNeuralProgress({ phase: "idle", progress: 0, message: "" });
+    commitNeuralAsset(null);
+    createCharacter({
+      name: ensemble.length > 1 ? "Wall Crew" : "Pip",
+      personality: "curious and kind",
+      accent: drawing.analysis.secondaryColor,
+      inflation: 0.82,
+    }, "CHILD");
+  }, [commitNeuralAsset, createCharacter]);
 
   const startNeuralReconstruction = useCallback(async () => {
     const drawing = captureRef.current;
     if (!drawing) return;
+    const ensemble = captureEnsembleRef.current.length ? captureEnsembleRef.current : [drawing];
+    if (ensemble.length > 1) {
+      setNeuralConsentVisible(false);
+      setNotice("Full AI sculpt works on one figure at a time. Use instant local 3D to keep the complete cast separate and movable.");
+      return;
+    }
     neuralAbortRef.current?.abort();
     const controller = new AbortController();
     neuralAbortRef.current = controller;
@@ -542,16 +565,21 @@ export default function Home() {
     drawingApproved: Boolean(captureRef.current),
     drawingAnalysis: captureRef.current?.analysis ?? null,
     reconstruction: captureRef.current ? {
-      localIsolation: "Drawing-aware point extraction, compact drawing mask, then MagicTouch only as a gated last resort",
-      localPreview: "verified transparent character cutout awaiting human review; it is not represented as 3D",
-      method: neuralAssetRef.current ? `${neuralAssetRef.current.provider} full-volume neural mesh + skeleton skinning` : "local drawing segmentation + reconstruction-readiness gate + human review",
+      localIsolation: "Authored alpha or prompt-mask-first segmentation; low-confidence heuristic fallback remains below the 3D readiness gate",
+      localPreview: characterRef.current.created ? "artwork-preserving closed 3D puppet cast" : "verified transparent character cutout awaiting human review",
+      method: neuralAssetRef.current
+        ? `${neuralAssetRef.current.provider} full-volume neural mesh + skeleton skinning`
+        : characterRef.current.created
+          ? "local contour-preserving closed mesh + textured front + neutral filled back + per-figure branch rig"
+          : "local drawing segmentation + reconstruction-readiness gate + human review",
       provider: neuralAssetRef.current?.provider ?? "WallAlive local recognition",
       model: neuralAssetRef.current?.model ?? captureRef.current.cutoutRecognition?.model ?? "authored-alpha-cutout",
-      assetType: neuralAssetRef.current ? "glTF SkinnedMesh" : "reviewed transparent 2D cutout",
-      topology: neuralAssetRef.current ? "generated full 3D surface including unseen views" : "semantic evidence only; no local mesh is shown",
+      assetType: neuralAssetRef.current ? "glTF SkinnedMesh" : characterRef.current.created ? "Three.js SkinnedMesh cast" : "reviewed transparent 2D cutout",
+      topology: neuralAssetRef.current ? "generated full 3D surface including unseen views" : characterRef.current.created ? "closed contour volume with independently rigged figures" : "semantic evidence awaiting 3D choice",
       topologyConfidence: captureRef.current.rig.topologyConfidence ?? null,
-      backInference: neuralAssetRef.current ? "full neural generative prior" : "none until neural 3D succeeds",
-      viewableDegrees: neuralAssetRef.current ? 360 : 0,
+      backInference: neuralAssetRef.current ? "full neural generative prior" : characterRef.current.created ? "bounded neutral relief; no invented rear artwork" : "not built yet",
+      neuralEvidence: { viewableDegrees: neuralAssetRef.current ? 360 : 0 },
+      viewableDegrees: characterRef.current.created ? 360 : 0,
       contourPoints: captureRef.current.contour.length,
       skeletonPoints: captureRef.current.skeleton.length,
       rigVersion: captureRef.current.rig.version,
@@ -578,8 +606,8 @@ export default function Home() {
       generatedAsset: riggedAssetInfoRef.current,
       characterValidation: captureRef.current.characterValidation ?? null,
       reconstructionReadiness: assessReconstructionReadiness(captureRef.current),
-      generationPhase: neuralAssetRef.current ? "neural-ready" : "verified-cutout-review-ready",
-      neuralUpgrade: neuralAssetRef.current ? "active" : "human-approval-required-for-real-3d",
+      generationPhase: neuralAssetRef.current ? "neural-ready" : characterRef.current.created ? "local-articulated-ready" : "verified-cutout-review-ready",
+      neuralUpgrade: neuralAssetRef.current ? "active" : "optional-single-figure-human-approved-upgrade",
       externalUploadApproved: externalUploadApprovedRef.current,
     } : null,
     character: { ...characterRef.current, textureUrl: undefined },
@@ -803,7 +831,7 @@ export default function Home() {
             personality: { type: "string", minLength: 1, maxLength: 120 },
             accent: { type: "string", pattern: "^#[0-9a-fA-F]{6}$" },
             inflation: { type: "number", minimum: 0.7, maximum: 1.35 },
-            reconstructionMode: { type: "string", enum: ["neural-full"] },
+            reconstructionMode: { type: "string", enum: ["local-articulated", "neural-full"] },
           },
           required: ["name", "personality", "accent"],
         },
@@ -813,9 +841,22 @@ export default function Home() {
           try {
             guard(signal);
             if (!captureRef.current) throw new Error("No drawing is approved. The child must capture or choose a drawing first.");
+            if (input.reconstructionMode === "local-articulated") {
+              commitNeuralAsset(null);
+              return ok({
+                character: createCharacter(input, "BROWSER AGENT", "request_rigged_3d_cast"),
+                reconstructionMode: "local-articulated",
+                localRig: {
+                  figures: captureEnsembleRef.current.length || 1,
+                  rendering: "closed Three.js SkinnedMesh with exact artwork front and neutral filled back",
+                  private: true,
+                },
+                generatedAsset: null,
+              });
+            }
             if (!neuralAssetRef.current) {
               requestNeuralConsent();
-              return ok({ requiresHumanApproval: true, phase: "consent-required", message: "Use the visible approval card to request full neural 3D. WallAlive will never substitute a rounded 2D shell if recognition or the provider fails." });
+              return ok({ requiresHumanApproval: true, phase: "choice-required", message: "Use the visible card to choose instant local articulated 3D or approve a single-figure full AI sculpt." });
             }
             return ok({
               character: createCharacter(input, "BROWSER AGENT", "request_rigged_3d_cast"),
@@ -944,7 +985,7 @@ export default function Home() {
       setNotice(`${tools.length} WebMCP tools are ready. Camera capture remains human-only.`);
     }).catch(() => setWebMcpReady(false));
     return () => controller.abort();
-  }, [createCharacter, currentCharacterCapabilities, directEnsembleBeat, inspectCreativeScene, parseShowMoves, requestNeuralConsent, stageMagicShow]);
+  }, [commitNeuralAsset, createCharacter, currentCharacterCapabilities, directEnsembleBeat, inspectCreativeScene, parseShowMoves, requestNeuralConsent, stageMagicShow]);
 
   const runMagicDemo = useCallback(async () => {
     if (demoRunning) return;
@@ -1273,10 +1314,10 @@ export default function Home() {
             {capture && cameraState !== "active" && !character.created ? <div className="cutout-review" onPointerDown={(event) => event.stopPropagation()}><img src={capture.textureUrl} alt="Isolated character cutout to review" /><span>{captureEnsemble.length > 1 ? `${captureEnsemble.length} SEPARATE FIGURES FOUND` : "IS THE WHOLE CHARACTER VISIBLE?"}</span><div><button onClick={requestNeuralConsent}>YES · CONTINUE</button><button onClick={() => capture.sourceScope === "camera" ? startCamera() : uploadRef.current?.click()}>NO · TRY AGAIN</button></div></div> : null}
             {step === "camera" ? <><div className="capture-guide"><span /><b>TAP CHARACTER · THEN CAPTURE</b></div><div className="capture-target" style={{ left: `${captureTarget.x * 100}%`, top: `${captureTarget.y * 100}%` }}><i /></div></> : null}
             {character.created ? <Suspense fallback={<div className="three-layer" aria-hidden="true" />}>
-              <ARStage ref={stageRef} characters={null} contour={capture?.contour ?? null} skeleton={capture?.skeleton ?? null} textureUrl={capture?.textureUrl ?? null} rig={capture?.rig ?? null} depth={capture?.depthRecognition ?? null} action={character.action} ensembleActions={ensembleActions} world={world} accent={character.accent} inflation={character.inflation} neuralAssetUrl={neuralAsset?.meshUrl ?? null} visible onCapability={handleARCapability} onPlaced={handleARPlaced} onNeuralAssetInfo={handleRiggedAssetInfo} />
+              <ARStage ref={stageRef} characters={character.created && !neuralAsset ? captureEnsemble : null} contour={capture?.contour ?? null} skeleton={capture?.skeleton ?? null} textureUrl={capture?.textureUrl ?? null} rig={capture?.rig ?? null} depth={capture?.depthRecognition ?? null} action={character.action} ensembleActions={ensembleActions} world={world} accent={character.accent} inflation={character.inflation} neuralAssetUrl={neuralAsset?.meshUrl ?? null} visible onCapability={handleARCapability} onPlaced={handleARPlaced} onNeuralAssetInfo={handleRiggedAssetInfo} />
             </Suspense> : null}
             {neuralConsentVisible ? <div className="neural-consent" role="dialog" aria-modal="true" aria-labelledby="neural-consent-title" onPointerDown={(event) => event.stopPropagation()}>
-              <span>REAL 3D · HUMAN APPROVAL</span><h2 id="neural-consent-title">Generate unseen geometry?</h2><p>Only this reviewed transparent cutout goes to AniGen for a full mesh, back, skeleton, and skin weights. If generation fails, WallAlive stops instead of showing a fake rounded shell.</p><div><button onClick={startNeuralReconstruction}>GENERATE REAL 3D</button><button onClick={() => { setNeuralConsentVisible(false); setPartEditorOpen(true); }}>REVIEW CUTOUT + RIG</button></div>
+              <span>CHOOSE YOUR 3D</span><h2 id="neural-consent-title">Wake {captureEnsemble.length > 1 ? "the whole cast" : "this drawing"}</h2><p>{captureEnsemble.length > 1 ? "Separate closed 3D puppets, separate rigs, one shared world." : "Instant private puppet now—or send only the cutout for a full AI sculpt."}</p><div><button onClick={startLocalReconstruction}>INSTANT 3D · PRIVATE</button>{captureEnsemble.length === 1 ? <button onClick={startNeuralReconstruction}>GENERATE REAL 3D · AI</button> : null}<button onClick={() => { setNeuralConsentVisible(false); setPartEditorOpen(true); }}>CHECK PARTS</button></div>
             </div> : null}
             {neuralBusy ? <div className="neural-progress" role="status" onPointerDown={(event) => event.stopPropagation()}><span>ANIGEN · RIGGED 3D</span><b>{neuralProgress.message}</b><div><i style={{ width: `${Math.round(neuralProgress.progress * 100)}%` }} /></div><small>{Math.round(neuralProgress.progress * 100)}% · PUBLIC GPU</small></div> : null}
             {magicShowPlan?.status === "awaiting-human-approval" ? <div className="magic-show-approval" role="dialog" aria-modal="false" aria-labelledby="magic-show-title" onPointerDown={(event) => event.stopPropagation()}>
@@ -1287,7 +1328,7 @@ export default function Home() {
               <div className="show-approval-actions"><button onClick={approveAndPlayMagicShow}>APPROVE &amp; PLAY <span>▶</span></button><button onClick={dismissMagicShow}>NOT YET</button></div>
             </div> : null}
             {showPlaying ? <div className="magic-show-live" role="status"><i /> AGENT PLAN · HUMAN APPROVED · LIVE</div> : null}
-            <div className="camera-hud"><span><i /> {cameraState === "active" ? "LIVE CAMERA · LOCAL" : neuralAsset && character.created ? `FULL NEURAL RIG · ${riggedAssetInfo?.bones ?? "…"} BONES` : capture ? "CUTOUT REVIEW · LOCAL" : "SAFE DEMO ROOM"}</span><strong>{immersiveAR ? "WEBXR READY" : `${world.toUpperCase()} · REAL 3D SCENE`}</strong></div>
+            <div className="camera-hud"><span><i /> {cameraState === "active" ? "LIVE CAMERA · LOCAL" : neuralAsset && character.created ? `FULL NEURAL RIG · ${riggedAssetInfo?.bones ?? "…"} BONES` : character.created ? `${captureEnsemble.length} LOCAL 3D PUPPET${captureEnsemble.length === 1 ? "" : "S"}` : capture ? "CUTOUT REVIEW · LOCAL" : "SAFE DEMO ROOM"}</span><strong>{immersiveAR ? "WEBXR READY" : `${world.toUpperCase()} · REAL 3D SCENE`}</strong></div>
             {character.created && storyCaption ? <div className="story-caption"><span>{character.storyTitle || "LIVE MOMENT"}</span><p>{storyCaption}</p></div> : null}
             {cameraState === "denied" || cameraState === "unavailable" ? <div className="camera-message"><b>CAMERA OPTIONAL</b><p>The demo doodle still proves the complete WebMCP and 3D workflow.</p></div> : null}
           </div>
@@ -1298,7 +1339,7 @@ export default function Home() {
             <div><span>CHARACTER ACTIONS</span><small>{character.created ? `${character.name.toUpperCase()} · ${character.personality.toUpperCase()}` : "WAKE A DRAWING TO PLAY"}</small></div>
             {actions.map((item) => <button key={item.action} disabled={!character.created || showPlaying} className={character.action === item.action ? "active" : ""} onClick={() => animateCharacter(item.action, "CHILD")}><i>{item.glyph}</i>{item.label}</button>)}
           </div>
-          <p className="placement-tip">{neuralAsset && character.created ? "Drag for 360° · Generated back · Move through a real perspective 3D world" : capture ? "Review the transparent cutout before generating real rigged 3D" : "Photograph a clear figure—uncertain recognition is blocked before 3D"}</p>
+          <p className="placement-tip">{character.created ? neuralAsset ? "Drag for 360° · Generated back · Move through the perspective world" : "Drag for 360° · Filled backs · Every figure moves on its own rig" : capture ? "Check the cutout, then choose instant private 3D or full AI sculpt" : "Photograph a clear figure—uncertain recognition is blocked before 3D"}</p>
         </section>
 
         <aside className={`agent-panel ${inspectorOpen ? "is-open" : ""}`} aria-hidden={!inspectorOpen}>

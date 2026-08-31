@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { CaptureTarget } from "../lib/drawing";
+import { makeTransparentArtworkPixels } from "../lib/target-cutout";
 
 type Tool = "pencil" | "brush" | "marker" | "spray" | "eraser" | "fill" | "line" | "rectangle" | "circle" | "triangle" | "star";
 
@@ -287,7 +288,8 @@ export function DrawingWall({ open, onClose, onMake3D }: DrawingWallProps) {
     const canvas = canvasRef.current;
     const context = canvas?.getContext("2d", { willReadFrequently: true });
     if (!canvas || !context) return;
-    const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
+    const image = context.getImageData(0, 0, canvas.width, canvas.height);
+    const pixels = makeTransparentArtworkPixels(image.data, canvas.width, canvas.height);
     let left = canvas.width;
     let top = canvas.height;
     let right = -1;
@@ -295,7 +297,7 @@ export function DrawingWall({ open, onClose, onMake3D }: DrawingWallProps) {
     for (let y = 0; y < canvas.height; y += 3) {
       for (let x = 0; x < canvas.width; x += 3) {
         const index = (y * canvas.width + x) * 4;
-        if (pixels[index + 3] > 20 && (pixels[index] < 244 || pixels[index + 1] < 244 || pixels[index + 2] < 244)) {
+        if (pixels[index + 3] > 20) {
           left = Math.min(left, x);
           top = Math.min(top, y);
           right = Math.max(right, x);
@@ -307,8 +309,19 @@ export function DrawingWall({ open, onClose, onMake3D }: DrawingWallProps) {
       setStatus("Draw something first—then I can find its shape.");
       return;
     }
+    const exportCanvas = document.createElement("canvas");
+    exportCanvas.width = canvas.width;
+    exportCanvas.height = canvas.height;
+    const exportContext = exportCanvas.getContext("2d");
+    if (!exportContext) {
+      setStatus("This browser could not prepare the transparent artwork.");
+      return;
+    }
+    const transparentImage = exportContext.createImageData(canvas.width, canvas.height);
+    transparentImage.data.set(pixels);
+    exportContext.putImageData(transparentImage, 0, 0);
     onMake3D({
-      dataUrl: canvas.toDataURL("image/png"),
+      dataUrl: exportCanvas.toDataURL("image/png"),
       target: { x: ((left + right) / 2) / canvas.width, y: ((top + bottom) / 2) / canvas.height },
     });
   }, [onMake3D]);
