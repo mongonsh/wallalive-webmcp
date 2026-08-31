@@ -57,7 +57,11 @@ export type LearnedTopology = {
   edges: TopologyEdge[];
 };
 
-export type SemanticPartKind = "body" | "eye" | "pupil" | "cheek" | "mouth" | "ear" | "arm" | "hand" | "leg" | "foot" | "marking";
+export type SemanticPartKind =
+  | "body" | "head" | "eye" | "pupil" | "cheek" | "mouth" | "ear" | "beak"
+  | "arm" | "hand" | "leg" | "foot"
+  | "wing" | "fin" | "tail" | "tentacle" | "trunk" | "branch" | "canopy" | "segment" | "linkage"
+  | "marking";
 export type SemanticSide = "left" | "right" | "center";
 export type SemanticPartSource = "image-region" | "silhouette-branch" | "structural-inference" | "learned-model" | "learned-pose" | "learned-topology";
 
@@ -108,6 +112,8 @@ export type CharacterRig = {
   parts: SemanticPart[];
   joints: Array<{ id: string; parentId: string; childId: string; x: number; y: number }>;
   detectedKinds: SemanticPartKind[];
+  topologyKind?: TopologyClass;
+  topologyConfidence?: number;
 };
 
 export type DrawingCandidateFeatures = {
@@ -596,11 +602,23 @@ export function recoverTargetSilhouette(mask: Uint8Array, width: number, height:
   const centerX = target.x * width;
   const centerY = target.y * height;
   const closedSilhouette = recoverSilhouette(targetInk, width, height);
-  const inkIndices = [...targetInk.keys()].filter((index) => targetInk[index]);
-  if (inkIndices.length) {
-    const inkXs = inkIndices.map((index) => index % width);
-    const inkYs = inkIndices.map((index) => Math.floor(index / width));
-    const inkBoundsArea = (Math.max(...inkXs) - Math.min(...inkXs) + 1) * (Math.max(...inkYs) - Math.min(...inkYs) + 1);
+  let inkCount = 0;
+  let inkMinX = width;
+  let inkMinY = height;
+  let inkMaxX = 0;
+  let inkMaxY = 0;
+  for (let index = 0; index < targetInk.length; index += 1) {
+    if (!targetInk[index]) continue;
+    const x = index % width;
+    const y = Math.floor(index / width);
+    inkCount += 1;
+    inkMinX = Math.min(inkMinX, x);
+    inkMinY = Math.min(inkMinY, y);
+    inkMaxX = Math.max(inkMaxX, x);
+    inkMaxY = Math.max(inkMaxY, y);
+  }
+  if (inkCount) {
+    const inkBoundsArea = (inkMaxX - inkMinX + 1) * (inkMaxY - inkMinY + 1);
     const closedPixels = closedSilhouette.reduce((sum, value) => sum + value, 0);
     const targetIndex = clamp(Math.round(centerY), 0, height - 1) * width + clamp(Math.round(centerX), 0, width - 1);
     if (closedSilhouette[targetIndex] && closedPixels >= inkBoundsArea * 0.2) return closedSilhouette;
@@ -1487,13 +1505,6 @@ export function mergeLearnedPartHints(
     }));
     return { parts, joints, detectedKinds: [...new Set(parts.map((part) => part.kind))] };
   };
-  if (!accepted.length) return {
-    ...extraction,
-    rig: { ...extraction.rig, ...withoutHeuristicFace() },
-    learnedRecognition: { model: "wallalive-v3-v4-gate-v5-pose-v6-topology-v10", latencyMs, detectedKinds: [] },
-    poseRecognition: pose,
-    topologyRecognition: topology,
-  };
   // Ear masks are especially vulnerable to paper labels above a character.
   // A predicted ear wider than one fifth of the character is almost always
   // surrounding clutter, not the small anatomical part used in training.
@@ -1508,11 +1519,31 @@ export function mergeLearnedPartHints(
   });
   const learned = plausible.map(toRigHint);
   const predictedKinds = new Set(learned.map((hint) => hint.kind));
+  const preserveUprightForelimbs = topology?.kind === "quadruped"
+    && extraction.analysis.aspectRatio <= 1.08
+    && learned.some((hint) => hint.kind === "arm")
+    && learned.some((hint) => hint.kind === "hand");
   // Once the learned face stack has run, it is authoritative for named face
   // anatomy. Keeping a classical heuristic cheek when ML says “no cheek” was
   // a hidden bypass that recreated the exact false-feature failure this gate
   // is designed to prevent.
-  const parts = withoutHeuristicFace().parts;
+  let parts = withoutHeuristicFace().parts;
+  // A radial creature, fish, tree, chain, or machine must not inherit the
+  // biped-only arm/leg guesses from the classical silhouette fallback. Its
+  // learned graph is authoritative for appendage semantics.
+  if (topology?.applicable && topology.kind !== "biped") {
+    const invalidByTopology: Partial<Record<TopologyClass, Set<SemanticPartKind>>> = {
+      quadruped: preserveUprightForelimbs ? new Set() : new Set(["arm", "hand"]),
+      winged: new Set(["ear", "arm", "hand"]),
+      aquatic: new Set(["ear", "arm", "hand", "leg", "foot"]),
+      radial: new Set(["ear", "arm", "hand", "leg", "foot"]),
+      branched: new Set(["eye", "pupil", "cheek", "mouth", "ear", "beak", "arm", "hand", "leg", "foot"]),
+      machine: new Set(["ear", "arm", "hand", "leg", "foot"]),
+      chain: new Set(["ear", "arm", "hand", "leg", "foot"]),
+    };
+    const invalid = invalidByTopology[topology.kind];
+    if (invalid) parts = parts.filter((part) => !invalid.has(part.kind));
+  }
   const regions = extraction.semanticRegions ?? [];
   const usedRegions = new Set<string>();
   const usedIds = new Set(parts.map((part) => part.id));
@@ -1818,6 +1849,33 @@ export function mergeLearnedPartHints(
     };
     const endpointNodes = topology.nodes.filter((node) => node.role === "endpoint")
       .sort((a, b) => b.confidence - a.confidence);
+    const farthestHorizontalNode = endpointNodes.reduce<TopologyNode | null>((best, node) => {
+      if (!best) return node;
+      return Math.abs(toRigPoint(node).x - body.center.x) > Math.abs(toRigPoint(best).x - body.center.x) ? node : best;
+    }, null);
+    type GraphPartKind = "ear" | "arm" | "leg" | "wing" | "fin" | "tail" | "tentacle" | "branch" | "segment" | "linkage";
+    const semanticKindForEndpoint = (node: TopologyNode, relativeX: number, relativeY: number): GraphPartKind | null => {
+      if (topology.kind === "radial") return "tentacle";
+      if (topology.kind === "branched") return "branch";
+      if (topology.kind === "machine") return "linkage";
+      if (topology.kind === "chain") return "segment";
+      if (topology.kind === "aquatic") return node.id === farthestHorizontalNode?.id ? "tail" : "fin";
+      if (topology.kind === "winged") {
+        if (relativeY < -0.28) return "leg";
+        if (relativeX > 0.17) return "wing";
+        return "tail";
+      }
+      if (topology.kind === "quadruped") {
+        if (relativeY < -0.16) return "leg";
+        if (relativeY > 0.3 && relativeX > 0.06) return "ear";
+        if (node.id === farthestHorizontalNode?.id && relativeX > 0.25) return "tail";
+        return relativeX > 0.18 ? "leg" : null;
+      }
+      if (relativeY > 0.3 && relativeX > 0.08) return "ear";
+      if (relativeY < -0.29) return "leg";
+      if (relativeX > 0.26) return "arm";
+      return null;
+    };
     for (const node of endpointNodes) {
       const endpoint = toRigPoint(node);
       const dx = endpoint.x - body.center.x;
@@ -1825,10 +1883,7 @@ export function mergeLearnedPartHints(
       const relativeX = Math.abs(dx) / Math.max(0.001, body.size.x);
       const relativeY = dy / Math.max(0.001, body.size.y);
       const side = sideFor(endpoint.x);
-      let kind: "ear" | "arm" | "leg" | null = null;
-      if (relativeY > 0.3 && relativeX > 0.08) kind = "ear";
-      else if (relativeY < -0.29) kind = "leg";
-      else if (relativeX > 0.26) kind = "arm";
+      const kind = semanticKindForEndpoint(node, relativeX, relativeY);
       if (!kind) continue;
       const existing = parts.filter((part) => part.kind === kind && part.side === side)
         .sort((a, b) => Math.hypot(a.center.x - endpoint.x, a.center.y - endpoint.y)
@@ -1855,7 +1910,10 @@ export function mergeLearnedPartHints(
       const rootward = pathToRoot(node.id).map(toRigPoint).reverse();
       const path = rootward.length >= 2 ? rootward : [body.center, endpoint];
       const anchor = path[0];
-      const thickness = clamp(body.size.x * 0.06, 0.028, body.size.x * 0.13);
+      const thicknessFactor = kind === "wing" ? 0.105
+        : kind === "tail" || kind === "tentacle" || kind === "branch" ? 0.052
+          : kind === "fin" ? 0.07 : 0.06;
+      const thickness = clamp(body.size.x * thicknessFactor, 0.022, body.size.x * (kind === "wing" ? 0.2 : 0.13));
       const length = path.slice(1).reduce((total, point, index) => total + Math.hypot(point.x - path[index].x, point.y - path[index].y), 0);
       const partId = nextId(kind, side);
       parts.push({
@@ -1872,7 +1930,8 @@ export function mergeLearnedPartHints(
         source: "learned-topology",
         path,
       });
-      const endpointKind = kind === "arm" ? "hand" : "foot";
+      const endpointKind = kind === "arm" ? "hand" : kind === "leg" ? "foot" : null;
+      if (!endpointKind) continue;
       const endpointSize = thickness * 1.3;
       parts.push({
         id: nextId(endpointKind, side),
@@ -1889,6 +1948,99 @@ export function mergeLearnedPartHints(
     }
   }
 
+  // Learned anatomy masks and the legacy ensemble run before the topology
+  // family is finalized. Enforce the family contract once more after every
+  // merge so, for example, a bird cannot leave the pipeline with hands and a
+  // fish cannot leave it with feet.
+  if (topology?.applicable && topology.kind !== "biped") {
+    const invalidFinal: Partial<Record<TopologyClass, Set<SemanticPartKind>>> = {
+      quadruped: preserveUprightForelimbs ? new Set() : new Set(["arm", "hand"]),
+      winged: new Set(["ear", "arm", "hand"]),
+      aquatic: new Set(["ear", "arm", "hand", "leg", "foot"]),
+      radial: new Set(["ear", "arm", "hand", "leg", "foot"]),
+      branched: new Set(["eye", "pupil", "cheek", "mouth", "ear", "beak", "arm", "hand", "leg", "foot"]),
+      machine: new Set(["ear", "arm", "hand", "leg", "foot"]),
+      chain: new Set(["ear", "arm", "hand", "leg", "foot"]),
+    };
+    const invalid = invalidFinal[topology.kind];
+    if (invalid) parts = parts.filter((part) => !invalid.has(part.kind));
+  }
+
+  if (topology?.applicable && ["biped", "quadruped", "winged", "aquatic", "radial"].includes(topology.kind)) {
+    const faceCore = parts.filter((part) => part.kind === "eye" || part.kind === "cheek" || part.kind === "mouth");
+    const eyes = faceCore.filter((part) => part.kind === "eye");
+    if (eyes.length && !parts.some((part) => part.kind === "head")) {
+      const minX = Math.min(...faceCore.map((part) => part.center.x - part.size.x * 0.5));
+      const maxX = Math.max(...faceCore.map((part) => part.center.x + part.size.x * 0.5));
+      const minY = Math.min(...faceCore.map((part) => part.center.y - part.size.y * 0.5));
+      const maxY = Math.max(...faceCore.map((part) => part.center.y + part.size.y * 0.5));
+      const width = clamp(maxX - minX + body.size.x * 0.18, body.size.x * 0.26, body.size.x * 0.56);
+      const height = clamp(maxY - minY + body.size.y * 0.2, body.size.y * 0.25, body.size.y * 0.56);
+      parts.push({
+        id: nextId("head", "center"),
+        kind: "head",
+        side: "center",
+        parentId: "body",
+        center: { x: (minX + maxX) * 0.5, y: (minY + maxY) * 0.5, z: 0 },
+        size: { x: width, y: height, z: Math.min(width, height) * 0.72 },
+        rotation: 0,
+        color: extraction.rig.bodyColor,
+        confidence: clamp(topology.kindConfidence * 0.72 + Math.min(0.2, eyes.length * 0.08), 0, 0.94),
+        source: "structural-inference",
+      });
+    }
+    if (topology.kind === "winged" && eyes.length && !parts.some((part) => part.kind === "beak")) {
+      const eye = eyes.sort((a, b) => b.confidence - a.confidence)[0];
+      const direction = eye.center.x >= body.center.x ? 1 : -1;
+      const length = body.size.x * 0.18;
+      parts.push({
+        id: nextId("beak", direction < 0 ? "left" : "right"),
+        kind: "beak",
+        side: direction < 0 ? "left" : "right",
+        parentId: parts.find((part) => part.kind === "head")?.id ?? "body",
+        center: { x: eye.center.x + direction * length * 0.72, y: eye.center.y - body.size.y * 0.08, z: 0 },
+        anchor: { x: eye.center.x + direction * length * 0.18, y: eye.center.y - body.size.y * 0.07, z: 0 },
+        size: { x: length, y: body.size.y * 0.085, z: body.size.y * 0.075 },
+        rotation: direction > 0 ? -Math.PI / 2 : Math.PI / 2,
+        color: extraction.rig.lineColor,
+        confidence: topology.kindConfidence * 0.68,
+        source: "structural-inference",
+      });
+    }
+  }
+
+  if (topology?.applicable && topology.kind === "branched") {
+    const decodedRoot = topology.nodes.find((node) => node.role === "root");
+    const rootPoint = decodedRoot ? toRigPoint(decodedRoot) : body.center;
+    const bottom = { x: rootPoint.x, y: body.center.y - body.size.y * 0.48, z: 0 };
+    parts.push({
+      id: nextId("trunk", "center"),
+      kind: "trunk",
+      side: "center",
+      parentId: "body",
+      center: rootPoint,
+      anchor: bottom,
+      size: { x: body.size.x * 0.13, y: Math.max(body.size.y * 0.32, rootPoint.y - bottom.y), z: body.size.z * 0.42 },
+      rotation: 0,
+      color: extraction.rig.bodyColor,
+      confidence: topology.kindConfidence * 0.86,
+      source: "learned-topology",
+      path: [bottom, rootPoint],
+    });
+    parts.push({
+      id: nextId("canopy", "center"),
+      kind: "canopy",
+      side: "center",
+      parentId: "trunk-center",
+      center: { x: rootPoint.x, y: rootPoint.y + body.size.y * 0.2, z: 0 },
+      size: { x: body.size.x * 0.82, y: body.size.y * 0.54, z: body.size.z * 0.8 },
+      rotation: 0,
+      color: extraction.rig.bodyColor,
+      confidence: topology.kindConfidence * 0.78,
+      source: "structural-inference",
+    });
+  }
+
   const joints = parts.filter((part) => part.parentId).map((part) => ({
     id: `joint-${part.id}`,
     parentId: part.parentId!,
@@ -1899,7 +2051,14 @@ export function mergeLearnedPartHints(
   const detectedKinds = [...new Set(parts.map((part) => part.kind))];
   return {
     ...extraction,
-    rig: { ...extraction.rig, parts, joints, detectedKinds },
+    rig: {
+      ...extraction.rig,
+      parts,
+      joints,
+      detectedKinds,
+      topologyKind: topology?.applicable ? topology.kind : extraction.rig.topologyKind,
+      topologyConfidence: topology?.applicable ? topology.kindConfidence : extraction.rig.topologyConfidence,
+    },
     learnedRecognition: { model: "wallalive-v3-v4-gate-v5-pose-v6-topology-v10", latencyMs, detectedKinds: [...predictedKinds] },
     poseRecognition: pose,
     topologyRecognition: topology,
@@ -1920,9 +2079,20 @@ export function extractionSearchWindow(width: number, height: number, scope: Ext
     scanInsetX: Math.round(width * (selectedImage ? 0.025 : 0.08)),
     scanInsetTop: Math.round(height * (selectedImage ? 0.025 : 0.09)),
     scanInsetBottom: Math.round(height * (selectedImage ? 0.035 : 0.16)),
-    focusRadiusX: width * (selectedImage ? 0.46 : 0.27),
-    focusRadiusY: height * (selectedImage ? 0.47 : 0.33),
+    // Uploaded artwork is already an intentional user selection. A radius
+    // below sqrt(0.5) clips valid diagonal extremities (tree branches, wings,
+    // ears, and feet) even when they are well inside the image bounds.
+    focusRadiusX: width * (selectedImage ? 0.72 : 0.27),
+    focusRadiusY: height * (selectedImage ? 0.72 : 0.33),
   };
+}
+
+export function hasMeaningfulSelectedAlpha(data: Uint8ClampedArray, scope: ExtractionScope) {
+  if (scope !== "selected-image" || data.length < 4) return false;
+  let visible = 0;
+  for (let index = 3; index < data.length; index += 4) if (data[index] > 24) visible += 1;
+  const fraction = visible / (data.length / 4);
+  return fraction >= 0.005 && fraction <= 0.985;
 }
 
 function extractDrawingFromSource(sourceImage: CanvasImageSource, sourceWidth: number, sourceHeight: number, target: CaptureTarget, scope: ExtractionScope = "camera"): DrawingExtraction {
@@ -1935,6 +2105,7 @@ function extractDrawingFromSource(sourceImage: CanvasImageSource, sourceWidth: n
   if (!context) throw new Error("Canvas processing is unavailable in this browser.");
   context.drawImage(sourceImage, 0, 0, width, height);
   const frame = context.getImageData(0, 0, width, height);
+  const useSourceAlpha = hasMeaningfulSelectedAlpha(frame.data, scope);
   const background = averageBorder(frame.data, width, height);
   const backgroundChroma = Math.max(background.r, background.g, background.b) - Math.min(background.r, background.g, background.b);
   const backgroundLightness = (Math.max(background.r, background.g, background.b) + Math.min(background.r, background.g, background.b)) / 2;
@@ -1948,6 +2119,13 @@ function extractDrawingFromSource(sourceImage: CanvasImageSource, sourceWidth: n
     for (let x = scanInsetX; x < width - scanInsetX; x += 1) {
       if (((x - focusX) / focusRadiusX) ** 2 + ((y - focusY) / focusRadiusY) ** 2 > 1) continue;
       const pixelIndex = (y * width + x) * 4;
+      if (useSourceAlpha) {
+        if (frame.data[pixelIndex + 3] > 24) {
+          rawInk[y * width + x] = 1;
+          chromaticInk[y * width + x] = 1;
+        }
+        continue;
+      }
       const pixel = { r: frame.data[pixelIndex], g: frame.data[pixelIndex + 1], b: frame.data[pixelIndex + 2] };
       const maxChannel = Math.max(pixel.r, pixel.g, pixel.b);
       const minChannel = Math.min(pixel.r, pixel.g, pixel.b);
@@ -1975,7 +2153,10 @@ function extractDrawingFromSource(sourceImage: CanvasImageSource, sourceWidth: n
   }
 
   const colorCloseRadius = clamp(Math.round(Math.min(width, height) * 0.014), 5, 9);
-  const enclosedTargetRegion = recoverEnclosedTargetRegion(chromaticInk, width, height, target);
+  // An authored alpha channel is already the strongest possible segmentation
+  // mask. Running hole-based recovery on it can mistake the negative space
+  // between tree branches or tentacles for the selected character.
+  const enclosedTargetRegion = useSourceAlpha ? null : recoverEnclosedTargetRegion(chromaticInk, width, height, target);
   const preconnectedChromaticInk = erode(dilate(chromaticInk, width, height, 2), width, height, 1);
   const isolatedChromaticInk = isolateTargetInk(preconnectedChromaticInk, width, height, target);
   const colorConnectedInk = erode(dilate(isolatedChromaticInk, width, height, colorCloseRadius), width, height, Math.max(2, colorCloseRadius - 3));
@@ -1988,15 +2169,17 @@ function extractDrawingFromSource(sourceImage: CanvasImageSource, sourceWidth: n
     x: target.x * 0.5 + enclosedComponent.centerX / width * 0.5,
     y: target.y * 0.5 + enclosedComponent.centerY / height * 0.5,
   } : target;
-  const recoveredColorSilhouette = localizedClosedInk
-    ? recoverTargetSilhouette(localizedClosedInk, width, height, silhouetteTarget, false)
-    : recoverTargetSilhouette(colorConnectedInk, width, height, target);
+  const recoveredColorSilhouette = useSourceAlpha
+    ? chromaticInk
+    : localizedClosedInk
+      ? recoverTargetSilhouette(localizedClosedInk, width, height, silhouetteTarget, false)
+      : recoverTargetSilhouette(colorConnectedInk, width, height, target);
   const colorSolidComponents = connectedComponents(recoveredColorSilhouette, width, height);
   const colorAnchor = chooseDrawing(colorSolidComponents, frame.data, width, height, target);
   const connectedInk = erode(dilate(rawInk, width, height, 2), width, height, 1);
   const fallbackComponents = connectedComponents(connectedInk, width, height);
   const colorInkCount = colorAnchor?.pixels.reduce((count, index) => count + chromaticInk[index], 0) ?? 0;
-  const useColorInk = Boolean(colorAnchor && (enclosedTargetRegion || colorInkCount >= Math.max(24, colorAnchor.pixels.length * 0.002)));
+  const useColorInk = Boolean(colorAnchor && (useSourceAlpha || enclosedTargetRegion || colorInkCount >= Math.max(24, colorAnchor.pixels.length * 0.002)));
   const components = useColorInk ? colorSolidComponents : fallbackComponents;
   const anchor = useColorInk ? colorAnchor : chooseDrawing(fallbackComponents, frame.data, width, height, target);
   if (!anchor) throw new Error("I couldn't find one clear character outline. Tap the drawing, move closer, and capture again.");

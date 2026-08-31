@@ -106,10 +106,56 @@ def distance_to_segment(points: np.ndarray, start: np.ndarray, end: np.ndarray) 
     return np.linalg.norm(points - projected, axis=1)
 
 
-def semantic_endpoint_records(root: list[float], endpoints: list[list[float]]):
-    """Select one evidence-backed endpoint per anatomical role and side."""
+def semantic_endpoint_records(root: list[float], endpoints: list[list[float]], topology_kind: str):
+    """Name graph endpoints using the learned topology family, never a fixed humanoid template."""
+    viable = [endpoint for endpoint in endpoints if math.hypot(endpoint[0] - root[0], endpoint[1] - root[1]) >= 0.18]
+    if topology_kind != "biped":
+        if not viable:
+            return []
+        roles: list[str]
+        if topology_kind == "radial":
+            roles = ["Tentacle"] * len(viable)
+        elif topology_kind == "branched":
+            trunk_index = min(range(len(viable)), key=lambda index: viable[index][1])
+            roles = ["Trunk" if index == trunk_index else "Branch" for index in range(len(viable))]
+        elif topology_kind == "machine":
+            roles = ["Linkage"] * len(viable)
+        elif topology_kind == "chain":
+            roles = ["Segment"] * len(viable)
+        elif topology_kind == "aquatic":
+            tail_index = max(range(len(viable)), key=lambda index: abs(viable[index][0] - root[0]))
+            roles = ["Tail" if index == tail_index else "Fin" for index in range(len(viable))]
+        elif topology_kind == "winged":
+            roles = ["Leg" if endpoint[1] < root[1] - 0.24 else "Wing" for endpoint in viable]
+            if len(viable) >= 3:
+                tail_index = min(range(len(viable)), key=lambda index: viable[index][1])
+                roles[tail_index] = "Tail"
+        else:  # quadruped
+            roles = []
+            horizontal_index = max(range(len(viable)), key=lambda index: abs(viable[index][0] - root[0]))
+            for index, endpoint in enumerate(viable):
+                if endpoint[1] > root[1] + 0.22:
+                    roles.append("Ear")
+                elif index == horizontal_index and endpoint[1] > root[1] - 0.34:
+                    roles.append("Tail")
+                else:
+                    roles.append("Leg")
+        counts: dict[str, int] = {}
+        records = []
+        for role, endpoint in zip(roles, viable, strict=True):
+            counts[role] = counts.get(role, 0) + 1
+            records.append({
+                "role": role,
+                "side": "L" if endpoint[0] < root[0] else "R",
+                "name": f"{role}.{counts[role]:02d}",
+                "endpoint": endpoint,
+            })
+        return records
+
+    # Bipeds keep a bilateral anatomical prior, but only when measured endpoints
+    # support it. Other topology families never pass through this classifier.
     candidates: dict[tuple[str, str], list[tuple[float, list[float]]]] = {}
-    for endpoint in endpoints:
+    for endpoint in viable:
         dx = endpoint[0] - root[0]
         dy = endpoint[1] - root[1]
         if math.hypot(dx, dy) < 0.18:
@@ -141,46 +187,6 @@ def semantic_endpoint_records(root: list[float], endpoints: list[list[float]]):
                     float(record["endpoint"][2]),
                 ]
     return records
-
-
-def create_semantic_appendages(records, root: list[float], body_material):
-    objects = []
-    for record in records:
-        endpoint = np.asarray(record["endpoint"][:2], dtype=np.float32)
-        root_xy = np.asarray(root[:2], dtype=np.float32)
-        delta = endpoint - root_xy
-        distance = max(0.001, float(np.linalg.norm(delta)))
-        direction = delta / distance
-        role = record["role"]
-        anchor_fraction = 0.62 if role == "Ear" else 0.7
-        anchor = root_xy + direction * distance * anchor_fraction
-        # Endpoint heatmaps land on the last confident stroke, commonly just
-        # inside a faint outer tip. Extend only along that measured branch.
-        outer = root_xy + delta * {"Ear": 1.2, "Arm": 1.14, "Leg": 1.12}[role]
-        center = (anchor + outer) * 0.5
-        length = max(0.13, float(np.linalg.norm(outer - anchor)) * (1.12 if role == "Ear" else 1.04))
-        thickness = {"Ear": 0.085, "Arm": 0.062, "Leg": 0.072}[role]
-        bpy.ops.mesh.primitive_uv_sphere_add(
-            segments=28,
-            ring_count=18,
-            location=(float(center[0]), float(center[1]), 0.0),
-            rotation=(0.0, 0.0, math.atan2(-float(direction[0]), float(direction[1]))),
-        )
-        obj = bpy.context.object
-        obj.name = f"semantic-{role.lower()}-{record['side'].lower()}"
-        obj.scale = (thickness, length * 0.55, thickness * (1.05 if role == "Ear" else 0.9))
-        obj.data.materials.append(body_material)
-        obj["semantic_kind"] = role.lower()
-        obj["evidence"] = "learned topology endpoint + medial skeleton"
-        obj["endpoint"] = [float(value) for value in record["endpoint"]]
-        bpy.context.view_layer.objects.active = obj
-        obj.select_set(True)
-        bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
-        for polygon in obj.data.polygons:
-            polygon.use_smooth = True
-        obj.select_set(False)
-        objects.append((obj, record["name"]))
-    return objects
 
 
 def build_armature(mesh_object, vertices: np.ndarray, root: list[float], endpoint_records):
@@ -250,6 +256,8 @@ def main() -> None:
     bpy.context.collection.objects.link(body)
     body["reconstruction_method"] = "silhouette signed-distance lens marching cubes"
     body["back_prior"] = rig_data["back_prior"]
+    body["topology_kind"] = rig_data["topology_kind"]
+    body["topology_confidence"] = rig_data["topology_confidence"]
     body["source_semantic_kinds"] = ",".join(rig_data["semantic_kinds"])
 
     front_material = texture_material(args.input_dir / "texture.png", rig_data["body_color"])
@@ -275,15 +283,8 @@ def main() -> None:
     for feature in rig_data["semantic_features"]:
         create_feature(feature, line_material, eye_material)
 
-    endpoint_records = semantic_endpoint_records(rig_data["root"], rig_data["skeleton_endpoints"])
-    appendages = create_semantic_appendages(endpoint_records, rig_data["root"], back_material)
+    endpoint_records = semantic_endpoint_records(rig_data["root"], rig_data["skeleton_endpoints"], rig_data["topology_kind"])
     rig, bone_count = build_armature(body, vertices, rig_data["root"], endpoint_records)
-    for appendage, bone_name in appendages:
-        world_transform = appendage.matrix_world.copy()
-        appendage.parent = rig
-        appendage.parent_type = "BONE"
-        appendage.parent_bone = bone_name
-        appendage.matrix_world = world_transform
     rig["bone_count"] = bone_count
     rig["weight_contract"] = "normalized multi-bone semantic skinning"
     rig["viewable_degrees"] = 360
@@ -314,8 +315,10 @@ def main() -> None:
         "vertices": len(vertices),
         "triangles": len(faces),
         "bones": bone_count,
+        "topology_kind": rig_data["topology_kind"],
+        "topology_confidence": rig_data["topology_confidence"],
         "semantic_features": len(rig_data["semantic_features"]),
-        "semantic_appendages": [record["name"] for record in endpoint_records],
+        "graph_bones": [record["name"] for record in endpoint_records],
         "body_color": rig_data["body_color"],
         "line_color": rig_data["line_color"],
         "back_prior": rig_data["back_prior"],

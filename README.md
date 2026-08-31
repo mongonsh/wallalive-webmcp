@@ -6,9 +6,7 @@
 
 **Public source:** https://github.com/mongonsh/wallalive-webmcp
 
-WallAlive turns one human-approved drawing into a colored, 360° **rigged 3D character** in the camera view. Compact locally trained models recognize visible semantic parts and decode a variable endpoint/junction graph for bipeds, quadrupeds, winged and aquatic forms, radial creatures, plants, machines, and chains. It uses [AniGen](https://github.com/VAST-AI-Research/AniGen) to generate a coherent mesh, unseen surfaces, skeleton, and skinning weights from the isolated image, then loads the result as a Three.js `SkinnedMesh`. WebMCP lets a browser agent name, place, animate, recolor, and direct that same visible character.
-
-The old contour inflation is retained only as a clearly labeled **rough private preview**. It is never presented as neural reconstruction.
+WallAlive turns one human-approved drawing into a colored, 360° **rigged 3D character** in the camera view. Compact locally trained models recognize visible semantic parts and decode a variable endpoint/junction graph for bipeds, quadrupeds, winged and aquatic forms, radial creatures, plants, machines, and chains. A private first result builds one closed Marching Cubes surface and skins that continuous surface to the learned graph; it does not attach generic capsule limbs. [AniGen](https://github.com/VAST-AI-Research/AniGen) is an optional, visibly approved upgrade that generates unseen surfaces, skeleton, and skinning weights. WebMCP can name, place, animate, recolor, and direct either result.
 
 ## Why this needs WebMCP
 
@@ -22,10 +20,10 @@ The old contour inflation is retained only as a clearly labeled **rough private 
 ## The real 3D loop
 
 1. **Scan or upload and recognize locally:** the child can capture with the camera or choose an existing drawing photo. WallAlive separates one drawing from paper edges, text, and foreground clutter in browser memory. Uploaded photos use a wider full-character search window so top ears and lower feet are not removed before inference. WallAlive PartUNet proposes nine visible semantic part classes, TopologyNet v10 decodes variable endpoints, junctions, and branch paths for non-human drawings, and AmateurPose v6 estimates 17 named joints only for applicable humanoids. Semantic masks snap back to original pixel regions, so face position, outline, and sampled color come from the child’s drawing.
-2. **Approve minimally:** a second visible approval explains that only the isolated drawing—not the live camera or room frame—will be sent to AniGen.
-3. **Generate jointly:** AniGen’s `ss_flow_solo` + `slat_flow_auto` path predicts full geometry, a skeleton of arbitrary complexity, and smooth skinning weights together.
-4. **Load and play:** the browser downloads the returned GLB into a tab-local Blob URL. Three.js loads its `SkinnedMesh`, classifies arm/leg bone branches, and drives wave, dance, walk, hop, hide, and spin actions.
-5. **Enter AR:** Android/WebXR devices can place the same model with surface hit testing; iPhone and other browsers use the camera-overlay experience.
+2. **Build private 3D immediately:** a silhouette signed-distance field produces a closed rounded surface with real side depth and an explicit symmetric back prior. The learned graph supplies normalized skin weights over that one surface, while exact high-resolution eye, cheek, mouth, and marking shapes retain their measured positions and colors.
+3. **Play or upgrade:** the private result is rotatable and actionable without an upload. A separate approval can send only the isolated drawing—not the live camera or room frame—to AniGen.
+4. **Generate jointly when approved:** AniGen’s `ss_flow_solo` + `slat_flow_auto` path predicts full geometry, a skeleton of arbitrary complexity, and smooth skinning weights together. Three.js loads the returned GLB into a tab-local Blob URL.
+5. **Enter AR:** Android/WebXR devices can place either result with surface hit testing; iPhone and other browsers use the camera-overlay experience.
 
 **Play Judge Demo** loads a previously generated AniGen reference result immediately, without spending public GPU quota. The fixture is a colored 159,930-vertex, 319,836-triangle `SkinnedMesh` with 20 bones, 26.6% depth-to-width, normalized weights, and zero boundary or non-manifold edges; tests parse the binary GLB and enforce those invariants.
 
@@ -34,7 +32,7 @@ The old contour inflation is retained only as a clearly labeled **rough private 
 | Tool | Mode | Purpose |
 | --- | --- | --- |
 | `inspect_wall_scene` | Read | Returns approved drawing state, actual reconstruction provider/type/counts, AR capability, and privacy boundary. |
-| `reconstruct_rigged_3d_character` | Write | Uses an already approved AniGen rig. If absent, surfaces the human approval UI but cannot upload or approve it. |
+| `reconstruct_rigged_3d_character` | Write | Creates the local-private closed graph rig immediately, or requests `neural-full` and surfaces human approval. It cannot upload or approve by itself. |
 | `set_character_personality` | Write | Changes performance intent without modifying the original drawing. |
 | `place_character` | Write | Places and scales the character in the visible scene. |
 | `animate_character` | Write | Drives one safe action on the generated skeleton. |
@@ -47,7 +45,7 @@ All tools use strict schemas, `additionalProperties: false`, cancellation signal
 ## Privacy boundary
 
 - Camera start and capture are human-only UI gestures.
-- Segmentation, semantic-part recognition, and the first preview happen locally.
+- Segmentation, semantic-part recognition, variable graph decoding, closed-surface reconstruction, and first 3D skinning happen locally.
 - The 5.39 MiB five-model ONNX stack is served from WallAlive’s own origin and runs with WebAssembly; it does not send the image to an inference API. The 96² and 128² face logits are validation-calibrated and blended locally; variable topology and an optional 17-joint pose graph run in parallel with the part model. A learned closed-form component gate rejects false cheek/ear islands without another model download. Older fallback checkpoints load only when the primary stack misses a basic eye, mouth, or limb anchor.
 - The agent never receives live frames or raw image pixels.
 - Neural generation requires a separate visible human approval.
@@ -59,7 +57,8 @@ All tools use strict schemas, `additionalProperties: false`, cancellation signal
 | Capability | Support |
 | --- | --- |
 | Camera capture + 3D overlay | Modern mobile/desktop browsers over HTTPS with WebGL |
-| Rigged single-image 3D | AniGen public Space for the demo; dedicated AniGen GPU recommended for production |
+| Private closed 3D + graph skinning | In-browser ONNX/WASM + Three.js, no upload |
+| Generative unseen geometry | Optional AniGen public Space; dedicated AniGen GPU recommended for production |
 | Immersive room placement | WebXR `immersive-ar` + `hit-test`, usually compatible Android Chrome devices |
 | iPhone/iPad and non-WebXR browsers | Camera overlay; immersive hit testing is not claimed |
 | No-camera judging | Bundled verified AniGen GLB and one-click story |
@@ -86,8 +85,9 @@ WallAlive ChildlikeSHAPES local ONNX/WASM stack
                 └── learned cheek/ear component confidence gate
         │
         ├── exact pixel snap: position + outline + color
-        ├── joint paths: shoulder→elbow→wrist / hip→knee→ankle
-        └─────────────────────────────────────────────► rough private preview
+        ├── joint paths: variable graph branches or applicable humanoid chains
+        └── signed-distance field → Marching Cubes → one continuous local SkinnedMesh
+                └────────────────────────────────────► private 360° character
         │
         ├── visible isolated-image approval (human only)
         ▼

@@ -4,9 +4,9 @@ This note records what WallAlive actually does, why the previous silhouette meth
 
 ## Root cause of the previous result
 
-The earlier app projected drawing pixels onto a Marching Cubes body derived from the 2D contour. That can create a closed rounded surface, but it has no learned 3D prior and no real skinned-mesh asset type. Every input therefore became a version of its front silhouette. More contour tuning could not infer unseen anatomy, separate semantic parts reliably, or produce skeleton and skin weights.
+The broken renderer combined a full-silhouette volume with separate generic sphere and capsule appendages. Limbs were therefore doubled, detached, and forced through a humanoid endpoint classifier. Thick centerline probabilities also merged nearby branches before graph decoding. The result in the reported screenshot was a real bug, not an acceptable artistic choice.
 
-That path now appears only as **rough private preview** when a user declines neural processing.
+The private renderer now thins the learned centerline, decodes a variable graph, names branches by learned topology family, builds one closed Marching Cubes surface, and assigns normalized graph-bone weights directly to that continuous surface. Generic capsule appendages are gone. The unseen back remains an explicit symmetric prior; only the optional neural path claims generative unseen geometry.
 
 ## Systems evaluated
 
@@ -19,6 +19,7 @@ That path now appears only as **rough private preview** when a user declines neu
 | [SAM 3](https://github.com/facebookresearch/sam3) | Promptable instance segmentation from text and visual prompts | Strong general proposals, but a large prompt model is not a browser-sized drawing anatomy parser and still does not create a rigged 3D asset. |
 | [SAM 3D Objects](https://github.com/facebookresearch/sam-3d-objects) | Single-image shape, texture, pose, and layout reconstruction | Strong current 3D alternative, but its primary output is a static reconstructed object rather than an animate-ready skeleton and skinning field. |
 | [Stable Fast 3D](https://github.com/Stability-AI/stable-fast-3d) | Fast textured single-image GLB generation | Produces a real mesh but not an animation skeleton or skinning weights. |
+| [TripoSR](https://github.com/VAST-AI-Research/TripoSR) | MIT-licensed learned single-image mesh reconstruction | Tested locally on Apple M4: 4,482 vertices / 8,960 triangles, watertight, 13.6 s total. A sparse cat drawing produced a thin poor shape because the model prior targets rendered 3D objects, so it is not the default drawing path. |
 | [TRELLIS](https://github.com/microsoft/TRELLIS) | Image-conditioned 3D representations and meshes | Strong geometry prior, but no coherent animation rig in its primary output. |
 | [Hunyuan3D 2.1](https://github.com/Tencent-Hunyuan/Hunyuan3D-2.1) | Geometry and PBR texture generation through a GPU service | Real 3D, but rigging remains a separate problem. |
 | [UniRig](https://github.com/VAST-AI-Research/UniRig) / [RigAnything](https://github.com/Isabella98Liu/RigAnything) | Post-hoc automatic rigging | Viable after a mesh generator, but a sequential pipeline compounds geometry/rig errors and deployment cost. |
@@ -46,7 +47,9 @@ The ensemble decodes up to six face instances and ten appendages per class. Pred
 
 The model is intentionally not the geometry source of truth. Its low-resolution masks identify what a region means; WallAlive then snaps each prediction to the nearest high-resolution isolated pixel component. This preserves the drawing’s measured center, dimensions, rotation, outline, and sampled color. Existing medial-skeleton limbs are retained and only confirmed or supplemented by high-confidence learned hints.
 
-The private supplied drawing is evaluated locally without uploading it. On the current exact regression crop, the face ensemble returns two eyes, two cheeks/facial marks, and one mouth; silhouette and variable-topology evidence add ear, arm/hand, and leg/foot branches for a 10-joint, 9-branch browser rig while preserving the measured pale-pink line color. The independent offline evaluator produces an 83,202-vertex, 166,400-triangle signed-distance body before semantic meshes, a seven-bone bilateral topology rig, a plain inferred back, and a separate authored front. The exported GLB passes geometric validation with zero welded boundary/non-manifold edges, normalized skin weights, color on every primitive, and 43.27% depth-to-height. These results describe one regression input, not universal recognition accuracy. On six separate public character textures from Meta Animated Drawings, the body model scores 0.803, 0.808, 0.860, 0.935, 0.939, and 0.952 IoU (mean 0.883), including the previous six-arm and quadruped failures. This transfer evidence supplements the much larger untouched official test; it is not a universal-quality claim.
+TopologyNet v10 adds a separate 402,052-parameter learned graph prior. It was trained with synthetic endpoint/junction supervision plus 10,241 disjoint real Quick, Draw! stroke records spanning biped, quadruped, winged, aquatic, radial, branched, machine, and chain families. Its thick centerline band is now Zhang-Suen thinned before graph-degree endpoint and junction recovery; this changed the radial QA drawing from a collapsed 2-node graph to 12 nodes / 11 branches and the tree to 13 nodes / 12 branches.
+
+The private supplied drawing is evaluated locally without uploading it. On the current exact crop, the model reports biped topology at 0.859 confidence and preserves body, two eyes, two cheeks/facial marks, mouth, ears, arm/hand, leg/foot, and the measured pale-pink line color. The independent offline evaluator produces a 27,656-vertex, 55,308-triangle continuous surface and a ten-bone graph GLB. Structural inspection reports zero welded boundary edges, zero non-manifold edges, normalized skin weights on every vertex, color on every primitive, and 43.52% depth-to-height. These results describe one regression input, not universal recognition accuracy. On six separate public character textures from Meta Animated Drawings, the body model scores 0.803, 0.808, 0.860, 0.935, 0.939, and 0.952 IoU (mean 0.883), including the previous six-arm and quadruped failures. This transfer evidence supplements the much larger untouched official test; it is not a universal-quality claim.
 
 The broader 75-drawing Amateur test split exposed the next root cause precisely. Its body-mask IoU is 0.8975 and 96.31% of visible annotated joints fall inside the isolated body, but the semantic decoder's named-joint hit rate is only 0.6333 eye, 0.0733 ear, 0.8200 arm, 0.5267 hand, 0.8733 leg, and 0.5933 foot. AmateurPose v6 improves the actual rig signal to 0.7969 PCK@5%, 0.8643 PCK@10%, and 5.578 mean input pixels of error. Strict per-joint PCK is 0.76–0.8133 for eyes, 0.80–0.8133 for ears, 0.7467–0.8267 for arm joints, and 0.72–0.88 for leg joints. The ONNX browser export matches the selected PyTorch checkpoint exactly.
 
@@ -67,6 +70,9 @@ EdgeTAM was also tested locally as an optional high-recall proposal generator. I
 The preview GLB is already a real `SkinnedMesh`. The optional final extraction endpoint adds simplification and texture baking, but it is not necessary to prove geometry, skeleton, skinning, 360° rotation, or bone deformation.
 
 ## Verified evidence
+
+- Five unseen held-out filled drawings classify correctly as quadruped cat (0.922), winged bird (0.975), aquatic fish (0.9999), radial octopus (0.998), and branched tree (0.9999).
+- Their exported graph-skinned GLBs contain 28,704–44,300 triangles, 7–8 bones, 45.33% relative depth, normalized weights, complete color data, no non-manifold edges, and pass the closed-surface structural contract.
 
 - The official Space accepted the WallAlive demo PNG and completed its CPU preprocessing path.
 - A complete AniGen generation was downloaded and parsed locally.

@@ -41,6 +41,9 @@ type SceneHandles = {
 };
 
 const VOLUME_RESOLUTION = 64;
+const GRAPH_APPENDAGE_KINDS = new Set([
+  "arm", "leg", "wing", "fin", "tail", "tentacle", "trunk", "branch", "segment", "linkage",
+]);
 
 function pointInsideContour(x: number, y: number, contour: ContourPoint[]) {
   let inside = false;
@@ -60,22 +63,23 @@ function distanceToSegment(x: number, y: number, start: ContourPoint, end: Conto
   return Math.hypot(x - (start.x + dx * amount), y - (start.y + dy * amount));
 }
 
+function segmentProjection(x: number, y: number, start: ContourPoint, end: ContourPoint) {
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  const lengthSquared = dx * dx + dy * dy;
+  const amount = lengthSquared ? Math.min(1, Math.max(0, ((x - start.x) * dx + (y - start.y) * dy) / lengthSquared)) : 0;
+  return {
+    amount,
+    distance: Math.hypot(x - (start.x + dx * amount), y - (start.y + dy * amount)),
+  };
+}
+
 function distanceToContour(x: number, y: number, contour: ContourPoint[]) {
   let distance = Infinity;
   for (let index = 0; index < contour.length; index += 1) {
     distance = Math.min(distance, distanceToSegment(x, y, contour[index], contour[(index + 1) % contour.length]));
   }
   return distance;
-}
-
-function meshMaterial(color: string, roughness = 0.62) {
-  return new THREE.MeshPhysicalMaterial({
-    color,
-    roughness,
-    metalness: 0,
-    clearcoat: 0.22,
-    clearcoatRoughness: 0.68,
-  });
 }
 
 function inkMaterial(color: string) {
@@ -144,9 +148,82 @@ export function buildCharacter(contour: ContourPoint[], skeleton: SkeletonPoint[
   }
   volume.blur(0.08);
   volume.update();
-  volume.castShadow = true;
-  volume.receiveShadow = true;
-  volume.userData.reconstruction = {
+  // MarchingCubes allocates its maximum vertex budget up front. DecalGeometry
+  // iterates attribute.count rather than drawRange, so passing that oversized
+  // buffer would project hundreds of thousands of unused zero vertices on a
+  // phone. Compact to the actual polygonized surface before skinning/decaling.
+  const activeVertexCount = volume.geometry.drawRange.count;
+  const sourcePositions = volume.geometry.getAttribute("position") as THREE.BufferAttribute;
+  const sourceNormals = volume.geometry.getAttribute("normal") as THREE.BufferAttribute;
+  const compactGeometry = new THREE.BufferGeometry();
+  compactGeometry.setAttribute("position", new THREE.Float32BufferAttribute(
+    new Float32Array((sourcePositions.array as Float32Array).subarray(0, activeVertexCount * 3)), 3,
+  ));
+  compactGeometry.setAttribute("normal", new THREE.Float32BufferAttribute(
+    new Float32Array((sourceNormals.array as Float32Array).subarray(0, activeVertexCount * 3)), 3,
+  ));
+  compactGeometry.setDrawRange(0, activeVertexCount);
+  compactGeometry.computeBoundingBox();
+  compactGeometry.computeBoundingSphere();
+  volume.geometry.dispose();
+  const structuralParts = rig.parts.filter((part) => GRAPH_APPENDAGE_KINDS.has(part.kind));
+  const rootBone = new THREE.Bone();
+  rootBone.name = "rig-body";
+  const branchBones = structuralParts.map((part) => {
+    const anchor = part.anchor ?? bodyPart?.center ?? { x: 0, y: 0, z: 0 };
+    const bone = new THREE.Bone();
+    bone.name = `rig-${part.id}`;
+    bone.position.set(anchor.x, anchor.y, 0);
+    bone.userData.baseRotationZ = 0;
+    rootBone.add(bone);
+    return { part, bone, anchor };
+  });
+  const positions = compactGeometry.getAttribute("position");
+  const skinIndices = new Uint16Array(positions.count * 4);
+  const skinWeights = new Float32Array(positions.count * 4);
+  for (let vertex = 0; vertex < positions.count; vertex += 1) {
+    const x = positions.getX(vertex);
+    const y = positions.getY(vertex);
+    let bestBone = 0;
+    let bestWeight = 0;
+    branchBones.forEach(({ part, anchor }, index) => {
+      const path = part.path?.length && part.path.length >= 2
+        ? part.path
+        : [anchor, part.center];
+      let minimumDistance = Infinity;
+      let progress = 0;
+      for (let segment = 0; segment < path.length - 1; segment += 1) {
+        const projection = segmentProjection(x, y, path[segment], path[segment + 1]);
+        if (projection.distance < minimumDistance) {
+          minimumDistance = projection.distance;
+          progress = (segment + projection.amount) / (path.length - 1);
+        }
+      }
+      const radius = Math.max(0.035, part.size.x * 0.72);
+      const radial = Math.max(0, 1 - minimumDistance / (radius * 1.8));
+      const alongBranch = Math.min(1, Math.max(0, (progress - 0.02) / 0.34));
+      const influence = radial * radial * alongBranch;
+      if (influence > bestWeight) {
+        bestWeight = influence;
+        bestBone = index + 1;
+      }
+    });
+    const branchWeight = Math.min(0.96, bestWeight);
+    const offset = vertex * 4;
+    skinIndices[offset] = 0;
+    skinIndices[offset + 1] = bestBone;
+    skinWeights[offset] = 1 - branchWeight;
+    skinWeights[offset + 1] = branchWeight;
+  }
+  compactGeometry.setAttribute("skinIndex", new THREE.Uint16BufferAttribute(skinIndices, 4));
+  compactGeometry.setAttribute("skinWeight", new THREE.Float32BufferAttribute(skinWeights, 4));
+  const skinnedVolume = new THREE.SkinnedMesh(compactGeometry, volumeMaterial);
+  skinnedVolume.name = "silhouette-distance-lens";
+  skinnedVolume.add(rootBone);
+  skinnedVolume.bind(new THREE.Skeleton([rootBone, ...branchBones.map(({ bone }) => bone)]));
+  skinnedVolume.castShadow = true;
+  skinnedVolume.receiveShadow = true;
+  skinnedVolume.userData.reconstruction = {
     method: "silhouette-preserving signed-distance lens",
     polygonizer: "Marching Cubes",
     resolution: VOLUME_RESOLUTION,
@@ -154,17 +231,18 @@ export function buildCharacter(contour: ContourPoint[], skeleton: SkeletonPoint[
     contourPoints: contour.length,
     skeletonPoints: skeleton.length,
     semanticRig: rig.version,
+    skinning: `${branchBones.length + 1} variable graph bones over one continuous surface`,
   };
-  character.add(volume);
+  character.add(skinnedVolume);
 
   if (textureUrl) {
-    volume.updateMatrixWorld(true);
+    skinnedVolume.updateMatrixWorld(true);
     const artworkTexture = new THREE.TextureLoader().load(textureUrl);
     artworkTexture.colorSpace = THREE.SRGBColorSpace;
     artworkTexture.anisotropy = 8;
     const decal = new THREE.Mesh(
       new DecalGeometry(
-        volume,
+        skinnedVolume,
         new THREE.Vector3(0, 0, bodyHalfDepth * 0.82),
         new THREE.Euler(0, 0, 0),
         new THREE.Vector3(1.4, 1.4, bodyHalfDepth * 2.6),
@@ -185,65 +263,6 @@ export function buildCharacter(contour: ContourPoint[], skeleton: SkeletonPoint[
   }
 
   const frontDepthAt = depthAt;
-
-  rig.parts.filter((part) => part.kind === "ear").forEach((part) => {
-    const anchor = part.anchor ?? part.center;
-    const pivot = new THREE.Group();
-    pivot.name = `rig-${part.id}`;
-    pivot.position.set(anchor.x, anchor.y, 0);
-    pivot.rotation.z = part.rotation;
-    pivot.userData.baseRotationZ = part.rotation;
-    const mesh = new THREE.Mesh(new THREE.SphereGeometry(0.5, 28, 18), meshMaterial(part.color));
-    const distance = Math.hypot(part.center.x - anchor.x, part.center.y - anchor.y);
-    mesh.position.y = distance;
-    mesh.scale.set(part.size.x, part.size.y, part.size.z);
-    mesh.castShadow = true;
-    pivot.add(mesh);
-    character.add(pivot);
-  });
-
-  rig.parts.filter((part) => part.kind === "arm" || part.kind === "leg").forEach((part) => {
-    const anchor = part.anchor ?? bodyPart?.center ?? { x: 0, y: 0, z: 0 };
-    const pivot = new THREE.Group();
-    pivot.name = `rig-${part.id}`;
-    pivot.position.set(anchor.x, anchor.y, 0);
-    const posePath = part.path?.length && part.path.length >= 3 ? part.path : null;
-    pivot.rotation.z = posePath ? 0 : part.rotation;
-    pivot.userData.baseRotationZ = posePath ? 0 : part.rotation;
-    const radius = Math.max(0.018, part.size.x * 0.5);
-    const length = Math.max(radius * 2.1, part.size.y);
-    const limb = posePath
-      ? new THREE.Mesh(
-        new THREE.TubeGeometry(
-          new THREE.CatmullRomCurve3(posePath.map((point) => new THREE.Vector3(point.x - anchor.x, point.y - anchor.y, point.z)), false, "centripetal", 0.2),
-          28,
-          radius,
-          12,
-          false,
-        ),
-        meshMaterial(part.color),
-      )
-      : new THREE.Mesh(new THREE.CapsuleGeometry(radius, Math.max(0.001, length - radius * 2), 8, 18), meshMaterial(part.color));
-    if (!posePath) limb.position.y = length * 0.5;
-    limb.castShadow = true;
-    limb.receiveShadow = true;
-    pivot.add(limb);
-    const endPart = rig.parts.find((candidate) => candidate.parentId === part.id && (candidate.kind === "hand" || candidate.kind === "foot"));
-    if (endPart) {
-      const end = new THREE.Mesh(new THREE.SphereGeometry(0.5, 24, 16), meshMaterial(endPart.color));
-      end.name = `rig-${endPart.id}`;
-      if (posePath) {
-        const endpoint = posePath.at(-1)!;
-        end.position.set(endpoint.x - anchor.x, endpoint.y - anchor.y, endpoint.z);
-      } else {
-        end.position.y = length;
-      }
-      end.scale.set(endPart.size.x, endPart.size.y, endPart.size.z);
-      end.castShadow = true;
-      pivot.add(end);
-    }
-    character.add(pivot);
-  });
 
   const addInkFeature = (part: SemanticPart) => {
     const group = new THREE.Group();
@@ -351,13 +370,15 @@ export function buildCharacter(contour: ContourPoint[], skeleton: SkeletonPoint[
     .forEach(addInkFeature);
 
   character.userData.reconstruction = {
-    method: "color-isolated semantic ink over a silhouette-preserving distance-field body",
+    method: "learned variable topology graph over a silhouette-preserving volumetric body",
     texturePlane: false,
     viewableDegrees: 360,
     bodyTopology: "closed",
     backPrior: "symmetric filled volume with silhouette rim; no invented face marks",
     semanticParts: rig.parts.map((part) => ({ id: part.id, kind: part.kind, confidence: part.confidence, source: part.source })),
     joints: rig.joints,
+    topologyKind: rig.topologyKind ?? null,
+    topologyConfidence: rig.topologyConfidence ?? null,
     accent,
   };
 
@@ -485,7 +506,7 @@ export const ARStage = forwardRef<ARStageHandle, ARStageProps>(function ARStage(
         const base = bone.userData.wallaliveBaseQuaternion as THREE.Quaternion | undefined;
         if (base) bone.quaternion.copy(base);
       });
-      rig?.parts.filter((part) => part.kind === "ear" || part.kind === "arm" || part.kind === "leg").forEach((part) => {
+      rig?.parts.filter((part) => part.kind === "ear" || GRAPH_APPENDAGE_KINDS.has(part.kind)).forEach((part) => {
         const node = articulated?.getObjectByName(`rig-${part.id}`);
         if (node) {
           node.rotation.x = 0;
@@ -504,7 +525,10 @@ export const ARStage = forwardRef<ARStageHandle, ARStageProps>(function ARStage(
       if (neuralSemantic?.mouth) neuralSemantic.mouth.scale.y = currentAction === "idle" ? 1 : 1 + Math.abs(Math.sin(elapsed * 5)) * 0.42;
 
       if (currentAction === "wave") {
-        const arm = articulated?.getObjectByName("rig-arm-right") ?? articulated?.getObjectByName("rig-arm-left");
+        const arm = articulated?.getObjectByName("rig-arm-right")
+          ?? articulated?.getObjectByName("rig-arm-left")
+          ?? rig?.parts.filter((part) => part.kind === "wing" || part.kind === "tentacle" || part.kind === "tail")
+            .map((part) => articulated?.getObjectByName(`rig-${part.id}`)).find(Boolean);
         if (arm) arm.rotation.z = Number(arm.userData.baseRotationZ ?? 0) + 0.92 + Math.sin(elapsed * 7.2) * 0.42;
         const neuralArm = neuralRig?.armRight ?? neuralRig?.armLeft;
         neuralArm?.rotateZ(0.72 + Math.sin(elapsed * 7.2) * 0.42);
@@ -518,6 +542,11 @@ export const ARStage = forwardRef<ARStageHandle, ARStageProps>(function ARStage(
         const rightArm = articulated?.getObjectByName("rig-arm-right");
         if (leftArm) leftArm.rotation.z = Number(leftArm.userData.baseRotationZ ?? 0) + Math.sin(elapsed * 5.2) * 0.55;
         if (rightArm) rightArm.rotation.z = Number(rightArm.userData.baseRotationZ ?? 0) - Math.sin(elapsed * 5.2) * 0.55;
+        rig?.parts.filter((part) => GRAPH_APPENDAGE_KINDS.has(part.kind) && part.kind !== "arm" && part.kind !== "trunk")
+          .forEach((part, index) => {
+            const node = articulated?.getObjectByName(`rig-${part.id}`);
+            if (node) node.rotation.z = Number(node.userData.baseRotationZ ?? 0) + (index % 2 ? -1 : 1) * Math.sin(elapsed * 5.2 + index * 0.45) * 0.34;
+          });
         neuralRig?.arms.forEach((arm, index) => {
           const direction = index % 2 ? -1 : 1;
           arm.rotateZ(direction * (0.52 + Math.sin(elapsed * 5.2 + index * 0.6) * 0.45));
@@ -532,10 +561,10 @@ export const ARStage = forwardRef<ARStageHandle, ARStageProps>(function ARStage(
         root.rotation.x = Math.sin(elapsed * 4.6) * 0.08;
       }
       if (currentAction === "walk") {
-        const leftLeg = articulated?.getObjectByName("rig-leg-left");
-        const rightLeg = articulated?.getObjectByName("rig-leg-right");
-        if (leftLeg) leftLeg.rotation.x = Math.sin(elapsed * 7) * 0.5;
-        if (rightLeg) rightLeg.rotation.x = -Math.sin(elapsed * 7) * 0.5;
+        rig?.parts.filter((part) => part.kind === "leg").forEach((part, index) => {
+          const leg = articulated?.getObjectByName(`rig-${part.id}`);
+          if (leg) leg.rotation.x = (index % 2 ? -1 : 1) * Math.sin(elapsed * 7 + index * 0.25) * 0.5;
+        });
         neuralRig?.legs.forEach((leg, index) => leg.rotateX((index % 2 ? -1 : 1) * Math.sin(elapsed * 7 + index * 0.25) * 0.48));
         neuralRig?.arms.forEach((arm, index) => arm.rotateX((index % 2 ? 1 : -1) * Math.sin(elapsed * 7 + index * 0.25) * 0.24));
         root.position.x = placement.x + Math.sin(elapsed * 1.5) * 0.85;

@@ -221,6 +221,51 @@ function components(mask: Uint8Array, size: number) {
   return found;
 }
 
+// Zhang-Suen thinning turns the learned centerline probability band into a
+// one-pixel graph. Endpoint heatmaps often merge nearby tentacles or tree
+// branches into one blob; graph degree remains separable after thinning.
+export function thinTopologyMask(input: Uint8Array, size: number) {
+  const mask = Uint8Array.from(input);
+  const neighborValues = (x: number, y: number) => [
+    mask[(y - 1) * size + x],
+    mask[(y - 1) * size + x + 1],
+    mask[y * size + x + 1],
+    mask[(y + 1) * size + x + 1],
+    mask[(y + 1) * size + x],
+    mask[(y + 1) * size + x - 1],
+    mask[y * size + x - 1],
+    mask[(y - 1) * size + x - 1],
+  ];
+  for (let iteration = 0; iteration < size * 2; iteration += 1) {
+    let changed = false;
+    for (const phase of [0, 1]) {
+      const remove: number[] = [];
+      for (let y = 1; y < size - 1; y += 1) {
+        for (let x = 1; x < size - 1; x += 1) {
+          const index = y * size + x;
+          if (!mask[index]) continue;
+          const neighbors = neighborValues(x, y);
+          const count = neighbors.reduce((total, value) => total + value, 0);
+          if (count < 2 || count > 6) continue;
+          let transitions = 0;
+          for (let neighbor = 0; neighbor < 8; neighbor += 1) {
+            if (!neighbors[neighbor] && neighbors[(neighbor + 1) % 8]) transitions += 1;
+          }
+          if (transitions !== 1) continue;
+          const [north, , east, , south, , west] = neighbors;
+          const firstTriplet = phase === 0 ? north * east * south : north * east * west;
+          const secondTriplet = phase === 0 ? east * south * west : north * south * west;
+          if (!firstTriplet && !secondTriplet) remove.push(index);
+        }
+      }
+      if (remove.length) changed = true;
+      for (const index of remove) mask[index] = 0;
+    }
+    if (!changed) break;
+  }
+  return mask;
+}
+
 function componentOutline(component: PixelComponent, size: number, mapPoint: PointMap) {
   const mask = new Uint8Array(size * size);
   for (const index of component.pixels) mask[index] = 1;
@@ -417,6 +462,7 @@ export function decodeTopology(
     return mask;
   };
   const centerlineMask = maskFor(1, 0.46);
+  const thinnedCenterline = thinTopologyMask(centerlineMask, TOPOLOGY_FIELD_SIZE);
   const describe = (channel: number, role: "endpoint" | "junction", threshold: number, maximum: number) => components(maskFor(channel, threshold), TOPOLOGY_FIELD_SIZE)
     .filter((component) => component.pixels.length <= area * 0.06)
     .map((component) => {
@@ -435,8 +481,35 @@ export function decodeTopology(
     })
     .sort((a, b) => b.confidence - a.confidence)
     .slice(0, maximum);
-  const endpointCandidates = describe(2, "endpoint", 0.42, 14);
-  const junctionCandidates = describe(3, "junction", 0.42, 8);
+  const graphCandidates = (role: "endpoint" | "junction", minimumNeighbors: number, maximumNeighbors: number, maximum: number) => {
+    const found: Array<{ role: "endpoint" | "junction"; x: number; y: number; confidence: number }> = [];
+    for (let y = 1; y < TOPOLOGY_FIELD_SIZE - 1; y += 1) {
+      for (let x = 1; x < TOPOLOGY_FIELD_SIZE - 1; x += 1) {
+        const index = y * TOPOLOGY_FIELD_SIZE + x;
+        if (!thinnedCenterline[index]) continue;
+        let neighbors = 0;
+        for (let offsetY = -1; offsetY <= 1; offsetY += 1) {
+          for (let offsetX = -1; offsetX <= 1; offsetX += 1) {
+            if (offsetX || offsetY) neighbors += thinnedCenterline[(y + offsetY) * TOPOLOGY_FIELD_SIZE + x + offsetX];
+          }
+        }
+        if (neighbors < minimumNeighbors || neighbors > maximumNeighbors) continue;
+        const confidence = Math.max(probability(role === "endpoint" ? 2 : 3, index), probability(1, index) * 0.82);
+        found.push({ role, x, y, confidence });
+      }
+    }
+    return found.sort((a, b) => b.confidence - a.confidence).filter((candidate, index, all) => !all.slice(0, index).some((other) => (
+      Math.hypot(other.x - candidate.x, other.y - candidate.y) < (role === "endpoint" ? 3.2 : 4.2)
+    ))).slice(0, maximum);
+  };
+  const endpointCandidates = [...describe(2, "endpoint", 0.42, 14), ...graphCandidates("endpoint", 0, 1, 14)]
+    .sort((a, b) => b.confidence - a.confidence)
+    .filter((candidate, index, all) => !all.slice(0, index).some((other) => Math.hypot(other.x - candidate.x, other.y - candidate.y) < 2.5))
+    .slice(0, 14);
+  const junctionCandidates = [...describe(3, "junction", 0.42, 8), ...graphCandidates("junction", 3, 8, 8)]
+    .sort((a, b) => b.confidence - a.confidence)
+    .filter((candidate, index, all) => !all.slice(0, index).some((other) => Math.hypot(other.x - candidate.x, other.y - candidate.y) < 3.2))
+    .slice(0, 8);
   const candidates = [...junctionCandidates, ...endpointCandidates].filter((candidate, index, all) => !all.slice(0, index).some((other) => (
     other.role === candidate.role && Math.hypot(other.x - candidate.x, other.y - candidate.y) < 2.5
   )));

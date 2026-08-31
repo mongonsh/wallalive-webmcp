@@ -32,6 +32,29 @@ from evaluate_single_drawing import (
 )
 
 
+TOPOLOGY_CLASSES = ("biped", "quadruped", "winged", "aquatic", "radial", "branched", "machine", "chain")
+TOPOLOGY_SEMANTICS = {
+    "biped": ("body", "head", "ear", "arm", "hand", "leg", "foot"),
+    "quadruped": ("body", "head", "ear", "leg", "foot", "tail"),
+    "winged": ("body", "head", "beak", "wing", "leg", "foot", "tail"),
+    "aquatic": ("body", "head", "fin", "tail"),
+    "radial": ("body", "head", "tentacle"),
+    "branched": ("body", "trunk", "branch", "canopy"),
+    "machine": ("body", "linkage"),
+    "chain": ("body", "segment"),
+}
+FACE_KINDS_BY_TOPOLOGY = {
+    "biped": frozenset(("eye", "pupil", "cheek", "mouth", "ear", "marking")),
+    "quadruped": frozenset(("eye", "pupil", "cheek", "mouth", "ear", "marking")),
+    "winged": frozenset(("eye", "pupil", "cheek", "mouth", "marking")),
+    "aquatic": frozenset(("eye", "pupil", "cheek", "mouth", "marking")),
+    "radial": frozenset(("eye", "pupil", "cheek", "mouth", "marking")),
+    "branched": frozenset(),
+    "machine": frozenset(),
+    "chain": frozenset(),
+}
+
+
 def hex_color(values: np.ndarray) -> str:
     channels = np.clip(np.round(values), 0, 255).astype(np.uint8)
     return "#" + "".join(f"{channel:02x}" for channel in channels[:3])
@@ -329,6 +352,11 @@ def main() -> None:
     prepared, content_rect = square_fit(source, 96)
     _, coarse_logits = run(args.models / "wallalive-parts-v3.onnx", tensor(prepared))
     topology_fields, topology_logits = run(args.models / "wallalive-topology-v10.onnx", tensor(prepared))
+    shifted_topology_logits = topology_logits[0] - topology_logits[0].max()
+    topology_probabilities = np.exp(shifted_topology_logits) / np.exp(shifted_topology_logits).sum()
+    topology_index = int(np.argmax(topology_probabilities))
+    topology_kind = TOPOLOGY_CLASSES[topology_index]
+    topology_confidence = float(topology_probabilities[topology_index])
     head_rect = locate_head(coarse_logits, content_rect)
     head_box = model_rect_to_source(head_rect, content_rect, source)
     head = source.crop(head_box)
@@ -344,6 +372,8 @@ def main() -> None:
         source, head_box, probabilities, thresholds, source_box,
         (offset_x, offset_y), scale, args.resolution, local_depth,
     )
+    allowed_face_kinds = FACE_KINDS_BY_TOPOLOGY[topology_kind]
+    features = [feature for feature in features if str(feature["kind"]) in allowed_face_kinds]
 
     root_y, root_x = np.unravel_index(int(inside_distance.argmax()), inside_distance.shape)
     endpoints = topology_endpoints(
@@ -373,9 +403,11 @@ def main() -> None:
         "contour": contour.round(6).tolist(),
         "root": [round((root_x / (args.resolution - 1) - 0.5) * 2, 6), round((0.5 - root_y / (args.resolution - 1)) * 2, 6), 0.0],
         "skeleton_endpoints": endpoints,
-        "topology_class_probabilities": [round(float(value), 5) for value in np.exp(topology_logits[0] - topology_logits[0].max()) / np.exp(topology_logits[0] - topology_logits[0].max()).sum()],
+        "topology_kind": topology_kind,
+        "topology_confidence": round(topology_confidence, 5),
+        "topology_class_probabilities": [round(float(value), 5) for value in topology_probabilities],
         "semantic_features": features,
-        "semantic_kinds": sorted(set([str(feature["kind"]) for feature in features] + ["body", "ear", "arm", "leg"])),
+        "semantic_kinds": sorted(set([str(feature["kind"]) for feature in features] + list(TOPOLOGY_SEMANTICS[topology_kind]))),
         "back_prior": "symmetric filled volume; no copied face texture",
     }
     (args.output / "rig.json").write_text(json.dumps(report, indent=2) + "\n")
@@ -389,7 +421,7 @@ def main() -> None:
         draw.ellipse((px - 6, py - 6, px + 6, py + 6), outline="#b8ff39", width=3)
         draw.text((px + 8, py - 7), str(feature["kind"]), fill="#17332f", stroke_width=2, stroke_fill="white")
     diagnostic.save(args.output / "diagnostic.png")
-    print(json.dumps({key: report[key] for key in ("mesh", "body_color", "line_color", "semantic_kinds", "back_prior")}, indent=2))
+    print(json.dumps({key: report[key] for key in ("mesh", "topology_kind", "topology_confidence", "body_color", "line_color", "semantic_kinds", "back_prior")}, indent=2))
 
 
 if __name__ == "__main__":

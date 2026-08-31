@@ -97,7 +97,10 @@ test("implements local drawing extraction and real WebXR hit testing", async () 
   assert.match(stage, /volume\.field\.fill/);
   assert.match(stage, /wallalive-semantic-character/);
   assert.match(stage, /SphereGeometry/);
-  assert.match(stage, /CapsuleGeometry/);
+  assert.match(stage, /SkinnedMesh/);
+  assert.match(stage, /skinIndex/);
+  assert.match(stage, /skinWeight/);
+  assert.doesNotMatch(stage, /CapsuleGeometry/);
   assert.match(stage, /TubeGeometry/);
   assert.match(stage, /texturePlane: false/);
   assert.match(stage, /viewableDegrees: 360/);
