@@ -380,11 +380,14 @@ export function prepareNeuralCharacter(source: THREE.Group, rig?: CharacterRig) 
       }, branch.getWorldPosition(new THREE.Vector3()));
       const dx = endpoint.x - rootPosition.x;
       const dy = endpoint.y - rootPosition.y;
-      if (dy < -boneSize.y * 0.13) {
+      const semanticName = branch.name.toLowerCase();
+      const namedLeg = /(?:^|[._-])(leg|foot|paw|hoof)(?:$|[._-])/.test(semanticName);
+      const namedArm = /(?:^|[._-])(arm|hand|wing|fin|tentacle)(?:$|[._-])/.test(semanticName);
+      if (namedLeg || (!namedArm && dy < -boneSize.y * 0.13)) {
         rigMap.legs.push(branch);
         if (dx < 0) rigMap.legLeft ??= branch;
         else rigMap.legRight ??= branch;
-      } else if (Math.abs(dx) > boneSize.x * 0.2) {
+      } else if (namedArm || Math.abs(dx) > boneSize.x * 0.2) {
         rigMap.arms.push(branch);
         if (dx < 0) rigMap.armLeft ??= branch;
         else rigMap.armRight ??= branch;
@@ -399,7 +402,7 @@ export function prepareNeuralCharacter(source: THREE.Group, rig?: CharacterRig) 
   character.userData.wallaliveRig = rigMap;
   character.userData.wallaliveSemantic = semanticMap;
   character.userData.reconstruction = {
-    method: "AniGen joint mesh-skeleton-skinning reconstruction",
+    method: "neural full-volume mesh + learned variable graph skinning",
     assetType: "glTF SkinnedMesh",
     topology: "generated full 3D surface",
     viewableDegrees: 360,

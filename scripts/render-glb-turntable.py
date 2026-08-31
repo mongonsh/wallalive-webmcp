@@ -66,12 +66,12 @@ def main() -> None:
     bpy.context.scene.world = world
     world.use_nodes = True
     world.node_tree.nodes["Background"].inputs["Color"].default_value = (0.035, 0.048, 0.047, 1)
-    world.node_tree.nodes["Background"].inputs["Strength"].default_value = 0.6
+    world.node_tree.nodes["Background"].inputs["Strength"].default_value = 0.28
 
     for name, location, energy, color, size in (
-        ("Key", center + Vector((-longest * 2.2, -longest * 2.4, longest * 2.7)), 1100, (1.0, 0.83, 0.67), longest * 2.0),
-        ("Fill", center + Vector((longest * 2.4, -longest * 0.8, longest * 1.2)), 850, (0.55, 0.82, 1.0), longest * 1.8),
-        ("Rim", center + Vector((longest * 0.2, longest * 2.4, longest * 2.0)), 950, (0.75, 1.0, 0.55), longest * 1.6),
+        ("Key", center + Vector((-longest * 2.2, -longest * 2.4, longest * 2.7)), 560, (1.0, 0.90, 0.80), longest * 2.0),
+        ("Fill", center + Vector((longest * 2.4, -longest * 0.8, longest * 1.2)), 260, (0.68, 0.86, 1.0), longest * 1.8),
+        ("Rim", center + Vector((longest * 0.2, longest * 2.4, longest * 2.0)), 340, (0.82, 1.0, 0.70), longest * 1.6),
     ):
         data = bpy.data.lights.new(name, "AREA")
         data.energy = energy

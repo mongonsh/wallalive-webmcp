@@ -62,6 +62,30 @@ CASES = {
         "body_color": "#9dce82",
         "line_color": "#31572c",
     },
+    "car": {
+        "key_id": "5290218582179840",
+        "source_line_index": 2402,
+        "topology": "machine",
+        "expected_visible_parts": ["body", "window", "wheel", "linkage"],
+        "body_color": "#f4b15c",
+        "line_color": "#5f3714",
+    },
+    "snake": {
+        "key_id": "5690765676118016",
+        "source_line_index": 2408,
+        "topology": "chain",
+        "expected_visible_parts": ["head", "eye", "body", "segment", "tail"],
+        "body_color": "#8fd39b",
+        "line_color": "#214c2c",
+    },
+    "snowman": {
+        "key_id": "6049313371193344",
+        "source_line_index": 2405,
+        "topology": "biped",
+        "expected_visible_parts": ["head", "eye", "mouth", "body"],
+        "body_color": "#dcefff",
+        "line_color": "#314d68",
+    },
 }
 
 

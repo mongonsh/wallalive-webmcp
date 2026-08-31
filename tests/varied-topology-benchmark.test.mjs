@@ -18,6 +18,9 @@ test("keeps the varied filled-drawing benchmark outside every topology-v10 split
     ["fish", "aquatic"],
     ["octopus", "radial"],
     ["tree", "branched"],
+    ["car", "machine"],
+    ["snake", "chain"],
+    ["snowman", "biped"],
   ];
 
   assert.deepEqual(manifest.cases.map((item) => [item.id, item.expected_topology]), expected);
@@ -39,7 +42,7 @@ test("keeps the varied filled-drawing benchmark outside every topology-v10 split
   }
 });
 
-test("bundled AniGen judge asset is closed volumetric colored and skinned", async () => {
+test("bundled AniGen reference asset is closed volumetric colored and skinned", async () => {
   const evaluator = fileURLToPath(new URL("../scripts/evaluate-anigen.mjs", import.meta.url));
   const asset = fileURLToPath(new URL("../public/anigen-demo.glb", import.meta.url));
   const { stdout } = await execFileAsync(process.execPath, [evaluator, "--inspect", asset], { maxBuffer: 1_000_000 });
@@ -55,4 +58,26 @@ test("bundled AniGen judge asset is closed volumetric colored and skinned", asyn
   assert.equal(inspection.trueVolume, true);
   assert.equal(inspection.rigged, true);
   assert.equal(inspection.colorData, true);
+});
+
+test("all eight held-out drawing families produce asymmetric closed learned-depth rigs", async () => {
+  const report = JSON.parse(await readFile(new URL("../eval/varied-drawings/local-depth-v1-results.json", import.meta.url), "utf8"));
+  const topology = JSON.parse(await readFile(new URL("../eval/varied-drawings/topology-v10-results.json", import.meta.url), "utf8"));
+  assert.equal(report.model, "wallalive-sketch-depth-v1");
+  assert.equal(report.cases, 8);
+  assert.equal(report.passed, true);
+  assert.equal(topology.cases.length, 8);
+  assert.equal(topology.passed, true);
+  for (const item of report.results) {
+    assert.ok(item.vertices > 10_000);
+    assert.ok(item.triangles > 20_000);
+    assert.ok(item.depth_ratio > 0.17);
+    assert.ok(item.mean_front_back_asymmetry > 0.005);
+    assert.equal(item.bones, item.active_joints);
+    assert.ok(item.branch_influence_coverage > 0.12);
+    assert.equal(item.closed, true);
+    assert.equal(item.true_volume, true);
+    assert.equal(item.rigged, true);
+    assert.equal(item.color, true);
+  }
 });

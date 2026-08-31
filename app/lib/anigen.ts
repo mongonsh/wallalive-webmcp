@@ -3,6 +3,8 @@ import type { Client } from "@gradio/client";
 export const ANIGEN_SPACE = "VAST-AI/AniGen";
 export const ANIGEN_PROVIDER = "AniGen" as const;
 export const ANIGEN_MODEL = "ss_flow_solo + slat_flow_auto" as const;
+export const WALLALIVE_NEURAL_PROVIDER = "WallAlive Sketch Neural Lab" as const;
+export const WALLALIVE_NEURAL_MODEL = "sketch-to-render + TripoSR + variable graph skin" as const;
 
 export type NeuralReconstructionPhase =
   | "idle"
@@ -22,9 +24,9 @@ export type NeuralProgress = {
 };
 
 export type NeuralAsset = {
-  source: "anigen-live" | "anigen-demo";
-  provider: typeof ANIGEN_PROVIDER;
-  model: typeof ANIGEN_MODEL;
+  source: "anigen-live" | "wallalive-neural-demo";
+  provider: typeof ANIGEN_PROVIDER | typeof WALLALIVE_NEURAL_PROVIDER;
+  model: typeof ANIGEN_MODEL | typeof WALLALIVE_NEURAL_MODEL;
   meshUrl: string;
   skeletonUrl?: string;
   processedImageUrl?: string;
@@ -162,12 +164,12 @@ export async function generateAniGenAsset(
 
 export function createBundledAniGenAsset(): NeuralAsset {
   return {
-    source: "anigen-demo",
-    provider: ANIGEN_PROVIDER,
-    model: ANIGEN_MODEL,
-    meshUrl: "/anigen-demo.glb",
+    source: "wallalive-neural-demo",
+    provider: WALLALIVE_NEURAL_PROVIDER,
+    model: WALLALIVE_NEURAL_MODEL,
+    meshUrl: "/pip-neural-demo.glb",
     preview: true,
-    generatedAt: "2026-08-30T00:00:00.000Z",
+    generatedAt: "2026-08-31T01:41:00.000Z",
   };
 }
 

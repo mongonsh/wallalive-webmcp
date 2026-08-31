@@ -4,6 +4,7 @@ import {
   TOPOLOGY_CLASSES,
   type DrawingExtraction,
   type LearnedPartHint,
+  type LearnedDepthField,
   type LearnedPose,
   type LearnedTopology,
   type TopologyNode,
@@ -16,12 +17,14 @@ const FACE_V3_MODEL_PATH = "/models/wallalive-face-v3.onnx";
 const FACE_V4_MODEL_PATH = "/models/wallalive-face-v4.onnx";
 const POSE_MODEL_PATH = "/models/wallalive-amateur-pose-v6.onnx";
 const TOPOLOGY_MODEL_PATH = "/models/wallalive-topology-v10.onnx";
+const DEPTH_MODEL_PATH = "/models/wallalive-sketch-depth-v1.onnx";
 const FALLBACK_MODEL_PATHS = ["/models/wallalive-parts-v2.onnx", "/models/wallalive-parts-v1.onnx"] as const;
 const BODY_SIZE = 96;
 const FACE_V3_SIZE = 96;
 const FACE_SIZE = 128;
 const POSE_HEATMAP_SIZE = 48;
 const TOPOLOGY_FIELD_SIZE = 48;
+const DEPTH_SIZE = 64;
 const FALLBACK_SIZE = 64;
 const PARTS = ["body", "eye", "cheek", "mouth", "ear", "arm", "hand", "leg", "foot"] as const;
 const FACE_PARTS = ["eye", "cheek", "mouth", "ear"] as const;
@@ -73,7 +76,7 @@ type PreparedImage = {
 };
 
 let runtimePromise: Promise<OrtRuntime> | null = null;
-let sessionPromise: Promise<{ ort: OrtRuntime; body: OrtSession; faceV3: OrtSession; faceV4: OrtSession; pose: OrtSession; topology: OrtSession }> | null = null;
+let sessionPromise: Promise<{ ort: OrtRuntime; body: OrtSession; faceV3: OrtSession; faceV4: OrtSession; pose: OrtSession; topology: OrtSession; depth: OrtSession }> | null = null;
 let fallbackSessionPromise: Promise<OrtSession[]> | null = null;
 
 const sessionOptions = {
@@ -88,14 +91,15 @@ function loadSessions() {
     sessionPromise = runtimePromise.then(async (ort) => {
       ort.env.wasm.numThreads = typeof crossOriginIsolated !== "undefined" && crossOriginIsolated ? 2 : 1;
       ort.env.wasm.proxy = false;
-      const [body, faceV3, faceV4, pose, topology] = await Promise.all([
+      const [body, faceV3, faceV4, pose, topology, depth] = await Promise.all([
         ort.InferenceSession.create(BODY_MODEL_PATH, sessionOptions),
         ort.InferenceSession.create(FACE_V3_MODEL_PATH, sessionOptions),
         ort.InferenceSession.create(FACE_V4_MODEL_PATH, sessionOptions),
         ort.InferenceSession.create(POSE_MODEL_PATH, sessionOptions),
         ort.InferenceSession.create(TOPOLOGY_MODEL_PATH, sessionOptions),
+        ort.InferenceSession.create(DEPTH_MODEL_PATH, sessionOptions),
       ]);
-      return { ort, body, faceV3, faceV4, pose, topology };
+      return { ort, body, faceV3, faceV4, pose, topology, depth };
     });
   }
   return sessionPromise;
@@ -164,6 +168,123 @@ function prepareImage(image: HTMLImageElement, size: number, crop?: { x: number;
     values: canvasValues(canvas),
     mapPoint,
     contentRect: { x: offsetX, y: offsetY, width: drawWidth, height: drawHeight },
+  };
+}
+
+function prepareDepthImage(image: HTMLImageElement) {
+  const canvas = document.createElement("canvas");
+  canvas.width = DEPTH_SIZE;
+  canvas.height = DEPTH_SIZE;
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  if (!context) throw new Error("Canvas processing is unavailable in this browser.");
+  context.clearRect(0, 0, DEPTH_SIZE, DEPTH_SIZE);
+  context.imageSmoothingEnabled = true;
+  context.imageSmoothingQuality = "high";
+  context.drawImage(image, 0, 0, DEPTH_SIZE, DEPTH_SIZE);
+  const rgba = context.getImageData(0, 0, DEPTH_SIZE, DEPTH_SIZE).data;
+  const area = DEPTH_SIZE * DEPTH_SIZE;
+  const mask = new Uint8Array(area);
+  for (let index = 0; index < area; index += 1) mask[index] = rgba[index * 4 + 3] > 38 ? 1 : 0;
+
+  const distance = new Float32Array(area);
+  const far = DEPTH_SIZE * 2;
+  const diagonal = Math.SQRT2;
+  for (let index = 0; index < area; index += 1) distance[index] = mask[index] ? far : 0;
+  for (let y = 0; y < DEPTH_SIZE; y += 1) {
+    for (let x = 0; x < DEPTH_SIZE; x += 1) {
+      const index = y * DEPTH_SIZE + x;
+      if (!distance[index]) continue;
+      if (x) distance[index] = Math.min(distance[index], distance[index - 1] + 1);
+      if (y) distance[index] = Math.min(distance[index], distance[index - DEPTH_SIZE] + 1);
+      if (x && y) distance[index] = Math.min(distance[index], distance[index - DEPTH_SIZE - 1] + diagonal);
+      if (x + 1 < DEPTH_SIZE && y) distance[index] = Math.min(distance[index], distance[index - DEPTH_SIZE + 1] + diagonal);
+    }
+  }
+  let maximumDistance = 1;
+  for (let y = DEPTH_SIZE - 1; y >= 0; y -= 1) {
+    for (let x = DEPTH_SIZE - 1; x >= 0; x -= 1) {
+      const index = y * DEPTH_SIZE + x;
+      if (!distance[index]) continue;
+      if (x + 1 < DEPTH_SIZE) distance[index] = Math.min(distance[index], distance[index + 1] + 1);
+      if (y + 1 < DEPTH_SIZE) distance[index] = Math.min(distance[index], distance[index + DEPTH_SIZE] + 1);
+      if (x + 1 < DEPTH_SIZE && y + 1 < DEPTH_SIZE) distance[index] = Math.min(distance[index], distance[index + DEPTH_SIZE + 1] + diagonal);
+      if (x && y + 1 < DEPTH_SIZE) distance[index] = Math.min(distance[index], distance[index + DEPTH_SIZE - 1] + diagonal);
+      maximumDistance = Math.max(maximumDistance, distance[index]);
+    }
+  }
+
+  const ink = new Uint8Array(area);
+  const colorDifference = (left: number, right: number) => {
+    const leftOffset = left * 4;
+    const rightOffset = right * 4;
+    return Math.max(
+      Math.abs(rgba[leftOffset] - rgba[rightOffset]),
+      Math.abs(rgba[leftOffset + 1] - rgba[rightOffset + 1]),
+      Math.abs(rgba[leftOffset + 2] - rgba[rightOffset + 2]),
+      Math.abs(rgba[leftOffset + 3] - rgba[rightOffset + 3]),
+    );
+  };
+  for (let y = 0; y < DEPTH_SIZE; y += 1) {
+    for (let x = 0; x < DEPTH_SIZE; x += 1) {
+      const index = y * DEPTH_SIZE + x;
+      if (!mask[index]) continue;
+      const neighbors = [
+        x ? index - 1 : -1,
+        x + 1 < DEPTH_SIZE ? index + 1 : -1,
+        y ? index - DEPTH_SIZE : -1,
+        y + 1 < DEPTH_SIZE ? index + DEPTH_SIZE : -1,
+      ];
+      ink[index] = neighbors.some((neighbor) => neighbor < 0 || !mask[neighbor] || colorDifference(index, neighbor) >= 30) ? 1 : 0;
+    }
+  }
+  // Match the one-pixel analytic-contour dilation used while training.
+  const dilatedInk = Uint8Array.from(ink);
+  for (let y = 1; y < DEPTH_SIZE - 1; y += 1) {
+    for (let x = 1; x < DEPTH_SIZE - 1; x += 1) {
+      const index = y * DEPTH_SIZE + x;
+      if (!mask[index] || ink[index]) continue;
+      for (let offsetY = -1; offsetY <= 1 && !dilatedInk[index]; offsetY += 1) {
+        for (let offsetX = -1; offsetX <= 1; offsetX += 1) {
+          if (ink[(y + offsetY) * DEPTH_SIZE + x + offsetX]) {
+            dilatedInk[index] = 1;
+            break;
+          }
+        }
+      }
+    }
+  }
+  const values = new Float32Array(area * 3);
+  for (let index = 0; index < area; index += 1) {
+    values[index] = mask[index];
+    values[area + index] = distance[index] / maximumDistance;
+    values[area * 2 + index] = dilatedInk[index];
+  }
+  return values;
+}
+
+function decodeDepth(output: import("onnxruntime-web/wasm").Tensor, latencyMs: number): LearnedDepthField {
+  const values = output.data as Float32Array;
+  const area = DEPTH_SIZE * DEPTH_SIZE;
+  const front = Float32Array.from(values.subarray(0, area));
+  const back = Float32Array.from(values.subarray(area, area * 2));
+  let occupied = 0;
+  let thickness = 0;
+  let asymmetry = 0;
+  for (let index = 0; index < area; index += 1) {
+    if (front[index] + back[index] <= 0.001) continue;
+    occupied += 1;
+    thickness += (front[index] + back[index]) * 0.525;
+    asymmetry += Math.abs(front[index] - back[index]) * 0.525;
+  }
+  return {
+    model: "wallalive-sketch-depth-v1",
+    latencyMs,
+    size: DEPTH_SIZE,
+    depthScale: 0.525,
+    front,
+    back,
+    meanThickness: thickness / Math.max(1, occupied),
+    meanAsymmetry: asymmetry / Math.max(1, occupied),
   };
 }
 
@@ -759,15 +880,23 @@ function supplementFallbackHints(primary: LearnedPartHint[], fallback: LearnedPa
 
 export async function recognizeDrawingParts(extraction: DrawingExtraction): Promise<DrawingExtraction> {
   const started = performance.now();
-  const [{ ort, body, faceV3, faceV4, pose, topology }, image] = await Promise.all([loadSessions(), loadImage(extraction.textureUrl)]);
+  const [{ ort, body, faceV3, faceV4, pose, topology, depth }, image] = await Promise.all([loadSessions(), loadImage(extraction.textureUrl)]);
   const prepared = prepareImage(image, BODY_SIZE);
   const bodyTensor = new ort.Tensor("float32", prepared.values, [1, 3, BODY_SIZE, BODY_SIZE]);
+  const depthValues = prepareDepthImage(image);
+  const depthTensor = new ort.Tensor("float32", depthValues, [1, 3, DEPTH_SIZE, DEPTH_SIZE]);
   const poseStarted = performance.now();
-  const [bodyResults, poseResults, topologyResults] = await Promise.all([
+  const depthStarted = performance.now();
+  const [bodyResults, poseResults, topologyResults, depthResults] = await Promise.all([
     body.run({ pixel_values: bodyTensor }),
     pose.run({ pose_values: bodyTensor }),
     topology.run({ topology_values: bodyTensor }),
+    depth.run({ sketch_values: depthTensor }),
   ]);
+  const learnedDepth = decodeDepth(
+    depthResults.front_back_depth ?? Object.values(depthResults)[0],
+    Math.round(performance.now() - depthStarted),
+  );
   const partOutput = bodyResults.part_logits ?? Object.values(bodyResults)[0];
   const coarseOutput = bodyResults.coarse_logits ?? Object.values(bodyResults)[1];
   const fullHints = decodeHints(partOutput, BODY_SIZE, PARTS, BODY_THRESHOLDS, prepared.values, prepared.mapPoint, { skipBody: true });
@@ -838,5 +967,8 @@ export async function recognizeDrawingParts(extraction: DrawingExtraction): Prom
     // pair count so they cannot overwhelm unusual v3 multi-part predictions.
     hints = supplementFallbackHints(hints, oldHints);
   }
-  return mergeLearnedPartHints(extraction, hints, Math.round(performance.now() - started), learnedPose, learnedTopology);
+  return {
+    ...mergeLearnedPartHints(extraction, hints, Math.round(performance.now() - started), learnedPose, learnedTopology),
+    depthRecognition: learnedDepth,
+  };
 }

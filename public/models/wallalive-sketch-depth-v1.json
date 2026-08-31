@@ -1,0 +1,256 @@
+{
+  "model": "wallalive-sketch-depth-v1",
+  "architecture": "compact U-Net front/back depth prior",
+  "purpose": "predict distinct visible and hidden surfaces from a segmented drawing",
+  "input": [
+    1,
+    3,
+    64,
+    64
+  ],
+  "input_channels": [
+    "foreground mask",
+    "interior distance",
+    "authored/internal contour ink"
+  ],
+  "output": [
+    1,
+    2,
+    64,
+    64
+  ],
+  "output_channels": [
+    "front depth",
+    "back depth"
+  ],
+  "depth_scale_scene_units": 0.75,
+  "families": [
+    "biped",
+    "quadruped",
+    "winged",
+    "aquatic",
+    "radial",
+    "branched",
+    "machine",
+    "chain"
+  ],
+  "parameters": 80486,
+  "training_examples": 6144,
+  "validation_examples": 768,
+  "sealed_test_examples": 768,
+  "family_counts": {
+    "train": {
+      "biped": 768,
+      "quadruped": 768,
+      "winged": 768,
+      "aquatic": 768,
+      "radial": 768,
+      "branched": 768,
+      "machine": 768,
+      "chain": 768
+    },
+    "validation": {
+      "biped": 96,
+      "quadruped": 96,
+      "winged": 96,
+      "aquatic": 96,
+      "radial": 96,
+      "branched": 96,
+      "machine": 96,
+      "chain": 96
+    },
+    "test": {
+      "biped": 96,
+      "quadruped": 96,
+      "winged": 96,
+      "aquatic": 96,
+      "radial": 96,
+      "branched": 96,
+      "machine": 96,
+      "chain": 96
+    }
+  },
+  "selection": "lowest validation surface MAE; sealed test opened once after selection",
+  "test_split_used_for_selection": false,
+  "best_epoch": 20,
+  "validation": {
+    "epoch": 20,
+    "train_loss": 0.047016,
+    "surface_mae_normalized": 0.036917,
+    "surface_mae_scene_units": 0.027688,
+    "front_back_asymmetry_mae": 0.044092,
+    "surface_correlation": 0.915629
+  },
+  "sealed_test": {
+    "surface_mae_normalized": 0.036363,
+    "surface_mae_scene_units": 0.027272,
+    "front_back_asymmetry_mae": 0.042699,
+    "surface_correlation": 0.91988
+  },
+  "onnx_max_absolute_error": 2.25752592086792e-06,
+  "onnx_export_verified": true,
+  "training_data": "procedural analytic unions of articulated ellipsoids; no child drawings or user pixels",
+  "limitations": "single-view hidden depth is a learned plausible prior, not measurable ground truth for an unseen back",
+  "history": [
+    {
+      "epoch": 1,
+      "train_loss": 0.090477,
+      "surface_mae_normalized": 0.056574,
+      "surface_mae_scene_units": 0.042431,
+      "front_back_asymmetry_mae": 0.069707,
+      "surface_correlation": 0.811132
+    },
+    {
+      "epoch": 2,
+      "train_loss": 0.078177,
+      "surface_mae_normalized": 0.054439,
+      "surface_mae_scene_units": 0.040829,
+      "front_back_asymmetry_mae": 0.06967,
+      "surface_correlation": 0.828925
+    },
+    {
+      "epoch": 3,
+      "train_loss": 0.075429,
+      "surface_mae_normalized": 0.051768,
+      "surface_mae_scene_units": 0.038826,
+      "front_back_asymmetry_mae": 0.069752,
+      "surface_correlation": 0.837729
+    },
+    {
+      "epoch": 4,
+      "train_loss": 0.070737,
+      "surface_mae_normalized": 0.047758,
+      "surface_mae_scene_units": 0.035819,
+      "front_back_asymmetry_mae": 0.063118,
+      "surface_correlation": 0.866883
+    },
+    {
+      "epoch": 5,
+      "train_loss": 0.064191,
+      "surface_mae_normalized": 0.04506,
+      "surface_mae_scene_units": 0.033795,
+      "front_back_asymmetry_mae": 0.055394,
+      "surface_correlation": 0.882761
+    },
+    {
+      "epoch": 6,
+      "train_loss": 0.060156,
+      "surface_mae_normalized": 0.04244,
+      "surface_mae_scene_units": 0.03183,
+      "front_back_asymmetry_mae": 0.051612,
+      "surface_correlation": 0.89451
+    },
+    {
+      "epoch": 7,
+      "train_loss": 0.057491,
+      "surface_mae_normalized": 0.041252,
+      "surface_mae_scene_units": 0.030939,
+      "front_back_asymmetry_mae": 0.049136,
+      "surface_correlation": 0.900611
+    },
+    {
+      "epoch": 8,
+      "train_loss": 0.055831,
+      "surface_mae_normalized": 0.04089,
+      "surface_mae_scene_units": 0.030667,
+      "front_back_asymmetry_mae": 0.050569,
+      "surface_correlation": 0.903005
+    },
+    {
+      "epoch": 9,
+      "train_loss": 0.054669,
+      "surface_mae_normalized": 0.040174,
+      "surface_mae_scene_units": 0.03013,
+      "front_back_asymmetry_mae": 0.049269,
+      "surface_correlation": 0.903173
+    },
+    {
+      "epoch": 10,
+      "train_loss": 0.053218,
+      "surface_mae_normalized": 0.039843,
+      "surface_mae_scene_units": 0.029882,
+      "front_back_asymmetry_mae": 0.047289,
+      "surface_correlation": 0.908066
+    },
+    {
+      "epoch": 11,
+      "train_loss": 0.052281,
+      "surface_mae_normalized": 0.039812,
+      "surface_mae_scene_units": 0.029859,
+      "front_back_asymmetry_mae": 0.045844,
+      "surface_correlation": 0.911157
+    },
+    {
+      "epoch": 12,
+      "train_loss": 0.051509,
+      "surface_mae_normalized": 0.038389,
+      "surface_mae_scene_units": 0.028792,
+      "front_back_asymmetry_mae": 0.046202,
+      "surface_correlation": 0.909683
+    },
+    {
+      "epoch": 13,
+      "train_loss": 0.050419,
+      "surface_mae_normalized": 0.03837,
+      "surface_mae_scene_units": 0.028778,
+      "front_back_asymmetry_mae": 0.045865,
+      "surface_correlation": 0.912219
+    },
+    {
+      "epoch": 14,
+      "train_loss": 0.049728,
+      "surface_mae_normalized": 0.037676,
+      "surface_mae_scene_units": 0.028257,
+      "front_back_asymmetry_mae": 0.044986,
+      "surface_correlation": 0.913418
+    },
+    {
+      "epoch": 15,
+      "train_loss": 0.049059,
+      "surface_mae_normalized": 0.037375,
+      "surface_mae_scene_units": 0.028031,
+      "front_back_asymmetry_mae": 0.044645,
+      "surface_correlation": 0.913973
+    },
+    {
+      "epoch": 16,
+      "train_loss": 0.048374,
+      "surface_mae_normalized": 0.037277,
+      "surface_mae_scene_units": 0.027958,
+      "front_back_asymmetry_mae": 0.044776,
+      "surface_correlation": 0.914367
+    },
+    {
+      "epoch": 17,
+      "train_loss": 0.047902,
+      "surface_mae_normalized": 0.037152,
+      "surface_mae_scene_units": 0.027864,
+      "front_back_asymmetry_mae": 0.04451,
+      "surface_correlation": 0.914646
+    },
+    {
+      "epoch": 18,
+      "train_loss": 0.047467,
+      "surface_mae_normalized": 0.037249,
+      "surface_mae_scene_units": 0.027937,
+      "front_back_asymmetry_mae": 0.044281,
+      "surface_correlation": 0.915682
+    },
+    {
+      "epoch": 19,
+      "train_loss": 0.047201,
+      "surface_mae_normalized": 0.037004,
+      "surface_mae_scene_units": 0.027753,
+      "front_back_asymmetry_mae": 0.044216,
+      "surface_correlation": 0.915288
+    },
+    {
+      "epoch": 20,
+      "train_loss": 0.047016,
+      "surface_mae_normalized": 0.036917,
+      "surface_mae_scene_units": 0.027688,
+      "front_back_asymmetry_mae": 0.044092,
+      "surface_correlation": 0.915629
+    }
+  ]
+}

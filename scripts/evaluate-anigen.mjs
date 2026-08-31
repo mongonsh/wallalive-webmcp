@@ -162,6 +162,8 @@ function inspectGlb(buffer) {
   let coloredPrimitives = 0;
   let validWeightVertices = 0;
   let weightVertices = 0;
+  let branchInfluencedVertices = 0;
+  const activeJointIndices = new Set();
 
   for (const mesh of document.meshes ?? []) {
     for (const primitive of mesh.primitives ?? []) {
@@ -181,10 +183,18 @@ function inspectGlb(buffer) {
       if (hasSkin) {
         skinnedPrimitives += 1;
         const weights = accessorReader(document, binary, primitive.attributes.WEIGHTS_0);
+        const joints = accessorReader(document, binary, primitive.attributes.JOINTS_0);
         weightVertices += weights.accessor.count;
         for (let item = 0; item < weights.accessor.count; item += 1) {
           let sum = 0;
-          for (let component = 0; component < weights.components; component += 1) sum += weights.read(item, component);
+          let branchWeight = 0;
+          for (let component = 0; component < weights.components; component += 1) {
+            const weight = weights.read(item, component);
+            sum += weight;
+            if (weight > 0.02) activeJointIndices.add(joints.read(item, component));
+            if (joints.read(item, component) > 0) branchWeight += weight;
+          }
+          if (branchWeight > 0.05) branchInfluencedVertices += 1;
           if (sum > 0.99 && sum < 1.01) validWeightVertices += 1;
         }
       }
@@ -204,6 +214,7 @@ function inspectGlb(buffer) {
   const weightNormalizationRatio = weightVertices ? validWeightVertices / weightVertices : 0;
   return {
     bytes: buffer.byteLength,
+    assetExtras: document.extras ?? null,
     meshes: document.meshes?.length ?? 0,
     primitives,
     vertices,
@@ -212,8 +223,10 @@ function inspectGlb(buffer) {
     depthRatio: spans[2] / Math.max(1e-9, Math.max(spans[0], spans[1])),
     skins: document.skins?.length ?? 0,
     bones: maximumSkinJoints,
+    activeJoints: activeJointIndices.size,
     skinnedPrimitives,
     weightNormalizationRatio,
+    branchInfluenceCoverage: weightVertices ? branchInfluencedVertices / weightVertices : 0,
     materials: document.materials?.length ?? 0,
     coloredPrimitives,
     boundaryEdges: surface.boundaryEdges,

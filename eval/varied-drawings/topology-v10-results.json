@@ -142,6 +142,90 @@
         "endpoint": 598,
         "junction": 555
       }
+    },
+    {
+      "id": "car",
+      "source_line_index": 2402,
+      "expected": "machine",
+      "predicted": "machine",
+      "confidence": 1.0,
+      "passed": true,
+      "top3": [
+        [
+          "machine",
+          1.0
+        ],
+        [
+          "chain",
+          0.0
+        ],
+        [
+          "biped",
+          0.0
+        ]
+      ],
+      "positive_field_pixels": {
+        "foreground": 2226,
+        "centerline": 2207,
+        "endpoint": 2171,
+        "junction": 2231
+      }
+    },
+    {
+      "id": "snake",
+      "source_line_index": 2408,
+      "expected": "chain",
+      "predicted": "chain",
+      "confidence": 0.9772,
+      "passed": true,
+      "top3": [
+        [
+          "chain",
+          0.9772
+        ],
+        [
+          "winged",
+          0.0227
+        ],
+        [
+          "aquatic",
+          0.0002
+        ]
+      ],
+      "positive_field_pixels": {
+        "foreground": 562,
+        "centerline": 475,
+        "endpoint": 463,
+        "junction": 400
+      }
+    },
+    {
+      "id": "snowman",
+      "source_line_index": 2405,
+      "expected": "biped",
+      "predicted": "biped",
+      "confidence": 1.0,
+      "passed": true,
+      "top3": [
+        [
+          "biped",
+          1.0
+        ],
+        [
+          "winged",
+          0.0
+        ],
+        [
+          "quadruped",
+          0.0
+        ]
+      ],
+      "positive_field_pixels": {
+        "foreground": 1614,
+        "centerline": 1611,
+        "endpoint": 1565,
+        "junction": 1703
+      }
     }
   ]
 }

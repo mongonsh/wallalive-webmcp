@@ -5,7 +5,7 @@ import * as THREE from "three";
 import { DecalGeometry } from "three/addons/geometries/DecalGeometry.js";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { MarchingCubes } from "three/addons/objects/MarchingCubes.js";
-import type { CharacterRig, ContourPoint, SemanticPart, SkeletonPoint } from "../lib/drawing";
+import type { CharacterRig, ContourPoint, LearnedDepthField, SemanticPart, SkeletonPoint } from "../lib/drawing";
 import { disposeObject, prepareNeuralCharacter, type NeuralRigMap, type NeuralSemanticMap, type RiggedAssetInfo } from "../lib/rigged-model";
 
 export type CharacterAction = "idle" | "wave" | "dance" | "hop" | "walk" | "hide" | "spin";
@@ -21,6 +21,7 @@ type ARStageProps = {
   skeleton: SkeletonPoint[] | null;
   textureUrl: string | null;
   rig: CharacterRig | null;
+  depth: LearnedDepthField | null;
   action: CharacterAction;
   accent: string;
   inflation: number;
@@ -92,7 +93,21 @@ function inkMaterial(color: string) {
   });
 }
 
-export function buildCharacter(contour: ContourPoint[], skeleton: SkeletonPoint[], rig: CharacterRig, textureUrl: string | null, accent: string, inflation: number) {
+function sampleLearnedDepth(field: Float32Array, depth: LearnedDepthField, x: number, y: number) {
+  const modelX = Math.min(depth.size - 1, Math.max(0, (x / 1.4 + 0.5) * (depth.size - 1)));
+  const modelY = Math.min(depth.size - 1, Math.max(0, (0.5 - y / 1.4) * (depth.size - 1)));
+  const x0 = Math.floor(modelX);
+  const y0 = Math.floor(modelY);
+  const x1 = Math.min(depth.size - 1, x0 + 1);
+  const y1 = Math.min(depth.size - 1, y0 + 1);
+  const amountX = modelX - x0;
+  const amountY = modelY - y0;
+  const top = field[y0 * depth.size + x0] * (1 - amountX) + field[y0 * depth.size + x1] * amountX;
+  const bottom = field[y1 * depth.size + x0] * (1 - amountX) + field[y1 * depth.size + x1] * amountX;
+  return (top * (1 - amountY) + bottom * amountY) * depth.depthScale;
+}
+
+export function buildCharacter(contour: ContourPoint[], skeleton: SkeletonPoint[], rig: CharacterRig, depth: LearnedDepthField | null, textureUrl: string | null, accent: string, inflation: number) {
   const character = new THREE.Group();
   character.name = "wallalive-semantic-character";
 
@@ -127,11 +142,39 @@ export function buildCharacter(contour: ContourPoint[], skeleton: SkeletonPoint[
     }
   }
   const bodyHalfDepth = Math.min(0.48, Math.max(0.12, (bodyPart?.size.z ?? 0.34) * 0.58 * inflation));
-  const depthAt = (x: number, y: number) => {
+  const fallbackDepthAt = (x: number, y: number) => {
     if (!pointInsideContour(x, y, contour)) return 0;
     const normalizedDistance = Math.min(1, distanceToContour(x, y, contour) / maximumInteriorDistance);
     return Math.max(cell * 0.7, bodyHalfDepth * Math.sqrt(normalizedDistance));
   };
+  const frontDepthAt = (x: number, y: number) => {
+    if (!pointInsideContour(x, y, contour)) return 0;
+    return depth
+      ? Math.max(cell * 0.7, sampleLearnedDepth(depth.front, depth, x, y) * inflation)
+      : fallbackDepthAt(x, y);
+  };
+  const backDepthAt = (x: number, y: number) => {
+    if (!pointInsideContour(x, y, contour)) return 0;
+    return depth
+      ? Math.max(cell * 0.7, sampleLearnedDepth(depth.back, depth, x, y) * inflation)
+      : fallbackDepthAt(x, y);
+  };
+  let maximumFrontDepth = cell;
+  let maximumBackDepth = cell;
+  const frontDepthField = new Float32Array(VOLUME_RESOLUTION * VOLUME_RESOLUTION);
+  const backDepthField = new Float32Array(VOLUME_RESOLUTION * VOLUME_RESOLUTION);
+  for (let y = 1; y < VOLUME_RESOLUTION - 1; y += 1) {
+    const fieldY = (y - half) / half;
+    for (let x = 1; x < VOLUME_RESOLUTION - 1; x += 1) {
+      const planeIndex = y * VOLUME_RESOLUTION + x;
+      if (!insideField[planeIndex]) continue;
+      const fieldX = (x - half) / half;
+      frontDepthField[planeIndex] = frontDepthAt(fieldX, fieldY);
+      backDepthField[planeIndex] = backDepthAt(fieldX, fieldY);
+      maximumFrontDepth = Math.max(maximumFrontDepth, frontDepthField[planeIndex]);
+      maximumBackDepth = Math.max(maximumBackDepth, backDepthField[planeIndex]);
+    }
+  }
   for (let z = 1; z < VOLUME_RESOLUTION - 1; z += 1) {
     const fieldZ = (z - half) / half;
     for (let y = 1; y < VOLUME_RESOLUTION - 1; y += 1) {
@@ -139,10 +182,9 @@ export function buildCharacter(contour: ContourPoint[], skeleton: SkeletonPoint[
         const planeIndex = y * VOLUME_RESOLUTION + x;
         const edgeDistance = edgeDistanceField[planeIndex];
         const signedEdge = insideField[planeIndex] ? edgeDistance : -edgeDistance;
-        const localDepth = insideField[planeIndex]
-          ? Math.max(cell * 0.7, bodyHalfDepth * Math.sqrt(Math.min(1, edgeDistance / maximumInteriorDistance)))
-          : 0;
-        volume.setCell(x, y, z, Math.min(signedEdge, localDepth - Math.abs(fieldZ)));
+        const localFront = frontDepthField[planeIndex];
+        const localBack = backDepthField[planeIndex];
+        volume.setCell(x, y, z, Math.min(signedEdge, localFront - fieldZ, localBack + fieldZ));
       }
     }
   }
@@ -224,7 +266,7 @@ export function buildCharacter(contour: ContourPoint[], skeleton: SkeletonPoint[
   skinnedVolume.castShadow = true;
   skinnedVolume.receiveShadow = true;
   skinnedVolume.userData.reconstruction = {
-    method: "silhouette-preserving signed-distance lens",
+    method: depth ? "learned distinct front/back depth fields" : "silhouette-preserving signed-distance lens fallback",
     polygonizer: "Marching Cubes",
     resolution: VOLUME_RESOLUTION,
     topology: "closed",
@@ -232,6 +274,12 @@ export function buildCharacter(contour: ContourPoint[], skeleton: SkeletonPoint[
     skeletonPoints: skeleton.length,
     semanticRig: rig.version,
     skinning: `${branchBones.length + 1} variable graph bones over one continuous surface`,
+    learnedDepth: depth ? {
+      model: depth.model,
+      meanThickness: depth.meanThickness,
+      meanAsymmetry: depth.meanAsymmetry,
+      frontBackMirrored: false,
+    } : null,
   };
   character.add(skinnedVolume);
 
@@ -243,9 +291,9 @@ export function buildCharacter(contour: ContourPoint[], skeleton: SkeletonPoint[
     const decal = new THREE.Mesh(
       new DecalGeometry(
         skinnedVolume,
-        new THREE.Vector3(0, 0, bodyHalfDepth * 0.82),
+        new THREE.Vector3(0, 0, maximumFrontDepth * 0.82),
         new THREE.Euler(0, 0, 0),
-        new THREE.Vector3(1.4, 1.4, bodyHalfDepth * 2.6),
+        new THREE.Vector3(1.4, 1.4, Math.max(0.2, (maximumFrontDepth + maximumBackDepth) * 1.4)),
       ),
       new THREE.MeshStandardMaterial({
         map: artworkTexture,
@@ -261,8 +309,6 @@ export function buildCharacter(contour: ContourPoint[], skeleton: SkeletonPoint[
     decal.name = "curved-artwork-skin";
     character.add(decal);
   }
-
-  const frontDepthAt = depthAt;
 
   const addInkFeature = (part: SemanticPart) => {
     const group = new THREE.Group();
@@ -338,7 +384,7 @@ export function buildCharacter(contour: ContourPoint[], skeleton: SkeletonPoint[
   };
   // Keep the authored silhouette readable even when the source paper and the
   // filled body are both pale. The front rim reinforces the exact captured
-  // contour; the rear rim makes the explicitly inferred symmetric back clear
+  // contour; the rear rim makes the separately learned hidden surface clear
   // during a 360° turn without copying facial features onto it.
   addInkFeature({
     id: "body-ink-outline",
@@ -354,7 +400,7 @@ export function buildCharacter(contour: ContourPoint[], skeleton: SkeletonPoint[
     outline: contour,
   });
   if (contour.length >= 6) {
-    const rearPoints = contour.map((point) => new THREE.Vector3(point.x, point.y, -frontDepthAt(point.x, point.y) - 0.009));
+    const rearPoints = contour.map((point) => new THREE.Vector3(point.x, point.y, -backDepthAt(point.x, point.y) - 0.009));
     const rearRim = new THREE.Mesh(
       new THREE.TubeGeometry(new THREE.CatmullRomCurve3(rearPoints, true, "centripetal", 0.3), Math.max(48, contour.length * 2), 0.0065, 8, true),
       inkMaterial(rig.lineColor),
@@ -370,11 +416,13 @@ export function buildCharacter(contour: ContourPoint[], skeleton: SkeletonPoint[
     .forEach(addInkFeature);
 
   character.userData.reconstruction = {
-    method: "learned variable topology graph over a silhouette-preserving volumetric body",
+    method: depth ? "learned variable topology graph + learned asymmetric front/back depth volume" : "variable topology graph + symmetric emergency depth fallback",
     texturePlane: false,
     viewableDegrees: 360,
     bodyTopology: "closed",
-    backPrior: "symmetric filled volume with silhouette rim; no invented face marks",
+    backPrior: depth ? "sketch-depth-v1 learned hidden surface; no copied face marks" : "symmetric emergency fallback; no invented face marks",
+    depthModel: depth?.model ?? null,
+    meanDepthAsymmetry: depth?.meanAsymmetry ?? 0,
     semanticParts: rig.parts.map((part) => ({ id: part.id, kind: part.kind, confidence: part.confidence, source: part.source })),
     joints: rig.joints,
     topologyKind: rig.topologyKind ?? null,
@@ -386,7 +434,7 @@ export function buildCharacter(contour: ContourPoint[], skeleton: SkeletonPoint[
 }
 
 export const ARStage = forwardRef<ARStageHandle, ARStageProps>(function ARStage(
-  { contour, skeleton, textureUrl, rig, action, accent, inflation, neuralAssetUrl, visible, onCapability, onPlaced, onNeuralAssetInfo },
+  { contour, skeleton, textureUrl, rig, depth, action, accent, inflation, neuralAssetUrl, visible, onCapability, onPlaced, onNeuralAssetInfo },
   ref,
 ) {
   const mountRef = useRef<HTMLDivElement>(null);
@@ -420,7 +468,7 @@ export const ARStage = forwardRef<ARStageHandle, ARStageProps>(function ARStage(
     renderer.setSize(width, height);
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.08;
+    renderer.toneMappingExposure = 0.9;
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     renderer.xr.enabled = true;
@@ -431,9 +479,9 @@ export const ARStage = forwardRef<ARStageHandle, ARStageProps>(function ARStage(
     const camera = new THREE.PerspectiveCamera(40, width / height, 0.01, 40);
     camera.position.set(0, 0.05, 4.15);
 
-    const ambient = new THREE.HemisphereLight(0xfff4dc, 0x253d42, 1.65);
+    const ambient = new THREE.HemisphereLight(0xfff4dc, 0x253d42, 0.85);
     scene.add(ambient);
-    const key = new THREE.DirectionalLight(0xfff7e8, 3.7);
+    const key = new THREE.DirectionalLight(0xfff7e8, 2.1);
     key.position.set(-2.6, 4.2, 5.5);
     key.castShadow = true;
     key.shadow.mapSize.set(1024, 1024);
@@ -441,10 +489,10 @@ export const ARStage = forwardRef<ARStageHandle, ARStageProps>(function ARStage(
     key.shadow.camera.far = 14;
     key.shadow.bias = -0.0005;
     scene.add(key);
-    const fill = new THREE.DirectionalLight(0x9edce5, 1.2);
+    const fill = new THREE.DirectionalLight(0x9edce5, 0.7);
     fill.position.set(3.5, 1.2, 2.3);
     scene.add(fill);
-    const rim = new THREE.DirectionalLight(0xffc7a8, 0.85);
+    const rim = new THREE.DirectionalLight(0xffc7a8, 0.5);
     rim.position.set(0.6, 2.5, -3.2);
     scene.add(rim);
 
@@ -466,7 +514,7 @@ export const ARStage = forwardRef<ARStageHandle, ARStageProps>(function ARStage(
         () => { if (!disposed) onNeuralAssetInfo(null); },
       );
     } else if (contour?.length && skeleton?.length && rig) {
-      characterRoot.add(buildCharacter(contour, skeleton, rig, textureUrl, accent, inflation));
+      characterRoot.add(buildCharacter(contour, skeleton, rig, depth, textureUrl, accent, inflation));
       onNeuralAssetInfo(null);
     }
 
@@ -625,7 +673,7 @@ export const ARStage = forwardRef<ARStageHandle, ARStageProps>(function ARStage(
       handlesRef.current = null;
       dispose();
     };
-  }, [accent, contour, inflation, neuralAssetUrl, onCapability, onNeuralAssetInfo, rig, skeleton, textureUrl, visible]);
+  }, [accent, contour, depth, inflation, neuralAssetUrl, onCapability, onNeuralAssetInfo, rig, skeleton, textureUrl, visible]);
 
   useImperativeHandle(ref, () => ({
     placeNormalized(x: number, y: number, scale = placementRef.current.scale) {

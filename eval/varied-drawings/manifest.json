@@ -105,6 +105,64 @@
         "body": "#9dce82",
         "line": "#31572c"
       }
+    },
+    {
+      "id": "car",
+      "input": "car.png",
+      "source_category": "car",
+      "source_key_id": "5290218582179840",
+      "source_line_index": 2402,
+      "source_url": "https://storage.googleapis.com/quickdraw_dataset/full/simplified/car.ndjson",
+      "expected_topology": "machine",
+      "expected_visible_parts": [
+        "body",
+        "window",
+        "wheel",
+        "linkage"
+      ],
+      "render_palette": {
+        "body": "#f4b15c",
+        "line": "#5f3714"
+      }
+    },
+    {
+      "id": "snake",
+      "input": "snake.png",
+      "source_category": "snake",
+      "source_key_id": "5690765676118016",
+      "source_line_index": 2408,
+      "source_url": "https://storage.googleapis.com/quickdraw_dataset/full/simplified/snake.ndjson",
+      "expected_topology": "chain",
+      "expected_visible_parts": [
+        "head",
+        "eye",
+        "body",
+        "segment",
+        "tail"
+      ],
+      "render_palette": {
+        "body": "#8fd39b",
+        "line": "#214c2c"
+      }
+    },
+    {
+      "id": "snowman",
+      "input": "snowman.png",
+      "source_category": "snowman",
+      "source_key_id": "6049313371193344",
+      "source_line_index": 2405,
+      "source_url": "https://storage.googleapis.com/quickdraw_dataset/full/simplified/snowman.ndjson",
+      "expected_topology": "biped",
+      "expected_visible_parts": [
+        "head",
+        "eye",
+        "mouth",
+        "body"
+      ],
+      "render_palette": {
+        "body": "#dcefff",
+        "line": "#314d68"
+      }
     }
   ]
 }

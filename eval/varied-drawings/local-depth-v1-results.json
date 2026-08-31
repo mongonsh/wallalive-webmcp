@@ -1,0 +1,17 @@
+{
+  "model": "wallalive-sketch-depth-v1",
+  "benchmark": "WallAlive varied human-drawing benchmark v1",
+  "cases": 8,
+  "passed": true,
+  "contract": "correct topology, nonzero learned front/back asymmetry, closed true volume, normalized active skin, and color data",
+  "results": [
+    { "id": "cat", "topology": "quadruped", "confidence": 0.92209, "vertices": 17941, "triangles": 35878, "depth_ratio": 0.1790, "mean_front_back_asymmetry": 0.058993, "bones": 9, "active_joints": 9, "branch_influence_coverage": 0.627446, "closed": true, "true_volume": true, "rigged": true, "color": true },
+    { "id": "bird", "topology": "winged", "confidence": 0.97474, "vertices": 18622, "triangles": 37240, "depth_ratio": 0.2832, "mean_front_back_asymmetry": 0.022359, "bones": 7, "active_joints": 7, "branch_influence_coverage": 0.446783, "closed": true, "true_volume": true, "rigged": true, "color": true },
+    { "id": "fish", "topology": "aquatic", "confidence": 0.99994, "vertices": 23326, "triangles": 46648, "depth_ratio": 0.3445, "mean_front_back_asymmetry": 0.009872, "bones": 9, "active_joints": 9, "branch_influence_coverage": 0.397153, "closed": true, "true_volume": true, "rigged": true, "color": true },
+    { "id": "octopus", "topology": "radial", "confidence": 0.99836, "vertices": 28062, "triangles": 56120, "depth_ratio": 0.3192, "mean_front_back_asymmetry": 0.025701, "bones": 7, "active_joints": 7, "branch_influence_coverage": 0.493301, "closed": true, "true_volume": true, "rigged": true, "color": true },
+    { "id": "tree", "topology": "branched", "confidence": 0.99994, "vertices": 24846, "triangles": 49688, "depth_ratio": 0.2598, "mean_front_back_asymmetry": 0.052208, "bones": 7, "active_joints": 7, "branch_influence_coverage": 0.352693, "closed": true, "true_volume": true, "rigged": true, "color": true },
+    { "id": "car", "topology": "machine", "confidence": 1.0, "vertices": 31706, "triangles": 63408, "depth_ratio": 0.3452, "mean_front_back_asymmetry": 0.036349, "bones": 4, "active_joints": 4, "branch_influence_coverage": 0.278118, "closed": true, "true_volume": true, "rigged": true, "color": true },
+    { "id": "snake", "topology": "chain", "confidence": 0.97104, "vertices": 14314, "triangles": 28624, "depth_ratio": 0.2095, "mean_front_back_asymmetry": 0.059183, "bones": 3, "active_joints": 3, "branch_influence_coverage": 0.500559, "closed": true, "true_volume": true, "rigged": true, "color": true },
+    { "id": "snowman", "topology": "biped", "confidence": 0.99996, "vertices": 22170, "triangles": 44336, "depth_ratio": 0.4264, "mean_front_back_asymmetry": 0.015262, "bones": 3, "active_joints": 3, "branch_influence_coverage": 0.196617, "closed": true, "true_volume": true, "rigged": true, "color": true }
+  ]
+}

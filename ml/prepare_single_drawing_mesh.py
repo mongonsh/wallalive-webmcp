@@ -277,6 +277,23 @@ def skeleton_endpoints(mask: np.ndarray, root_pixel: tuple[int, int]) -> list[li
     return [[round((x / (width - 1) - 0.5) * 2, 6), round((0.5 - y / (height - 1)) * 2, 6), 0.0] for x, y in selected]
 
 
+def sketch_depth_input(texture: Image.Image) -> np.ndarray:
+    rgba = np.asarray(texture.resize((64, 64), Image.Resampling.LANCZOS).convert("RGBA"))
+    mask = rgba[..., 3] > 38
+    distance = ndimage.distance_transform_edt(mask).astype(np.float32)
+    distance /= max(1.0, float(distance.max()))
+    contour = mask & ~morphology.binary_erosion(mask)
+    differences = np.zeros(mask.shape, dtype=np.float32)
+    color = rgba.astype(np.float32)
+    for axis in (0, 1):
+        shifted = np.roll(color, 1, axis=axis)
+        differences = np.maximum(differences, np.max(np.abs(color - shifted), axis=-1))
+        shifted = np.roll(color, -1, axis=axis)
+        differences = np.maximum(differences, np.max(np.abs(color - shifted), axis=-1))
+    ink = morphology.binary_dilation(contour | (mask & (differences >= 30)), morphology.disk(1)) & mask
+    return np.stack((mask.astype(np.float32), distance, ink.astype(np.float32)))[None]
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--image", type=Path, required=True)
@@ -324,30 +341,38 @@ def main() -> None:
     inside_distance = ndimage.distance_transform_edt(mask)
     outside_distance = ndimage.distance_transform_edt(~mask)
     signed_distance = inside_distance - outside_distance
-    maximum_distance = max(1.0, float(inside_distance.max()))
-    maximum_depth = args.resolution * 0.17
-    normalized_distance = np.clip(inside_distance / maximum_distance, 0, 1)
-    # A raw distance transform has sharp medial-axis ridges that render like a
-    # cut gemstone. Blur only the depth prior (never the source mask), then use
-    # a sinusoidal lens profile for a rounded clay/plush surface.
-    smooth_distance = ndimage.gaussian_filter(normalized_distance, sigma=max(1.0, args.resolution * 0.012))
-    smooth_distance /= max(1e-6, float(smooth_distance.max()))
-    local_depth_pixels = maximum_depth * np.sin(np.clip(smooth_distance, 0, 1) * math.pi / 2) ** 0.72
+    depth_prediction = run(args.models / "wallalive-sketch-depth-v1.onnx", sketch_depth_input(texture))[0][0]
+    front_normalized = np.asarray(Image.fromarray(depth_prediction[0]).resize((args.resolution, args.resolution), Image.Resampling.BILINEAR), dtype=np.float32)
+    back_normalized = np.asarray(Image.fromarray(depth_prediction[1]).resize((args.resolution, args.resolution), Image.Resampling.BILINEAR), dtype=np.float32)
+    scene_to_pixels = (args.resolution - 1) / 2
+    front_depth_pixels = np.maximum(0, front_normalized * 0.75 * scene_to_pixels) * mask
+    back_depth_pixels = np.maximum(0, back_normalized * 0.75 * scene_to_pixels) * mask
+    # Close the rim even when the learned prior keeps a small nonzero value at
+    # the antialiased mask boundary.  Front and back remain independently
+    # predicted everywhere inside the authored silhouette.
+    rim = np.sin(np.clip(inside_distance / max(1.0, float(inside_distance.max())), 0, 1) * math.pi / 2) ** 0.45
+    front_depth_pixels *= rim
+    back_depth_pixels *= rim
+    maximum_front = max(1.0, float(front_depth_pixels.max()))
+    maximum_back = max(1.0, float(back_depth_pixels.max()))
     z_resolution = 64
-    z_coordinates = np.linspace(-maximum_depth, maximum_depth, z_resolution, dtype=np.float32)
-    field = np.minimum(signed_distance[None], local_depth_pixels[None] - np.abs(z_coordinates[:, None, None])).astype(np.float32)
+    z_coordinates = np.linspace(-maximum_back, maximum_front, z_resolution, dtype=np.float32)
+    field = np.minimum(
+        signed_distance[None],
+        np.minimum(front_depth_pixels[None] - z_coordinates[:, None, None], back_depth_pixels[None] + z_coordinates[:, None, None]),
+    ).astype(np.float32)
     vertices_zyx, faces, _, _ = measure.marching_cubes(
         field,
         level=0,
-        spacing=(2 * maximum_depth / (z_resolution - 1), 1.0, 1.0),
+        spacing=((maximum_front + maximum_back) / (z_resolution - 1), 1.0, 1.0),
         allow_degenerate=False,
     )
-    z = vertices_zyx[:, 0] - maximum_depth
+    z = vertices_zyx[:, 0] - maximum_back
     y = vertices_zyx[:, 1]
     x = vertices_zyx[:, 2]
     vertices = np.column_stack(((x / (args.resolution - 1) - 0.5) * 2, (0.5 - y / (args.resolution - 1)) * 2, z / ((args.resolution - 1) / 2))).astype(np.float32)
     uv = np.column_stack((x / (args.resolution - 1), 1 - y / (args.resolution - 1))).astype(np.float32)
-    local_depth = (local_depth_pixels / ((args.resolution - 1) / 2)).astype(np.float32)
+    local_depth = (front_depth_pixels / scene_to_pixels).astype(np.float32)
 
     prepared, content_rect = square_fit(source, 96)
     _, coarse_logits = run(args.models / "wallalive-parts-v3.onnx", tensor(prepared))
@@ -388,6 +413,7 @@ def main() -> None:
 
     np.savez_compressed(args.output / "mesh.npz", vertices=vertices, faces=faces.astype(np.int32), uv=uv)
     background_rgb = tuple(int(body_color[index:index + 2], 16) for index in (1, 3, 5))
+    texture.save(args.output / "texture-rgba.png")
     final_texture = Image.new("RGB", texture.size, background_rgb)
     final_texture.paste(texture.convert("RGB"), (0, 0), texture.getchannel("A"))
     final_texture.save(args.output / "texture.png")
@@ -397,7 +423,7 @@ def main() -> None:
         "requested_crop": args.crop,
         "source_size": list(source.size),
         "source_character_box": list(source_box),
-        "mesh": {"vertices": len(vertices), "triangles": len(faces), "closed_volume_method": "signed-distance lens marching cubes", "depth_ratio": round(float(np.ptp(vertices[:, 2]) / max(np.ptp(vertices[:, 0]), np.ptp(vertices[:, 1]))), 4)},
+        "mesh": {"vertices": len(vertices), "triangles": len(faces), "closed_volume_method": "learned distinct front/back depth fields + marching cubes", "depth_ratio": round(float(np.ptp(vertices[:, 2]) / max(np.ptp(vertices[:, 0]), np.ptp(vertices[:, 1]))), 4)},
         "body_color": body_color,
         "line_color": line_color,
         "contour": contour.round(6).tolist(),
@@ -408,7 +434,9 @@ def main() -> None:
         "topology_class_probabilities": [round(float(value), 5) for value in topology_probabilities],
         "semantic_features": features,
         "semantic_kinds": sorted(set([str(feature["kind"]) for feature in features] + list(TOPOLOGY_SEMANTICS[topology_kind]))),
-        "back_prior": "symmetric filled volume; no copied face texture",
+        "depth_model": "wallalive-sketch-depth-v1",
+        "mean_depth_asymmetry": round(float(np.mean(np.abs(front_depth_pixels[mask] - back_depth_pixels[mask])) / scene_to_pixels), 6),
+        "back_prior": "learned hidden surface from sketch contours; no copied face texture",
     }
     (args.output / "rig.json").write_text(json.dumps(report, indent=2) + "\n")
 

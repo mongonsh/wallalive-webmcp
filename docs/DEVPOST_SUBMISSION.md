@@ -29,13 +29,13 @@ Children already treat drawings as living characters. A few lines can have a nam
 
 1. The child explicitly opens the camera, taps one character, and captures it.
 2. Local Canvas processing separates the drawing from smooth lighting, page borders, text, and foreground clutter.
-3. A second visible approval explains that only the isolated drawing—not the live camera or room frame—will go to the 3D model.
-4. AniGen jointly predicts a full mesh, unseen surfaces, skeleton, and skinning weights from that one image.
-5. WallAlive loads the GLB as a Three.js `SkinnedMesh`. Seven actions drive the generated bone branches; drag/spin exposes true 360° geometry and the generated back.
+3. Six local ONNX graphs recognize exact face/body pixels, decode an eight-family variable skeleton, and predict distinct front and hidden-surface depth. Marching Cubes immediately produces one private closed `SkinnedMesh` rather than a flat cut-out.
+4. A second visible approval explains that only the isolated drawing—not the live camera or room frame—may go to AniGen, which jointly predicts richer full geometry, an arbitrary skeleton, and skinning weights.
+5. WallAlive loads generated GLBs as Three.js `SkinnedMesh` assets. Seven actions drive bone branches; drag/spin exposes true 360° geometry and the generated back.
 6. Eight WebMCP tools let the agent inspect exact model state, create a personality, place and scale the rig, animate it, recolor an accent, and perform a cancellable mini story.
 7. WebXR hit testing places the same character on a real surface when supported; every other browser gets the camera-overlay experience.
 
-The one-click judge demo loads a verified AniGen fixture immediately. It contains one colored `SkinnedMesh`, 20 bones, and 159,930 vertices, so judging never depends on shared public GPU quota.
+The one-click judge demo uses the exact supplied drawing and loads its precomputed full neural reconstruction immediately: 68,326 vertices, 136,648 triangles, seven active semantic bones, a complete watertight back, normalized weights, and restored approved front color without copying facial marks onto the rear. Judging never depends on shared public GPU quota. A separate official AniGen reference fixture remains in the automated evidence suite.
 
 ## Why WallAlive is a strong fit for WebMCP
 
@@ -66,7 +66,9 @@ Each tool uses strict JSON Schema, `additionalProperties: false`, bounded values
 - Local target-aware drawing isolation with connected components, clutter/border rejection, morphology, and flood fill
 - AniGen `ss_flow_solo` + `slat_flow_auto` through a lazy `@gradio/client` connection
 - Three.js `GLTFLoader`, real `SkinnedMesh` assets, generated-bone actions, lighting, shadow, and 360° interaction
-- Four same-origin ONNX/WASM graphs for nine-part segmentation, high-resolution face parsing, and 17-joint pose estimation
+- Six same-origin ONNX/WASM graphs for nine-part segmentation, high-resolution face parsing, eight-family variable topology, 17-joint pose, and distinct front/back depth
+- An 80,486-parameter SketchDepth compact U-Net trained on 6,144 balanced analytic shapes and selected without opening its 768-example sealed test
+- Identity-preserving sketch-to-render conditioning + local TripoSR + WallAlive variable-graph skinning for the exact-drawing quota-free neural asset
 - WebXR `immersive-ar` with `hit-test`
 - Imperative WebMCP registration through `document.modelContext`
 - Human-only camera and isolated-image approval boundary
@@ -74,7 +76,7 @@ Each tool uses strict JSON Schema, `additionalProperties: false`, bounded values
 
 ## Challenges
 
-The first version proved that a thick silhouette is not enough. A deterministic 2D contour can produce a closed blob, but it cannot infer unseen anatomy or generate a true rig. Research across Animated Drawings, SAM 2, Stable Fast 3D, TRELLIS, Hunyuan3D, and post-hoc riggers led to AniGen, which generates shape, skeleton, and skinning together.
+The first version proved that a thick silhouette is not enough. A deterministic 2D contour can produce a closed blob, but it cannot infer unseen anatomy or generate a true rig. Research across Animated Drawings, DrawingSpinUp, SAM 3D Objects, Stable Fast 3D, TripoSR, TRELLIS, Hunyuan3D, post-hoc riggers, and AniGen led to a two-tier design: a learned local asymmetric-depth rig for instant privacy, then full neural reconstruction when approved.
 
 The second challenge was privacy. Real single-image 3D requires a learned GPU model, so “nothing leaves the browser” would be false. WallAlive instead minimizes data before consent: only the isolated character can be sent, after a second visible human approval, while the camera and room frame remain inaccessible to the agent.
 
@@ -85,7 +87,9 @@ The fourth challenge was anatomy. A good silhouette still gave straight, misplac
 ## Accomplishments
 
 - A real drawing → neural mesh + skeleton + skin weights → camera AR loop
-- A colored 159,930-vertex GLB with 20 bones, parsed and quality-gated in tests
+- The exact drawing reconstructed at 256³ extraction resolution as a smoothed, colored 68,326-vertex / 136,648-triangle watertight GLB with seven active semantic bones
+- A learned asymmetric depth model with 0.03636 sealed normalized surface MAE, 0.91988 correlation, and ONNX agreement within 2.26e-6
+- Eight post-split real drawing families classified correctly and exported as closed, colored, actively skinned local GLBs
 - A locally trained 17-joint drawing pose model whose ONNX export exactly reproduces the untouched-test result
 - Generated bone-branch animation instead of whole-object-only motion
 - Real WebXR surface hit testing plus universal camera overlay
@@ -97,7 +101,7 @@ The fourth challenge was anatomy. A good silhouette still gave straight, misplac
 ## What is next
 
 - Self-host AniGen on a dedicated 18 GB+ NVIDIA GPU
-- Run a curated multi-category set: child line art, humanoid, quadruped, bird, plant, and machine
+- Expand the eight-family held-out benchmark to hundreds of photographed child drawings with human-reviewed 3D preference scores
 - Add optional SAM 2 point/box refinement for difficult backgrounds
 - Retarget richer motion clips to generated skeletons
 - Multi-character classroom stories with teacher-controlled privacy
@@ -105,7 +109,7 @@ The fourth challenge was anatomy. A good silhouette still gave straight, misplac
 
 ## Built with
 
-WebMCP, AniGen, Hugging Face Gradio, WebXR, Three.js, React, TypeScript, Canvas API, WebGL, Cloudflare Workers, ChatGPT Sites
+WebMCP, AniGen, TripoSR, ONNX Runtime Web, Hugging Face Gradio, WebXR, Three.js, React, TypeScript, Canvas API, WebGL, Cloudflare Workers, ChatGPT Sites
 
 ## Suggested tags
 

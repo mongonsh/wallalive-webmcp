@@ -61,11 +61,11 @@ test("registers eight strict WebMCP tools without camera authority", async () =>
   assert.match(page, /Camera capture is human-only/);
   assert.match(page, /cameraFeedExposed: false/);
   assert.match(page, /neuralModelUsed: Boolean\(neuralAssetRef\.current\)/);
-  assert.match(page, /AniGen joint mesh-skeleton-skinning reconstruction/);
+  assert.match(page, /full-volume neural mesh \+ skeleton skinning/);
   assert.match(page, /requiresHumanApproval: true/);
-  assert.match(page, /UPLOAD APPROVED DRAWING/);
+  assert.match(page, /GENERATE FULL 3D/);
   assert.match(page, /externalUploadApproved/);
-  assert.match(page, /ANIGEN RIG \+ DRAWING PARTS/);
+  assert.match(page, /FULL NEURAL RIG \+ DRAWING PARTS/);
   assert.match(page, /COLOR MATCHED/);
   assert.match(page, /viewableDegrees: 360/);
   assert.match(page, /topologyRecognition/);

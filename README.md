@@ -6,7 +6,7 @@
 
 **Public source:** https://github.com/mongonsh/wallalive-webmcp
 
-WallAlive turns one human-approved drawing into a colored, 360° **rigged 3D character** in the camera view. Compact locally trained models recognize visible semantic parts and decode a variable endpoint/junction graph for bipeds, quadrupeds, winged and aquatic forms, radial creatures, plants, machines, and chains. A private first result builds one closed Marching Cubes surface and skins that continuous surface to the learned graph; it does not attach generic capsule limbs. [AniGen](https://github.com/VAST-AI-Research/AniGen) is an optional, visibly approved upgrade that generates unseen surfaces, skeleton, and skinning weights. WebMCP can name, place, animate, recolor, and direct either result.
+WallAlive turns one human-approved drawing into a colored, 360° **rigged 3D character** in the camera view. Compact locally trained models recognize visible semantic parts, decode a variable endpoint/junction graph for bipeds, quadrupeds, winged and aquatic forms, radial creatures, plants, machines, and chains, and predict distinct front and hidden-surface depth fields. A private first result builds one closed Marching Cubes surface and skins that continuous surface to the learned graph; it does not mirror the front depth or attach generic capsule limbs. [AniGen](https://github.com/VAST-AI-Research/AniGen) remains the visibly approved live upgrade for jointly generated surfaces, skeleton, and skinning weights. WebMCP can inspect, name, place, animate, recolor, and direct either result without receiving camera authority.
 
 ## Why this needs WebMCP
 
@@ -20,12 +20,12 @@ WallAlive turns one human-approved drawing into a colored, 360° **rigged 3D cha
 ## The real 3D loop
 
 1. **Scan or upload and recognize locally:** the child can capture with the camera or choose an existing drawing photo. WallAlive separates one drawing from paper edges, text, and foreground clutter in browser memory. Uploaded photos use a wider full-character search window so top ears and lower feet are not removed before inference. WallAlive PartUNet proposes nine visible semantic part classes, TopologyNet v10 decodes variable endpoints, junctions, and branch paths for non-human drawings, and AmateurPose v6 estimates 17 named joints only for applicable humanoids. Semantic masks snap back to original pixel regions, so face position, outline, and sampled color come from the child’s drawing.
-2. **Build private 3D immediately:** a silhouette signed-distance field produces a closed rounded surface with real side depth and an explicit symmetric back prior. The learned graph supplies normalized skin weights over that one surface, while exact high-resolution eye, cheek, mouth, and marking shapes retain their measured positions and colors.
+2. **Build private 3D immediately:** `wallalive-sketch-depth-v1` predicts separate front and back depth at 64² from the isolated mask, interior distance, and authored contour ink. Those fields bound one closed Marching Cubes surface. The variable graph supplies normalized skin weights, while exact high-resolution eye, cheek, mouth, and marking shapes retain their measured positions and colors.
 3. **Play or upgrade:** the private result is rotatable and actionable without an upload. A separate approval can send only the isolated drawing—not the live camera or room frame—to AniGen.
 4. **Generate jointly when approved:** AniGen’s `ss_flow_solo` + `slat_flow_auto` path predicts full geometry, a skeleton of arbitrary complexity, and smooth skinning weights together. Three.js loads the returned GLB into a tab-local Blob URL.
 5. **Enter AR:** Android/WebXR devices can place either result with surface hit testing; iPhone and other browsers use the camera-overlay experience.
 
-**Play Judge Demo** loads a previously generated AniGen reference result immediately, without spending public GPU quota. The fixture is a colored 159,930-vertex, 319,836-triangle `SkinnedMesh` with 20 bones, 26.6% depth-to-width, normalized weights, and zero boundary or non-manifold edges; tests parse the binary GLB and enforce those invariants.
+**Play Judge Demo** loads the supplied drawing and its precomputed full neural reconstruction immediately, without spending public GPU quota. An identity-preserving orthographic sketch-to-render pass supplied a 3D-aware condition, TripoSR reconstructed a watertight surface at 256³ extraction resolution, and WallAlive smoothed it, restored approved front colors without copying marks onto the rear, and transferred the learned variable drawing graph into semantic skin weights. The exact fixture is a 68,326-vertex, 136,648-triangle `SkinnedMesh` with seven active bones, 70.8% depth-to-height, normalized weights, and zero boundary or non-manifold edges. The older official AniGen fixture remains as a separate reference test.
 
 ## WebMCP tool surface
 
@@ -46,7 +46,7 @@ All tools use strict schemas, `additionalProperties: false`, cancellation signal
 
 - Camera start and capture are human-only UI gestures.
 - Segmentation, semantic-part recognition, variable graph decoding, closed-surface reconstruction, and first 3D skinning happen locally.
-- The 5.39 MiB five-model ONNX stack is served from WallAlive’s own origin and runs with WebAssembly; it does not send the image to an inference API. The 96² and 128² face logits are validation-calibrated and blended locally; variable topology and an optional 17-joint pose graph run in parallel with the part model. A learned closed-form component gate rejects false cheek/ear islands without another model download. Older fallback checkpoints load only when the primary stack misses a basic eye, mouth, or limb anchor.
+- The 5.72 MiB six-model primary ONNX stack is served from WallAlive’s own origin and runs with WebAssembly; it does not send the image to an inference API. Body parts, the 96²/128² face ensemble, variable topology, optional 17-joint pose, and front/back depth run concurrently. A learned closed-form component gate rejects false cheek/ear islands without another model download. Older fallback checkpoints load only when the primary stack misses a basic eye, mouth, or limb anchor.
 - The agent never receives live frames or raw image pixels.
 - Neural generation requires a separate visible human approval.
 - Only the isolated drawing is sent to the selected AniGen Space.
@@ -61,7 +61,7 @@ All tools use strict schemas, `additionalProperties: false`, cancellation signal
 | Generative unseen geometry | Optional AniGen public Space; dedicated AniGen GPU recommended for production |
 | Immersive room placement | WebXR `immersive-ar` + `hit-test`, usually compatible Android Chrome devices |
 | iPhone/iPad and non-WebXR browsers | Camera overlay; immersive hit testing is not claimed |
-| No-camera judging | Bundled verified AniGen GLB and one-click story |
+| No-camera judging | Bundled exact-drawing neural GLB and one-click story |
 
 The public Hugging Face ZeroGPU service is capacity-limited and can reject or queue live generations. A reliable public product must self-host AniGen on an NVIDIA GPU with at least 18 GB VRAM or configure a dedicated endpoint. No single-view model can guarantee a perfect artist-authored back; quality varies with occlusion, ambiguity, and input clarity.
 
@@ -79,6 +79,7 @@ WallAlive ChildlikeSHAPES local ONNX/WASM stack
         ├── 96² TopologyNet v10: foreground + centerline + endpoints + junctions
         │       └── variable minimum-spanning graph for any supported family
         ├── 96² AmateurPose: 17 named joints + humanoid applicability gate
+        ├── 64² SketchDepth v1: distinct front + hidden-surface depth
         └── validation-calibrated face ensemble
             ├── 96² v3 enlarged head crop
             └── 128² v4 rare-feature head crop
@@ -86,7 +87,7 @@ WallAlive ChildlikeSHAPES local ONNX/WASM stack
         │
         ├── exact pixel snap: position + outline + color
         ├── joint paths: variable graph branches or applicable humanoid chains
-        └── signed-distance field → Marching Cubes → one continuous local SkinnedMesh
+        └── learned front/back bounds → Marching Cubes → one continuous local SkinnedMesh
                 └────────────────────────────────────► private 360° character
         │
         ├── visible isolated-image approval (human only)
@@ -102,7 +103,7 @@ rigged GLB → local Blob URL → Three.js GLTFLoader / SkinnedMesh
 
 - React 19 + TypeScript, built with vinext for Cloudflare/Sites
 - Three.js `GLTFLoader`, `SkinnedMesh`, procedural bone actions, and WebXR hit testing
-- WallAlive local stack: a 288,109-parameter whole-character network, 109,832-parameter 96² and 435,624-parameter 128² face networks, a 402,052-parameter spatial variable-topology network, and a 161,133-parameter optional 17-joint pose network, loaded through `onnxruntime-web`
+- WallAlive local stack: a 288,109-parameter whole-character network, 109,832-parameter 96² and 435,624-parameter 128² face networks, a 402,052-parameter spatial variable-topology network, a 161,133-parameter optional 17-joint pose network, and an 80,486-parameter compact U-Net front/back depth prior, loaded through `onnxruntime-web`
 - Instance-aware decoding preserves multiple same-side arms/legs and separate facial features; a 22-feature standardized logistic gate judges individual cheek/ear masks from model agreement, probability, size, shape, fill, and position before every accepted region snaps back to high-resolution pixel geometry
 - Raised face meshes and detected contour tubes add real eye/cheek/mouth parallax to the private preview instead of leaving the features flat
 - High-confidence topology endpoints now create actual articulated ear/arm/leg branches with hand/foot children when the fixed humanoid pose gate is not applicable; this is what lets variable non-human drawings drive the preview rig instead of merely displaying a class label
@@ -119,9 +120,13 @@ On the untouched official ChildlikeSHAPES test set, the body/limb model scores 0
 
 The independent Amateur Drawings run contains 352 training, 63 validation, and 75 untouched test characters. The baseline browser pipeline already covered 96.31% of visible joints with its body mask but localized named semantic parts poorly—especially ears, hands, and feet. AmateurPose v6 reaches 0.7969 PCK@5%, 0.8643 PCK@10%, and 5.578 mean pixels of error at 96² on the untouched test split. The checked-in ONNX export reproduces those metrics exactly. Its output only refines named joint paths after a part-and-geometry applicability gate; it cannot invent eyes, ears, mouths, or cheeks. Exact segmentation evidence still decides face position, shape, outline, and sampled color. These numbers are regression evidence, not a claim that single-view recognition or an inferred unseen back can be perfect.
 
-`ml/train_topology_v10.py` jointly learns four graph fields from exact procedural graph labels and an eight-family spatial class head from 10,241 real Google Quick, Draw! records. Real strokes supervise class only, never pseudo endpoints or junctions. On disjoint sealed tests it reaches 0.9915 one-pixel-tolerant centerline F1, 0.5600 endpoint IoU, 0.6436 junction IoU, and 0.9587 real-drawing family accuracy; the checked-in ONNX reproduces the report exactly. `ml/prepare_varied_quickdraw_benchmark.py` separately preserves five attributed source records after line 2400—beyond the complete training/validation/test window ending before line 1960—and v10 classifies all five filled cutouts correctly. This benchmark validates recognition and conditioning only; a live AniGen GPU run is still required to validate each newly generated GLB.
+`ml/train_topology_v10.py` jointly learns four graph fields from exact procedural graph labels and an eight-family spatial class head from 10,241 real Google Quick, Draw! records. Real strokes supervise class only, never pseudo endpoints or junctions. On disjoint sealed tests it reaches 0.9915 one-pixel-tolerant centerline F1, 0.5600 endpoint IoU, 0.6436 junction IoU, and 0.9587 real-drawing family accuracy; the checked-in ONNX reproduces the report exactly.
 
-For difficult real photos, `ml/evaluate_single_drawing.py` reproduces the browser face ensemble and writes per-part overlay evidence. `ml/prepare_single_drawing_mesh.py` then builds a higher-resolution signed-distance volume from the isolated pixels, retains the exact front texture and sampled palette, and writes semantic/rig metadata. `scripts/build-semantic-glb.py` consumes that evidence in Blender to export a colored, closed, skinned GLB with a plain inferred back and topology-derived appendage bones. `scripts/evaluate-anigen.mjs --inspect` validates geometric closure after welding legitimate UV/normal seams, volume, normalized skin weights, bone count, and color materials.
+`ml/train_sketch_depth_v1.py` trains the checked-in 80,486-parameter compact U-Net on analytic unions of articulated ellipsoids. The 6,144 training, 768 validation, and 768 sealed-test examples are balanced across the same eight families and contain no child drawings or user pixels. Model selection uses validation only; the sealed test reports 0.03636 normalized surface MAE, 0.91988 surface correlation, and a nonzero 0.04270 front/back asymmetry MAE. ONNX agrees with the selected PyTorch checkpoint within 2.26e-6. These numbers validate the learned depth task on analytic ground truth; an unseen back from a real single view remains a plausible prior, not measured fact.
+
+`ml/prepare_varied_quickdraw_benchmark.py` now preserves eight attributed source records after line 2400—beyond topology-v10's complete training/validation/test window ending before line 1960. The set covers biped, quadruped, winged, aquatic, radial, branched, machine, and chain families. Topology-v10 classifies all eight correctly. The offline browser-math mirror then emits eight colored graph-skinned GLBs: every result has nonzero learned front/back asymmetry, 17.9–42.6% relative depth, normalized weights on every vertex, active branch influence, zero boundary/non-manifold edges, and a closed true volume. The contact sheet and machine-readable results are in `eval/varied-drawings/`.
+
+For difficult real photos, `ml/evaluate_single_drawing.py` reproduces the browser face ensemble and writes per-part overlay evidence. `ml/prepare_single_drawing_mesh.py` mirrors the learned asymmetric depth volume at higher resolution, retains the exact front texture and sampled palette, and writes semantic/rig metadata. `scripts/export-semantic-glb.py` exports a colored, closed, skinned GLB without Blender; `scripts/rig-neural-glb.py` can smooth a full neural surface, project approved color only onto its visible front, and transfer the learned drawing graph. `scripts/evaluate-anigen.mjs --inspect` validates geometric closure after welding legitimate UV/normal seams, true volume, normalized weights, active joints, branch influence, and color materials.
 
 ## Local development
 
@@ -140,15 +145,15 @@ npm test
 npm audit --omit=dev
 ```
 
-Optional exact-input 3D regression (requires the Python packages in `ml/requirements.txt` and Blender):
+Optional exact-input 3D regression (requires the Python packages in `ml/requirements.txt`; Blender is not required):
 
 ```bash
 python ml/evaluate_single_drawing.py --image drawing.png --output /tmp/wallalive-face-evidence
 python ml/prepare_single_drawing_mesh.py --image isolated-drawing.png --output /tmp/wallalive-mesh --resolution 256
-blender --background --python scripts/build-semantic-glb.py -- --input-dir /tmp/wallalive-mesh --output /tmp/wallalive.glb
+python scripts/export-semantic-glb.py --input-dir /tmp/wallalive-mesh --output /tmp/wallalive.glb
 node scripts/evaluate-anigen.mjs --inspect /tmp/wallalive.glb
 ```
 
 ## Attribution and license
 
-WallAlive is MIT licensed. V3 is trained on the official [ChildlikeSHAPES](https://arxiv.org/abs/2504.08022) release under CC-BY-4.0; dataset images are not redistributed in this repository. The retained fallback models use a 490-image slice of Meta’s public [Amateur Drawings Dataset](https://github.com/facebookresearch/AnimatedDrawings#amateur-drawings-dataset), released under MIT. TopologyNet v10 uses the official [Google Quick, Draw! dataset](https://github.com/googlecreativelab/quickdraw-dataset); the five small benchmark records retain key IDs and source attribution under CC BY 4.0. The neural reconstruction path uses [AniGen](https://github.com/VAST-AI-Research/AniGen), whose project and model card are MIT licensed; AniGen’s repository separately notes research/non-commercial restrictions on a bundled CUBVH-derived component, which must be reviewed before commercial self-hosting. The bundled judge fixture was generated by the official AniGen Space from its `brickbob.png` reference input and is included for reproducible, quota-free evaluation. See [docs/RESEARCH.md](./docs/RESEARCH.md) for the evaluated alternatives and exact capability boundary.
+WallAlive is MIT licensed. V3 is trained on the official [ChildlikeSHAPES](https://arxiv.org/abs/2504.08022) release under CC-BY-4.0; dataset images are not redistributed in this repository. The retained fallback models use a 490-image slice of Meta’s public [Amateur Drawings Dataset](https://github.com/facebookresearch/AnimatedDrawings#amateur-drawings-dataset), released under MIT. TopologyNet v10 uses the official [Google Quick, Draw! dataset](https://github.com/googlecreativelab/quickdraw-dataset); the eight small benchmark records retain key IDs and source attribution under CC BY 4.0. The optional live reconstruction path uses [AniGen](https://github.com/VAST-AI-Research/AniGen), whose project and model card are MIT licensed; its repository separately notes research/non-commercial restrictions on a bundled CUBVH-derived component, which must be reviewed before commercial self-hosting. The exact-drawing judge surface uses the official MIT-licensed [TripoSR](https://github.com/VAST-AI-Research/TripoSR) implementation plus WallAlive's own graph rigger. The older official AniGen `brickbob.png` result is retained only as independent reference evidence. See [docs/RESEARCH.md](./docs/RESEARCH.md) for the evaluated alternatives and exact capability boundary.

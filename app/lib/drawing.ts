@@ -57,6 +57,17 @@ export type LearnedTopology = {
   edges: TopologyEdge[];
 };
 
+export type LearnedDepthField = {
+  model: "wallalive-sketch-depth-v1";
+  latencyMs: number;
+  size: 64;
+  depthScale: 0.525;
+  front: Float32Array;
+  back: Float32Array;
+  meanThickness: number;
+  meanAsymmetry: number;
+};
+
 export type SemanticPartKind =
   | "body" | "head" | "eye" | "pupil" | "cheek" | "mouth" | "ear" | "beak"
   | "arm" | "hand" | "leg" | "foot"
@@ -153,6 +164,7 @@ export type DrawingExtraction = {
   };
   poseRecognition?: LearnedPose;
   topologyRecognition?: LearnedTopology;
+  depthRecognition?: LearnedDepthField;
 };
 
 type RGB = { r: number; g: number; b: number };
@@ -2472,5 +2484,5 @@ export async function extractDrawingFromImageUrl(imageUrl: string, target: Captu
 }
 
 export async function createAniGenDemoDrawing(): Promise<DrawingExtraction> {
-  return extractDrawingFromImageUrl("/anigen-demo-input.png", { x: 0.5, y: 0.47 });
+  return extractDrawingFromImageUrl("/pip-demo-input.png", { x: 0.5, y: 0.5 });
 }

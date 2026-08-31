@@ -206,7 +206,7 @@ def export(input_dir: Path, output: Path) -> dict:
         }],
         "materials": [
             {"name": "Authored front artwork", "pbrMetallicRoughness": {"baseColorTexture": {"index": 0}, "metallicFactor": 0, "roughnessFactor": 0.65}},
-            {"name": "Symmetric inferred back", "pbrMetallicRoughness": {"baseColorFactor": rgba(rig["body_color"]), "metallicFactor": 0, "roughnessFactor": 0.72}},
+            {"name": "Learned hidden-surface back", "pbrMetallicRoughness": {"baseColorFactor": rgba(rig["body_color"]), "metallicFactor": 0, "roughnessFactor": 0.72}},
         ],
         "samplers": [{"magFilter": 9729, "minFilter": 9987, "wrapS": 33071, "wrapT": 33071}],
         "textures": [{"sampler": 0, "source": 0}],
@@ -214,7 +214,7 @@ def export(input_dir: Path, output: Path) -> dict:
         "accessors": binary.accessors,
         "bufferViews": binary.views,
         "buffers": [{"byteLength": len(binary.data)}],
-        "extras": {"viewable_degrees": 360, "reconstruction": "signed-distance lens marching cubes + learned variable graph skinning"},
+        "extras": {"viewable_degrees": 360, "reconstruction": "learned distinct front/back depth + marching cubes + variable graph skinning"},
     }
     json_bytes = json.dumps(document, separators=(",", ":")).encode()
     json_bytes += b" " * ((4 - len(json_bytes) % 4) % 4)

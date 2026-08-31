@@ -6,15 +6,15 @@ Start on a child’s paper drawing, cut to WallAlive, and press **Play Judge Dem
 
 **Voiceover:** “Children already imagine their drawings are alive. WallAlive makes that leap visible—and lets a browser agent become the director.”
 
-Hold on BrickBob loading in the room. Drag to a side and back view, then press **Spin**.
+Hold on Pip loading beside the exact paper drawing. Drag to a side and back view, then press **Spin**.
 
-**Voiceover:** “This is not a cut-out or inflated picture. AniGen generated a colored 159,930-vertex SkinnedMesh with 20 real bones and unseen back geometry.”
+**Voiceover:** “This is not a cut-out or mirrored extrusion. The exact drawing became a smoothed, watertight 68,326-vertex neural SkinnedMesh with seven active semantic bones, restored front color, and a complete unmarked back.”
 
 ## 0:18–0:42 — Show the drawing path and privacy boundary
 
-Press **No camera? Try a demo doodle**, then **Generate real 3D**. Hold on the approval card.
+Upload another drawing or open the camera, then hold on the local learned-depth result and the **Generate full 3D** approval card.
 
-**Voiceover:** “A child controls the camera and capture. WallAlive isolates one drawing locally, preserves its face shapes and colors, and a locally trained 17-joint model finds elbows and knees. Real 3D requires a GPU, so a second human approval sends only this transparent character—never the live camera or room frame.”
+**Voiceover:** “A child controls the camera and capture. Six local models preserve face shapes and colors, decode variable bones for eight drawing families, and predict separate front and hidden surfaces. Richer neural 3D requires a GPU, so a second human approval sends only this transparent character—never the live camera or room frame.”
 
 Open **Privacy** and point to the three human-only gestures. If recording a successful live generation, continue; otherwise return to **Play Judge Demo** so quota cannot interrupt the video.
 
@@ -34,7 +34,7 @@ Show `inspect_wall_scene` and `reconstruct_rigged_3d_character` in activity hist
 
 Prompt:
 
-> Put BrickBob on the right side of the wall, then make them hide.
+> Put Pip on the right side of the wall, then make them hide.
 
 Show the character move and hide. Tap a different point manually, then press **Hop**.
 
@@ -46,7 +46,7 @@ On compatible Android hardware, press **Enter real AR**, wait for the hit-test r
 
 Prompt:
 
-> Tell a story called “BrickBob finds their courage”: hide at the edge, take one brave hop, wave hello, then spin.
+> Tell a story called “Pip finds their courage”: hide at the edge, take one brave hop, wave hello, then spin.
 
 Show captions and movements without cutting away. Hold on the wave so viewers can see the arm bone deform the mesh.
 
@@ -64,7 +64,7 @@ Show that no such tool exists.
 
 ## 2:15–2:25 — Close
 
-Show the full UI with the rig waving, AniGen Rig DNA, and visible history.
+Show the full UI with the rig waving, Full Neural Rig DNA, and visible history.
 
 **Voiceover:** “WallAlive. Draw it. Wake it. Play.”
 
