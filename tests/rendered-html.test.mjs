@@ -70,9 +70,10 @@ test("registers six goal-level WebMCP collaboration tools with human approval", 
   assert.match(page, /externalUploadApproved/);
   assert.match(page, /FULL NEURAL RIG \+ DRAWING PARTS/);
   assert.match(page, /COLOR MATCHED/);
-  assert.match(page, /viewableDegrees: neuralAssetRef\.current \|\| localFallbackRef\.current \? 360 : 0/);
-  assert.match(page, /local-fallback-ready/);
-  assert.match(page, /Private contour-preserving 3D is ready/);
+  assert.match(page, /viewableDegrees: neuralAssetRef\.current \? 360 : 0/);
+  assert.match(page, /assessReconstructionReadiness/);
+  assert.match(page, /did not substitute a rounded shell/);
+  assert.doesNotMatch(page, /localFallbackRef/);
   assert.match(page, /topologyRecognition/);
   assert.match(page, /variable graph decoded from learned centerline, endpoints, and junction fields/);
   assert.match(page, /world: worldRef\.current/);
@@ -80,18 +81,23 @@ test("registers six goal-level WebMCP collaboration tools with human approval", 
   assert.match(page, /recognizeDrawingsFromImageUrl\(dataUrl, target, 6\)/);
 });
 
-test("ships a pressure-aware full drawing wall and original switchable scene atlas", async () => {
+test("ships a pressure-aware drawing wall and real switchable Three.js worlds", async () => {
   const wall = await readFile(new URL("../app/components/DrawingWall.tsx", import.meta.url), "utf8");
   const css = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
-  const worlds = new URL("../public/wallalive-worlds.png", import.meta.url);
+  const stage = await readFile(new URL("../app/components/ARStage.tsx", import.meta.url), "utf8");
+  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
   assert.match(wall, /getCoalescedEvents/);
   assert.match(wall, /event\.pressure/);
   assert.match(wall, /floodFill/);
   for (const tool of ["pencil", "brush", "marker", "spray", "eraser", "fill", "line", "rectangle", "circle", "triangle", "star"]) assert.match(wall, new RegExp(`id: ["']${tool}["']`));
   assert.match(wall, /canvas\.toDataURL\("image\/png"\)/);
-  assert.match(css, /wallalive-worlds\.png/);
-  assert.match(css, /background-size: 300% 100%/);
-  assert.ok((await stat(worlds)).size > 100_000);
+  assert.doesNotMatch(css, /wallalive-worlds\.png/);
+  assert.match(stage, /buildWorldEnvironment/);
+  for (const geometry of ["BoxGeometry", "CylinderGeometry", "ConeGeometry", "SphereGeometry", "TorusGeometry"]) assert.match(stage, new RegExp(geometry));
+  assert.match(stage, /wallalive-3d-world-\$\{world\}/);
+  for (const landmark of ["studio-window", "storybook-castle", "wizard-column", "museum-frame"]) assert.match(stage, new RegExp(landmark));
+  assert.match(stage, /perspective, lighting, occlusion, and shadows/);
+  assert.match(page, /world=\{world\}/);
 });
 
 test("implements local drawing extraction and real WebXR hit testing", async () => {

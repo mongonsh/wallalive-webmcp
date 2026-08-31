@@ -14,12 +14,11 @@ test("classifies shared GPU capacity and network failures as recoverable provide
   assert.match(anigen, /export function isAniGenUnavailableError/);
 });
 
-test("continues with an honest private 3D fallback instead of stopping on public GPU quota", () => {
+test("stops safely instead of substituting a rounded shell when public GPU capacity is unavailable", () => {
   assert.match(page, /if \(isAniGenUnavailableError\(error\)\)/);
-  assert.match(page, /localFallbackRef\.current = true/);
-  assert.match(page, /setLocalFallbackActive\(true\)/);
-  assert.match(page, /createCharacter\(\{ name: "Pip"/);
-  assert.match(page, /Private on-device 3D is ready/);
-  assert.match(page, /ON-DEVICE 3D · PRIVATE/);
+  assert.match(page, /Nothing fake was created/);
+  assert.match(page, /did not substitute a rounded shell/);
+  assert.doesNotMatch(page, /localFallbackRef/);
+  assert.doesNotMatch(page, /setLocalFallbackActive/);
   assert.doesNotMatch(page, /public GPU time is temporarily full/);
 });

@@ -9,6 +9,15 @@ export type CharacterValidation = {
   reason: string;
 };
 
+export type ReconstructionReadiness = {
+  cutoutReady: boolean;
+  motionReady: boolean;
+  score: number;
+  blockers: string[];
+  warnings: string[];
+  evidence: string[];
+};
+
 const clamp01 = (value: number) => Math.min(1, Math.max(0, value));
 
 function contourMetrics(contour: ContourPoint[]) {
@@ -115,4 +124,58 @@ export function requireCharacterExtraction(extraction: DrawingExtraction): Drawi
     throw new Error(`${characterValidation.reason} Tap the middle of one character and keep the full head and limbs inside the guide.`);
   }
   return { ...extraction, characterValidation };
+}
+
+/**
+ * A segmentation mask and a playable rig are different claims. This second
+ * gate prevents a barely accepted crop from becoming a 3D character, and it
+ * prevents unverified joints from being presented as movable anatomy.
+ */
+export function assessReconstructionReadiness(extraction: DrawingExtraction): ReconstructionReadiness {
+  const validation = extraction.characterValidation ?? assessCharacterExtraction(extraction);
+  const cutoutConfidence = extraction.cutoutRecognition?.confidence ?? 1;
+  const areaPercent = extraction.cutoutRecognition?.areaPercent ?? extraction.analysis.coveragePercent;
+  const confidentPoseJoints = extraction.poseRecognition?.joints.filter((joint) => joint.confidence >= 0.46).length ?? 0;
+  const poseReady = Boolean(extraction.poseRecognition?.applicable && confidentPoseJoints >= 6);
+  const topology = extraction.topologyRecognition;
+  const topologyReady = Boolean(
+    topology?.applicable
+    && topology.kindConfidence >= 0.62
+    && topology.fieldConfidence >= 0.32
+    && topology.nodes.filter((node) => node.confidence >= 0.42).length >= 3
+    && topology.edges.filter((edge) => edge.confidence >= 0.38).length >= 2,
+  );
+  const learnedBranches = extraction.rig.parts.filter((part) => (
+    ["arm", "hand", "leg", "foot", "wing", "fin", "tail", "tentacle", "trunk", "branch", "linkage"].includes(part.kind)
+    && ["learned-model", "learned-pose", "learned-topology"].includes(part.source)
+    && part.confidence >= 0.62
+  )).length;
+
+  const blockers: string[] = [];
+  const warnings: string[] = [];
+  if (!validation.accepted || validation.score < 0.44) blockers.push(validation.reason);
+  if (cutoutConfidence < 0.62) blockers.push("The character boundary is too uncertain. Tap the character again or use a cleaner photo.");
+  if (areaPercent < 1.2) blockers.push("The selected character is too small to reconstruct safely.");
+  if (areaPercent > 56) blockers.push("The selection still contains too much paper or background.");
+  if (extraction.contour.length < 12) blockers.push("The outline is too simple to preserve the drawing safely.");
+  if (!poseReady && !topologyReady) warnings.push("The automatic skeleton is not reliable yet. Review the joints before asking it to move.");
+  if (!poseReady && !topologyReady && learnedBranches < 2) warnings.push("Arms and legs were not verified. Movement stays locked instead of inventing anatomy.");
+
+  const cutoutReady = blockers.length === 0;
+  const motionReady = cutoutReady && (poseReady || topologyReady) && learnedBranches >= 1;
+  const score = clamp01(
+    validation.score * 0.46
+    + cutoutConfidence * 0.28
+    + Math.min(1, extraction.contour.length / 48) * 0.12
+    + (poseReady ? 0.08 : 0)
+    + (topologyReady ? 0.06 : 0),
+  );
+  return {
+    cutoutReady,
+    motionReady,
+    score: Number(score.toFixed(3)),
+    blockers,
+    warnings,
+    evidence: validation.evidence,
+  };
 }

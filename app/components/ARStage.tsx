@@ -9,6 +9,7 @@ import { hasRecognizableArtworkSurface } from "../lib/mesh-materials";
 import { disposeObject, prepareNeuralCharacter, type NeuralRigMap, type NeuralSemanticMap, type RiggedAssetInfo } from "../lib/rigged-model";
 
 export type CharacterAction = "idle" | "wave" | "dance" | "hop" | "walk" | "hide" | "spin";
+export type ARWorld = "studio" | "storybook" | "wizard" | "museum";
 
 export type ARStageHandle = {
   enterImmersiveAR: () => Promise<{ ok: boolean; error?: string }>;
@@ -25,6 +26,7 @@ type ARStageProps = {
   depth: LearnedDepthField | null;
   action: CharacterAction;
   ensembleActions?: CharacterAction[] | null;
+  world: ARWorld;
   accent: string;
   inflation: number;
   neuralAssetUrl: string | null;
@@ -42,6 +44,122 @@ type SceneHandles = {
   reticle: THREE.Mesh;
   dispose: () => void;
 };
+
+type WorldEnvironment = {
+  group: THREE.Group;
+  background: THREE.Color;
+  fog: THREE.Fog;
+};
+
+const worldMaterial = (color: number, roughness = 0.82, emissive = 0x000000) => new THREE.MeshStandardMaterial({
+  color,
+  roughness,
+  metalness: 0.02,
+  emissive,
+  emissiveIntensity: emissive ? 0.5 : 0,
+});
+
+/** Builds actual perspective geometry. No world is a bitmap or CSS plate. */
+export function buildWorldEnvironment(world: ARWorld): WorldEnvironment {
+  const group = new THREE.Group();
+  group.name = `wallalive-3d-world-${world}`;
+  group.userData.world = world;
+  group.userData.rendering = "procedural Three.js geometry with perspective, lighting, occlusion, and shadows";
+
+  const add = (name: string, geometry: THREE.BufferGeometry, material: THREE.Material, x: number, y: number, z: number, rotationY = 0) => {
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.name = name;
+    mesh.position.set(x, y, z);
+    mesh.rotation.y = rotationY;
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    group.add(mesh);
+    return mesh;
+  };
+  const box = (name: string, size: [number, number, number], color: number, position: [number, number, number], rotationY = 0) => (
+    add(name, new THREE.BoxGeometry(...size), worldMaterial(color), ...position, rotationY)
+  );
+  const cylinder = (name: string, radius: number, height: number, color: number, position: [number, number, number], sides = 20) => (
+    add(name, new THREE.CylinderGeometry(radius, radius * 1.04, height, sides), worldMaterial(color), ...position)
+  );
+  const cone = (name: string, radius: number, height: number, color: number, position: [number, number, number], sides = 20) => (
+    add(name, new THREE.ConeGeometry(radius, height, sides), worldMaterial(color), ...position)
+  );
+  const sphere = (name: string, radius: number, color: number, position: [number, number, number], emissive = 0) => (
+    add(name, new THREE.SphereGeometry(radius, 20, 14), worldMaterial(color, 0.68, emissive), ...position)
+  );
+
+  const settings: Record<ARWorld, { background: number; fog: number; floor: number; wall: number }> = {
+    studio: { background: 0xf4ead5, fog: 0xe8dcc4, floor: 0xd9b98f, wall: 0xf1dfbd },
+    storybook: { background: 0x9fd6dc, fog: 0xb8d9cf, floor: 0x74a96c, wall: 0xb7cfc3 },
+    wizard: { background: 0x172433, fog: 0x223346, floor: 0x34364f, wall: 0x242a40 },
+    museum: { background: 0xe9dfcb, fog: 0xd8ccb8, floor: 0x8e6c52, wall: 0xe8dcc4 },
+  };
+  const palette = settings[world];
+  box(`${world}-floor`, [12, 0.12, 11], palette.floor, [0, -1.22, -2.2]);
+  box(`${world}-back-wall`, [12, 6.4, 0.16], palette.wall, [0, 1.25, -6.4]);
+  box(`${world}-left-wall`, [0.16, 6.4, 8.4], palette.wall, [-5.4, 1.25, -2.25]);
+  box(`${world}-right-wall`, [0.16, 6.4, 8.4], palette.wall, [5.4, 1.25, -2.25]);
+
+  if (world === "studio") {
+    box("studio-window", [2.4, 1.65, 0.12], 0x9dcbd2, [-2.45, 1.3, -6.26]);
+    box("studio-window-cross-v", [0.07, 1.65, 0.16], 0xf8f0dc, [-2.45, 1.3, -6.15]);
+    box("studio-window-cross-h", [2.4, 0.07, 0.16], 0xf8f0dc, [-2.45, 1.3, -6.15]);
+    box("studio-shelf", [2.1, 0.12, 0.48], 0x6c4836, [2.55, 0.25, -5.95]);
+    [-0.72, 0, 0.72].forEach((offset, index) => box(`studio-book-${index}`, [0.32, 0.78 - index * 0.08, 0.28], [0xe66551, 0x4ea9aa, 0xe0af45][index], [1.9 + offset, 0.68, -5.78]));
+    cylinder("studio-pot", 0.42, 0.48, 0xd2644c, [-3.6, -0.94, -5.2]);
+    cone("studio-plant-a", 0.56, 1.55, 0x47785a, [-3.75, 0.04, -5.15], 8);
+    cone("studio-plant-b", 0.46, 1.28, 0x5b9569, [-3.3, -0.02, -5.05], 8);
+  }
+
+  if (world === "storybook") {
+    box("storybook-path", [1.6, 0.06, 7.4], 0xe7c883, [0, -1.12, -2.72]);
+    box("storybook-castle", [3.15, 2.2, 0.72], 0xf1c5ad, [0, -0.05, -5.72]);
+    [-1.8, 1.8].forEach((x, index) => {
+      cylinder(`storybook-tower-${index}`, 0.62, 2.8, 0xe8a9a5, [x, 0.08, -5.42], 16);
+      cone(`storybook-roof-${index}`, 0.86, 1.34, 0x6f79b7, [x, 2.14, -5.42], 16);
+    });
+    box("storybook-gate", [0.78, 1.3, 0.24], 0x725044, [0, -0.46, -5.28]);
+    [-3.55, 3.55].forEach((x, index) => {
+      cylinder(`storybook-tree-trunk-${index}`, 0.18, 1.45, 0x744b34, [x, -0.46, -4.72], 10);
+      sphere(`storybook-tree-crown-${index}`, 0.88, 0x5a9c68, [x, 0.65, -4.72]);
+      sphere(`storybook-tree-crown-small-${index}`, 0.57, 0x82b86a, [x + (index ? -0.45 : 0.45), 0.5, -4.62]);
+    });
+    sphere("storybook-cloud-a", 0.6, 0xffffff, [-2.4, 2.5, -5.9]);
+    sphere("storybook-cloud-b", 0.43, 0xffffff, [-1.8, 2.54, -5.85]);
+  }
+
+  if (world === "wizard") {
+    [-3.55, -2.1, 2.1, 3.55].forEach((x, index) => {
+      cylinder(`wizard-column-${index}`, 0.3, 4.6, 0x646079, [x, 0.7, -5.55], 12);
+      add(`wizard-arch-${index}`, new THREE.TorusGeometry(0.72, 0.14, 10, 24, Math.PI), worldMaterial(0x716b88), x, 2.9, -5.45);
+    });
+    box("wizard-dais", [3.15, 0.22, 1.55], 0x4c4265, [0, -0.96, -4.82]);
+    sphere("wizard-orb-a", 0.19, 0x9cefff, [-2.5, 1.25, -4.6], 0x35c9ff);
+    sphere("wizard-orb-b", 0.14, 0xd3a4ff, [2.55, 1.85, -4.9], 0xb56cff);
+    sphere("wizard-orb-c", 0.11, 0xffd77b, [0.7, 2.45, -5.3], 0xffb52b);
+    [-1.2, 0, 1.2].forEach((x, index) => box(`wizard-rune-step-${index}`, [0.82, 0.08, 0.55], [0x57627f, 0x62577f, 0x4f6c7c][index], [x, -1.08 + index * 0.015, -3.0 - index * 0.8]));
+  }
+
+  if (world === "museum") {
+    [-3.75, 3.75].forEach((x, index) => {
+      cylinder(`museum-column-${index}`, 0.38, 4.8, 0xf0e7d3, [x, 0.82, -5.45], 20);
+      cylinder(`museum-column-base-${index}`, 0.55, 0.24, 0xd5c7ad, [x, -1.0, -5.45], 20);
+    });
+    [-2.25, 0, 2.25].forEach((x, index) => {
+      box(`museum-frame-${index}`, [1.55, 1.75, 0.18], 0x9e7441, [x, 1.05, -6.18]);
+      box(`museum-art-${index}`, [1.24, 1.42, 0.2], [0x83a8a8, 0xc88371, 0xd5ad55][index], [x, 1.05, -6.05]);
+    });
+    box("museum-plinth", [1.42, 1.05, 1.15], 0xe3d9c5, [0, -0.65, -4.7]);
+    sphere("museum-sculpture", 0.55, 0x93a5a8, [0, 0.2, -4.7]);
+  }
+
+  return {
+    group,
+    background: new THREE.Color(palette.background),
+    fog: new THREE.Fog(palette.fog, 5.5, 15),
+  };
+}
 
 function segmentProjection(x: number, y: number, start: ContourPoint, end: ContourPoint) {
   const dx = end.x - start.x;
@@ -225,7 +343,7 @@ export function buildCharacter(
 }
 
 export const ARStage = forwardRef<ARStageHandle, ARStageProps>(function ARStage(
-  { characters, contour, skeleton, textureUrl, rig, depth, action, ensembleActions = null, accent, inflation, neuralAssetUrl, visible, onCapability, onPlaced, onNeuralAssetInfo },
+  { characters, contour, skeleton, textureUrl, rig, depth, action, ensembleActions = null, world, accent, inflation, neuralAssetUrl, visible, onCapability, onPlaced, onNeuralAssetInfo },
   ref,
 ) {
   const mountRef = useRef<HTMLDivElement>(null);
@@ -269,6 +387,10 @@ export const ARStage = forwardRef<ARStageHandle, ARStageProps>(function ARStage(
     mount.appendChild(renderer.domElement);
 
     const scene = new THREE.Scene();
+    const environment = buildWorldEnvironment(world);
+    scene.add(environment.group);
+    scene.background = environment.background;
+    scene.fog = environment.fog;
     const camera = new THREE.PerspectiveCamera(40, width / height, 0.01, 40);
     camera.position.set(0, 0.05, 4.15);
 
@@ -366,6 +488,13 @@ export const ARStage = forwardRef<ARStageHandle, ARStageProps>(function ARStage(
       const directedActions = ensembleActionsRef.current;
       const placement = placementRef.current;
       const root = characterRoot;
+      const syntheticWorldVisible = !renderer.xr.isPresenting;
+      environment.group.visible = syntheticWorldVisible;
+      scene.background = syntheticWorldVisible ? environment.background : null;
+      scene.fog = syntheticWorldVisible ? environment.fog : null;
+      camera.position.x = Math.sin(rotationRef.current.yaw * 0.12) * 0.22;
+      camera.position.y = 0.05 + rotationRef.current.pitch * 0.12;
+      camera.lookAt(0, -0.04, -0.85);
       root.visible = visible;
       root.position.x = placement.x;
       root.position.y = placement.y + Math.sin(elapsed * 1.65) * 0.018;
@@ -531,7 +660,7 @@ export const ARStage = forwardRef<ARStageHandle, ARStageProps>(function ARStage(
       handlesRef.current = null;
       dispose();
     };
-  }, [accent, characters, contour, depth, inflation, neuralAssetUrl, onCapability, onNeuralAssetInfo, rig, skeleton, textureUrl, visible]);
+  }, [accent, characters, contour, depth, inflation, neuralAssetUrl, onCapability, onNeuralAssetInfo, rig, skeleton, textureUrl, visible, world]);
 
   useImperativeHandle(ref, () => ({
     placeNormalized(x: number, y: number, scale = placementRef.current.scale) {
