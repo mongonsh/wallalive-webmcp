@@ -83,7 +83,9 @@ test("registers eight goal-level WebMCP collaboration tools with spatial directi
   assert.match(page, /recognizeDrawingsFromImageUrl\(dataUrl, target, 6\)/);
   assert.match(page, /COPY PERFECT JUDGE DEMO PROMPT/);
   assert.match(page, /cyberpunk-neon/);
-  assert.match(page, /BUY YOUR LIVING ART ON SHOPIFY/);
+  assert.match(page, /SHOPIFY <span>MERCH/);
+  assert.match(page, /OPEN SAFE MOCK CHECKOUT/);
+  assert.match(page, /No address, card, order, or Shopify account/);
 });
 
 test("ships a pressure-aware drawing wall and real switchable Three.js worlds", async () => {
@@ -98,10 +100,17 @@ test("ships a pressure-aware drawing wall and real switchable Three.js worlds", 
   assert.match(wall, /canvas\.toDataURL\("image\/png"\)/);
   assert.doesNotMatch(css, /wallalive-worlds\.png/);
   assert.match(stage, /buildWorldEnvironment/);
-  for (const geometry of ["BoxGeometry", "CylinderGeometry", "ConeGeometry", "SphereGeometry", "TorusGeometry"]) assert.match(stage, new RegExp(geometry));
+  for (const geometry of ["RoundedBoxGeometry", "LatheGeometry", "ExtrudeGeometry", "TubeGeometry", "OctahedronGeometry", "TorusKnotGeometry"]) assert.match(stage, new RegExp(geometry));
   assert.match(stage, /wallalive-3d-world-\$\{world\}/);
   for (const landmark of ["studio-window", "storybook-castle", "wizard-column", "museum-frame"]) assert.match(stage, new RegExp(landmark));
   assert.match(stage, /perspective, lighting, occlusion, and shadows/);
+  assert.match(stage, /MeshPhysicalMaterial/);
+  assert.match(stage, /DataTexture/);
+  assert.match(stage, /PointLight/);
+  assert.match(stage, /worldMotion/);
+  assert.match(stage, /wallalivePortalShader/);
+  assert.match(stage, /new THREE\.ShaderMaterial/);
+  assert.match(stage, /mount\.dataset\.worldMeshes/);
   assert.match(page, /world=\{world\}/);
   assert.match(stage, /new OrbitControls/);
   assert.match(stage, /controls\.enableZoom = true/);
@@ -138,7 +147,11 @@ test("implements local drawing extraction and real WebXR hit testing", async () 
   assert.match(stage, /skinIndex/);
   assert.match(stage, /skinWeight/);
   assert.doesNotMatch(stage, /CapsuleGeometry/);
-  assert.doesNotMatch(stage, /TubeGeometry/);
+  assert.match(stage, /rig-\$\{part\.id\}-tip/);
+  assert.match(stage, /verified two-joint chains/);
+  assert.match(stage, /smoothstep\(bestProgress/);
+  assert.match(stage, /mount\.dataset\.articulatedChains/);
+  assert.match(drawing, /if \(part\.reviewed\) return true/);
   assert.match(stage, /texturePlane: false/);
   assert.match(stage, /viewableDegrees: 360/);
   assert.match(stage, /GLTFLoader/);

@@ -209,6 +209,7 @@ export default function Home() {
   const [lightingMood, setLightingMood] = useState<LightingMood>("sunset-warm");
   const [cameraPreset, setCameraPreset] = useState<CameraPreset>("cinematic-orbit");
   const [merchPipeline, setMerchPipeline] = useState<MerchPipeline | null>(null);
+  const [mockCheckoutOpen, setMockCheckoutOpen] = useState(false);
 
   const record = useCallback((actor: Actor, action: string, detail: string, toolName?: string) => {
     const item: Activity = { id: makeId(), time: timeLabel(), actor, action, detail, toolName };
@@ -589,7 +590,7 @@ export default function Home() {
     };
   }, [animateCharacter]);
 
-  const generateShopifyMerchPipeline = useCallback((input: Record<string, unknown>) => {
+  const generateShopifyMerchPipeline = useCallback((input: Record<string, unknown>, actor: Actor = "BROWSER AGENT") => {
     if (!captureRef.current) throw new Error("Approve a drawing before generating merchandise.");
     const product = stringValue(input.productType, "t-shirt", 24) as MerchProduct;
     if (product !== "t-shirt" && product !== "ceramic-mug") throw new Error("productType must be t-shirt or ceramic-mug.");
@@ -600,11 +601,12 @@ export default function Home() {
       createdAt: new Date().toISOString(),
     };
     setMerchPipeline(pipeline);
+    setMockCheckoutOpen(false);
     setInspectorOpen(true);
     setPanelTab("commerce");
     setAgentLine("The agent prepared a print-safe product concept from the approved artwork.");
     setNotice("Agent Commerce Pipeline Connected · Shopify merchandise mockup ready.");
-    record("BROWSER AGENT", "Generated Shopify merchandise pipeline", `${product} · ${pipeline.title} · mock checkout only.`, "generate_shopify_merch_pipeline");
+    record(actor, "Generated Shopify merchandise pipeline", `${product} · ${pipeline.title} · mock checkout only.`, actor === "BROWSER AGENT" ? "generate_shopify_merch_pipeline" : undefined);
     return {
       pipeline,
       storefront: "Shopify mock storefront handoff",
@@ -614,6 +616,16 @@ export default function Home() {
       visibleSidebarUpdated: true,
     };
   }, [record]);
+
+  const openMerchStudio = useCallback((product: MerchProduct = merchPipeline?.product ?? "t-shirt") => {
+    setInspectorOpen(true);
+    setPanelTab("commerce");
+    if (!captureRef.current) {
+      setNotice("Add a drawing first. The Shopify studio is open and waiting for approved artwork.");
+      return;
+    }
+    generateShopifyMerchPipeline({ productType: product }, "CHILD");
+  }, [generateShopifyMerchPipeline, merchPipeline?.product]);
 
   const placeCharacter = useCallback((x: number, y: number, surface: CharacterState["surface"], scale: number, actor: Actor, toolName?: string) => {
     const current = characterRef.current;
@@ -1253,6 +1265,7 @@ export default function Home() {
     };
     captureRef.current = next;
     setCapture(next);
+    setCaptureEnsemble((currentEnsemble) => currentEnsemble.length ? currentEnsemble.map((figure, index) => index === 0 ? next : figure) : [next]);
     setNotice(message);
   }, []);
 
@@ -1270,10 +1283,13 @@ export default function Home() {
       const dy = y - part.center.y;
       return {
         ...part,
+        reviewed: true,
         side: part.kind === "mouth" || part.kind === "nose" ? "center" as const : partSide(x),
         center: { ...part.center, x, y },
         outline: part.outline?.map((point) => ({ x: point.x + dx, y: point.y + dy })),
-        path: part.path?.map((point) => ({ ...point, x: point.x + dx, y: point.y + dy })),
+        path: part.path?.map((point, index) => index === 0 && part.anchor
+          ? { ...point, x: part.anchor.x, y: part.anchor.y }
+          : { ...point, x: point.x + dx, y: point.y + dy }),
       };
     });
     commitRigEdit(parts, "Part position updated. The 3D rig changed with it.");
@@ -1315,6 +1331,12 @@ export default function Home() {
       color: kind === "eye" || kind === "cheek" || kind === "nose" || kind === "mouth" ? current.rig.lineColor : current.rig.bodyColor,
       confidence: 1,
       source: "structural-inference",
+      reviewed: true,
+      path: structural ? [
+        { x: body.center.x, y: body.center.y, z: 0 },
+        { x: body.center.x + (x - body.center.x) * 0.52, y: body.center.y + (y - body.center.y) * 0.52, z: 0 },
+        { x, y, z: 0 },
+      ] : undefined,
     };
     commitRigEdit([...current.rig.parts, part], `${anatomyLabel[kind]} added exactly where you tapped.`);
     setSelectedPartId(id);
@@ -1329,6 +1351,7 @@ export default function Home() {
       const scale = Math.min(1.5, Math.max(0.5, amount));
       return {
         ...part,
+        reviewed: true,
         size: { x: part.size.x * scale, y: part.size.y * scale, z: part.size.z * scale },
         outline: part.outline?.map((point) => ({
           x: part.center.x + (point.x - part.center.x) * scale,
@@ -1338,6 +1361,25 @@ export default function Home() {
     });
     commitRigEdit(parts, "Part size updated.");
   }, [commitRigEdit, selectedPartId]);
+
+  const approveRigReview = useCallback(() => {
+    const current = captureRef.current;
+    if (!current) return;
+    const body = current.rig.parts.find((part) => part.kind === "body");
+    const movableKinds = new Set<SemanticPartKind>(["arm", "leg", "wing", "fin", "tail", "tentacle", "trunk", "branch", "segment", "linkage"]);
+    commitRigEdit(current.rig.parts.map((part) => {
+      if (!movableKinds.has(part.kind) || !body) return { ...part, reviewed: true };
+      const anchor = part.anchor ?? body.center;
+      const path = part.path && part.path.length >= 2 ? part.path : [
+        { x: anchor.x, y: anchor.y, z: 0 },
+        { x: anchor.x + (part.center.x - anchor.x) * 0.52, y: anchor.y + (part.center.y - anchor.y) * 0.52, z: 0 },
+        { x: part.center.x, y: part.center.y, z: 0 },
+      ];
+      return { ...part, anchor: { ...anchor }, path, reviewed: true };
+    }), "Rig approved. Reviewed limb paths can now drive articulated joints.");
+    setPartEditorOpen(false);
+    setPendingPartKind(null);
+  }, [commitRigEdit]);
 
   const deleteSelectedPart = useCallback(() => {
     const current = captureRef.current;
@@ -1369,6 +1411,7 @@ export default function Home() {
         <div className="mini-steps" aria-label="Three steps"><span className={stepIndex >= 1 ? "done" : "active"}>1 Scan</span><span className={stepIndex >= 2 ? "done" : ""}>2 Check</span><span className={stepIndex >= 3 ? "done" : ""}>3 Play</span></div>
         <div className="header-actions">
           <div className={`ready-pill ${webMcpReady ? "is-ready" : ""}`}><i /> {webMcpReady ? `${toolNames.length} WEBMCP TOOLS` : "INTERACTIVE DEMO"}</div>
+          <button className="merch-toggle" onClick={() => openMerchStudio()} aria-label="Open Shopify merchandise mockup studio">SHOPIFY <span>MERCH</span></button>
           <button className="inspector-toggle" onClick={() => setInspectorOpen(true)}>WEBMCP</button>
           <button className="judge-demo" onClick={runMagicDemo} disabled={demoRunning}>{demoRunning ? "PLAYING…" : "PLAY JUDGE DEMO"}</button>
         </div>
@@ -1433,6 +1476,7 @@ export default function Home() {
               {cameraState === "active" ? <button className="stop-camera" onClick={stopCamera}>STOP CAMERA</button> : null}
               {cameraState !== "active" && step === "ready" ? <button className="upload-camera" onClick={() => uploadRef.current?.click()}>UPLOAD PHOTO</button> : null}
               {cameraState !== "active" ? <button className="draw-wall-cta" onClick={() => setDrawingWallOpen(true)}>DRAW ON WALL <span>✦</span></button> : null}
+              {capture ? <button className="merch-cta" onClick={() => openMerchStudio()}>SHOPIFY MOCKUPS <span>↗</span></button> : null}
               <button className="primary-camera" onClick={primaryButton.action} disabled={cameraState === "requesting" || neuralBusy}>{cameraState === "requesting" ? "OPENING…" : neuralBusy ? "GENERATING…" : primaryButton.label}<span>↗</span></button>
             </div>
           </div>
@@ -1532,13 +1576,17 @@ export default function Home() {
             <div className="panel-body commerce-panel">
               <p className="kicker">AGENT COMMERCE PIPELINE CONNECTED</p>
               <h2>{merchPipeline ? merchPipeline.title : "Living art, ready for a shelf."}</h2>
-              <p>{merchPipeline ? "The agent composed a transparent print layout from the approved artwork." : "Ask the agent to generate a Shopify t-shirt or ceramic mug mockup."}</p>
+              <p>{merchPipeline ? "A transparent print layout made from the approved artwork—ready for a safe storefront preview." : capture ? "Choose a product to build the visible mockup." : "Add and approve a drawing, then return here for t-shirt and mug mockups."}</p>
+              <div className="merch-products" aria-label="Choose merchandise mockup">
+                <button className={merchPipeline?.product !== "ceramic-mug" ? "active" : ""} disabled={!capture} onClick={() => openMerchStudio("t-shirt")}><span>◫</span>T-SHIRT</button>
+                <button className={merchPipeline?.product === "ceramic-mug" ? "active" : ""} disabled={!capture} onClick={() => openMerchStudio("ceramic-mug")}><span>◒</span>MUG</button>
+              </div>
               <div className={`merch-mockup ${merchPipeline?.product === "ceramic-mug" ? "is-mug" : "is-shirt"}`}>
                 <div>{capture ? <img src={capture.textureUrl} alt="Approved drawing printed on merchandise" /> : <span>YOUR ART</span>}</div>
                 <small>{merchPipeline?.product === "ceramic-mug" ? "CERAMIC MUG" : "PREMIUM WHITE T-SHIRT"}</small>
               </div>
               <div className="commerce-steps"><span>1 ARTWORK</span><i>→</i><span>2 PRINT LAYOUT</span><i>→</i><span>3 SHOPIFY</span></div>
-              <button className="shopify-checkout" disabled={!merchPipeline} onClick={() => { setNotice("Mock Shopify checkout opened. No order or payment was created."); record("CHILD", "Opened mock Shopify checkout", "Demo only · no purchase was made."); }}>BUY YOUR LIVING ART ON SHOPIFY <span>↗</span></button>
+              <button className="shopify-checkout" disabled={!merchPipeline} onClick={() => { setMockCheckoutOpen(true); setNotice("Safe mock checkout opened. It contains no payment fields and cannot place an order."); record("CHILD", "Opened safe mock Shopify checkout", "Demo only · no payment fields · no purchase was made."); }}>OPEN SAFE MOCK CHECKOUT <span>↗</span></button>
               <small className="commerce-disclaimer">DEMO CHECKOUT · NO CHARGE · HUMAN CONFIRMATION REQUIRED</small>
             </div>
           ) : null}
@@ -1559,6 +1607,15 @@ export default function Home() {
           <footer className="agent-footer"><span>CHROME WEBMCP · CHATGPT SITES · SHOPIFY</span><b>THE CHILD DECIDES</b></footer>
         </aside>
       </section>
+      {mockCheckoutOpen && merchPipeline ? <div className="mock-checkout-backdrop" role="dialog" aria-modal="true" aria-labelledby="mock-checkout-title">
+        <section className="mock-checkout">
+          <header><div><span>SHOPIFY · SAFE PREVIEW</span><h2 id="mock-checkout-title">No-charge checkout</h2></div><button onClick={() => setMockCheckoutOpen(false)} aria-label="Close mock checkout">×</button></header>
+          <div className="mock-order-line"><div>{capture ? <img src={capture.textureUrl} alt="Approved artwork order preview" /> : null}</div><p><b>{merchPipeline.title}</b><span>{merchPipeline.product === "ceramic-mug" ? "Ceramic mug" : "Premium t-shirt"} · Demo sample</span></p><strong>$0.00</strong></div>
+          <div className="mock-safety"><i>✓</i><p><b>Simulation only</b><span>No address, card, order, or Shopify account is requested or created.</span></p></div>
+          <dl><div><dt>PRINT</dt><dd>Approved transparent artwork · 82% safe area</dd></div><div><dt>PAYMENT</dt><dd>Disabled in this hackathon demo</dd></div><div><dt>TOTAL</dt><dd>$0.00 · no charge</dd></div></dl>
+          <button className="mock-finish" onClick={() => { setMockCheckoutOpen(false); setNotice("Mock checkout closed. Nothing was purchased."); }}>FINISH DEMO · PLACE NO ORDER</button>
+        </section>
+      </div> : null}
       <DrawingWall open={drawingWallOpen} onClose={() => setDrawingWallOpen(false)} onMake3D={processWallDrawing} />
       {pendingUpload ? <div className="paper-picker-backdrop" role="dialog" aria-modal="true" aria-labelledby="paper-picker-title">
         <section className="paper-picker">
@@ -1628,7 +1685,7 @@ export default function Home() {
           <div className="part-editor-tools">
             <p><b>Add missing</b><small>Then tap the drawing</small></p>
             <div>{anatomyKinds.map((kind) => <button key={kind} className={pendingPartKind === kind ? "active" : ""} onClick={() => { setPendingPartKind(kind); setSelectedPartId(null); }}>{anatomyLabel[kind]}</button>)}</div>
-            <footer><button disabled={!selectedPartId} onClick={() => resizeSelectedPart(0.86)}>− SIZE</button><button disabled={!selectedPartId} onClick={() => resizeSelectedPart(1.16)}>＋ SIZE</button><button className="remove-part" disabled={!selectedPartId} onClick={deleteSelectedPart}>REMOVE</button><button className="editor-done" onClick={() => { setPartEditorOpen(false); setPendingPartKind(null); }}>LOOKS GOOD</button></footer>
+            <footer><button disabled={!selectedPartId} onClick={() => resizeSelectedPart(0.86)}>− SIZE</button><button disabled={!selectedPartId} onClick={() => resizeSelectedPart(1.16)}>＋ SIZE</button><button className="remove-part" disabled={!selectedPartId} onClick={deleteSelectedPart}>REMOVE</button><button className="editor-done" onClick={approveRigReview}>APPROVE RIG</button></footer>
           </div>
         </section>
       </div> : null}

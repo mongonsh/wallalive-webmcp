@@ -112,6 +112,8 @@ export type SemanticPart = {
   color: string;
   confidence: number;
   source: SemanticPartSource;
+  /** Set only after a person explicitly adds, moves, resizes, or approves this part in the rig editor. */
+  reviewed?: boolean;
   outline?: ContourPoint[];
   path?: Array<{ x: number; y: number; z: number }>;
 };
@@ -247,6 +249,9 @@ export function selectAnimatableRigParts(
   ]);
   return rig.parts.filter((part) => {
     if (!movableKinds.has(part.kind) || !part.path || part.path.length < 2 || part.confidence < 0.48) return false;
+    // A visible human correction is stronger evidence than a model guess. It
+    // may animate, but only after the rig editor has written this explicit bit.
+    if (part.reviewed) return true;
     if (part.source === "learned-pose") return applicability.poseApplicable;
     if (part.source === "learned-topology") return applicability.topologyApplicable;
     return false;
@@ -2706,9 +2711,15 @@ export function createDemoDoodle(): DrawingExtraction {
   previewContext.fillText("PIP · AGE 7", 0, 127);
   previewContext.restore();
 
-  // The no-camera demo deliberately goes through the same segmentation and
-  // skeleton pipeline as a live capture; it is not a pre-cut 3D asset.
-  return extractDrawingFromCanvas(preview, { x: 208 / preview.width, y: 234 / preview.height });
+  // Segment the authored character itself so the no-camera demo cannot mistake
+  // the decorative paper rectangle for the subject. The room photo remains the
+  // preview/AR background, while the extracted contour and texture still come
+  // from the same pixels the child actually drew.
+  const extraction = extractDrawingFromCanvas(output, { x: 0.5, y: 0.5 });
+  return {
+    ...extraction,
+    previewUrl: preview.toDataURL("image/jpeg", 0.9),
+  };
 }
 
 export async function extractDrawingFromImageUrl(imageUrl: string, target: CaptureTarget = { x: 0.5, y: 0.5 }): Promise<DrawingExtraction> {

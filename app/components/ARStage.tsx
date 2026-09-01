@@ -5,6 +5,7 @@ import * as THREE from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
+import { RoundedBoxGeometry } from "three/addons/geometries/RoundedBoxGeometry.js";
 import { selectAnimatableRigParts, type CharacterRig, type ContourPoint, type DrawingExtraction, type LearnedDepthField, type SkeletonPoint } from "../lib/drawing";
 import { buildArtworkShellGeometry } from "../lib/artwork-shell";
 import { hasRecognizableArtworkSurface } from "../lib/mesh-materials";
@@ -87,114 +88,262 @@ const moodPalettes: Record<LightingMood, {
   },
 };
 
-const worldMaterial = (color: number, roughness = 0.82, emissive = 0x000000) => new THREE.MeshStandardMaterial({
-  color,
-  roughness,
-  metalness: 0.02,
-  emissive,
-  emissiveIntensity: emissive ? 0.5 : 0,
-});
+type SurfaceFinish = "plaster" | "stone" | "wood" | "brass" | "velvet" | "glass" | "glow";
 
-/** Builds actual perspective geometry. No world is a bitmap or CSS plate. */
+function makeSurfaceTexture(color: number, finish: SurfaceFinish) {
+  const size = 64;
+  const data = new Uint8Array(size * size * 4);
+  const base = new THREE.Color(color);
+  const variation = finish === "stone" ? 0.13 : finish === "wood" ? 0.11 : finish === "plaster" ? 0.045 : 0.03;
+  let seed = (color ^ finish.length * 0x9e3779b9) >>> 0;
+  for (let pixel = 0; pixel < size * size; pixel += 1) {
+    seed = (seed * 1664525 + 1013904223) >>> 0;
+    const x = pixel % size;
+    const y = Math.floor(pixel / size);
+    const woodBand = finish === "wood" ? Math.sin(x * 0.46 + y * 0.08) * 0.045 : 0;
+    const broadGrain = Math.sin((x + (color & 31)) * 0.22) * Math.cos((y + ((color >>> 5) & 31)) * 0.18) * variation * 0.38;
+    const grain = (((seed >>> 8) & 255) / 255 - 0.5) * variation * 0.62 + broadGrain + woodBand;
+    data[pixel * 4] = Math.round(THREE.MathUtils.clamp(base.r + grain, 0, 1) * 255);
+    data[pixel * 4 + 1] = Math.round(THREE.MathUtils.clamp(base.g + grain * 0.84, 0, 1) * 255);
+    data[pixel * 4 + 2] = Math.round(THREE.MathUtils.clamp(base.b + grain * 0.62, 0, 1) * 255);
+    data[pixel * 4 + 3] = 255;
+  }
+  const texture = new THREE.DataTexture(data, size, size, THREE.RGBAFormat);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.repeat.set(finish === "wood" ? 3 : finish === "stone" ? 2.4 : 2, finish === "wood" ? 2 : finish === "stone" ? 2.4 : 2);
+  texture.magFilter = THREE.LinearFilter;
+  texture.minFilter = THREE.LinearMipmapLinearFilter;
+  texture.needsUpdate = true;
+  return texture;
+}
+
+/** Builds a material-rich, navigable perspective set. No world is a bitmap or CSS plate. */
 export function buildWorldEnvironment(world: ARWorld): WorldEnvironment {
   const group = new THREE.Group();
   group.name = `wallalive-3d-world-${world}`;
   group.userData.world = world;
   group.userData.rendering = "procedural Three.js geometry with perspective, lighting, occlusion, and shadows";
-
-  const add = (name: string, geometry: THREE.BufferGeometry, material: THREE.Material, x: number, y: number, z: number, rotationY = 0) => {
-    const mesh = new THREE.Mesh(geometry, material);
+  group.userData.artDirection = "original material-rich enchanted architecture; never a photographic backdrop";
+  const materialCache = new Map<string, THREE.MeshPhysicalMaterial>();
+  const material = (color: number, finish: SurfaceFinish = "plaster", emissive = 0x000000) => {
+    const key = `${color}-${finish}-${emissive}`;
+    const cached = materialCache.get(key);
+    if (cached) return cached;
+    const isGlass = finish === "glass";
+    const isGlow = finish === "glow";
+    const created = new THREE.MeshPhysicalMaterial({
+      color: isGlass || isGlow ? color : 0xffffff,
+      map: isGlass || isGlow ? null : makeSurfaceTexture(color, finish),
+      roughness: finish === "brass" ? 0.25 : finish === "wood" ? 0.66 : finish === "velvet" ? 0.94 : isGlass ? 0.12 : isGlow ? 0.2 : 0.86,
+      metalness: finish === "brass" ? 0.82 : isGlow ? 0.16 : 0.01,
+      clearcoat: finish === "brass" ? 0.7 : finish === "wood" ? 0.16 : isGlass ? 1 : 0.06,
+      clearcoatRoughness: finish === "brass" ? 0.18 : 0.72,
+      transmission: isGlass ? 0.48 : 0,
+      thickness: isGlass ? 0.55 : 0,
+      transparent: isGlass || isGlow,
+      opacity: isGlass ? 0.62 : isGlow ? 0.88 : 1,
+      emissive,
+      emissiveIntensity: emissive ? (isGlow ? 2.15 : 0.7) : 0,
+      side: isGlass || isGlow ? THREE.DoubleSide : THREE.FrontSide,
+    });
+    materialCache.set(key, created);
+    return created;
+  };
+  const add = (
+    name: string,
+    geometry: THREE.BufferGeometry,
+    surface: THREE.Material,
+    position: [number, number, number],
+    rotation: [number, number, number] = [0, 0, 0],
+    scale: [number, number, number] = [1, 1, 1],
+  ) => {
+    const mesh = new THREE.Mesh(geometry, surface);
     mesh.name = name;
-    mesh.position.set(x, y, z);
-    mesh.rotation.y = rotationY;
+    mesh.position.set(...position);
+    mesh.rotation.set(...rotation);
+    mesh.scale.set(...scale);
     mesh.castShadow = true;
     mesh.receiveShadow = true;
     group.add(mesh);
     return mesh;
   };
-  const box = (name: string, size: [number, number, number], color: number, position: [number, number, number], rotationY = 0) => (
-    add(name, new THREE.BoxGeometry(...size), worldMaterial(color), ...position, rotationY)
+  const rounded = (name: string, size: [number, number, number], color: number, position: [number, number, number], finish: SurfaceFinish = "plaster", radius = 0.08, rotation: [number, number, number] = [0, 0, 0]) => (
+    add(name, new RoundedBoxGeometry(size[0], size[1], size[2], 4, Math.min(radius, Math.min(...size) * 0.45)), material(color, finish), position, rotation)
   );
-  const cylinder = (name: string, radius: number, height: number, color: number, position: [number, number, number], sides = 20) => (
-    add(name, new THREE.CylinderGeometry(radius, radius * 1.04, height, sides), worldMaterial(color), ...position)
-  );
-  const cone = (name: string, radius: number, height: number, color: number, position: [number, number, number], sides = 20) => (
-    add(name, new THREE.ConeGeometry(radius, height, sides), worldMaterial(color), ...position)
-  );
-  const sphere = (name: string, radius: number, color: number, position: [number, number, number], emissive = 0) => (
-    add(name, new THREE.SphereGeometry(radius, 20, 14), worldMaterial(color, 0.68, emissive), ...position)
+  const column = (name: string, height: number, radius: number, color: number, position: [number, number, number], finish: SurfaceFinish = "stone") => {
+    const profile = [
+      new THREE.Vector2(radius * 1.52, 0), new THREE.Vector2(radius * 1.62, height * 0.055),
+      new THREE.Vector2(radius * 1.06, height * 0.12), new THREE.Vector2(radius * 0.82, height * 0.22),
+      new THREE.Vector2(radius * 0.76, height * 0.78), new THREE.Vector2(radius * 1.06, height * 0.9),
+      new THREE.Vector2(radius * 1.62, height * 0.95), new THREE.Vector2(radius * 1.52, height),
+    ];
+    return add(name, new THREE.LatheGeometry(profile, 28), material(color, finish), position);
+  };
+  const arch = (name: string, width: number, height: number, thickness: number, color: number, position: [number, number, number], finish: SurfaceFinish = "stone") => {
+    const outerRadius = width / 2;
+    const innerRadius = Math.max(0.08, outerRadius - thickness);
+    const spring = height - outerRadius;
+    const shape = new THREE.Shape();
+    shape.moveTo(-outerRadius, 0);
+    shape.lineTo(-outerRadius, spring);
+    shape.absarc(0, spring, outerRadius, Math.PI, 0, true);
+    shape.lineTo(outerRadius, 0);
+    shape.closePath();
+    const hole = new THREE.Path();
+    hole.moveTo(-innerRadius, -0.04);
+    hole.lineTo(-innerRadius, spring);
+    hole.absarc(0, spring, innerRadius, Math.PI, 0, true);
+    hole.lineTo(innerRadius, -0.04);
+    hole.closePath();
+    shape.holes.push(hole);
+    const geometry = new THREE.ExtrudeGeometry(shape, { depth: 0.2, bevelEnabled: true, bevelSegments: 3, steps: 1, bevelSize: 0.035, bevelThickness: 0.035, curveSegments: 24 });
+    geometry.center();
+    return add(name, geometry, material(color, finish), [position[0], position[1] + height / 2, position[2]]);
+  };
+  const gem = (name: string, color: number, position: [number, number, number], scale = 1, phase = 0) => {
+    const mesh = add(name, new THREE.OctahedronGeometry(0.2 * scale, 1), material(color, "glass", color), position, [0.2, phase, 0.12]);
+    mesh.userData.worldMotion = { baseY: position[1], phase, amplitude: 0.1 * scale, speed: 1.1 + phase * 0.08, spin: 0.22 };
+    return mesh;
+  };
+  const pointGlow = (name: string, color: number, intensity: number, position: [number, number, number], distance = 5) => {
+    const light = new THREE.PointLight(color, intensity, distance, 2);
+    light.name = name;
+    light.position.set(...position);
+    light.castShadow = false;
+    group.add(light);
+    return light;
+  };
+  const leafCluster = (name: string, color: number, position: [number, number, number], scale: [number, number, number]) => (
+    add(name, new THREE.IcosahedronGeometry(0.72, 2), material(color, "velvet"), position, [0, 0, 0], scale)
   );
 
   const settings: Record<ARWorld, { background: number; fog: number; floor: number; wall: number }> = {
-    studio: { background: 0xf4ead5, fog: 0xe8dcc4, floor: 0xd9b98f, wall: 0xf1dfbd },
-    storybook: { background: 0x9fd6dc, fog: 0xb8d9cf, floor: 0x74a96c, wall: 0xb7cfc3 },
-    wizard: { background: 0x172433, fog: 0x223346, floor: 0x34364f, wall: 0x242a40 },
-    museum: { background: 0xe9dfcb, fog: 0xd8ccb8, floor: 0x8e6c52, wall: 0xe8dcc4 },
+    studio: { background: 0xeee1c7, fog: 0xd9c7a8, floor: 0x9b6b46, wall: 0xe6d2aa },
+    storybook: { background: 0x78b7c4, fog: 0x9bc6bb, floor: 0x567c4d, wall: 0xb99a78 },
+    wizard: { background: 0x0d1524, fog: 0x111d31, floor: 0x20263d, wall: 0x343044 },
+    museum: { background: 0xdfd4c2, fog: 0xc8b9a2, floor: 0x72513c, wall: 0xd8c6aa },
   };
   const palette = settings[world];
-  box(`${world}-floor`, [12, 0.12, 11], palette.floor, [0, -1.22, -2.2]);
-  box(`${world}-back-wall`, [12, 6.4, 0.16], palette.wall, [0, 1.25, -6.4]);
-  box(`${world}-left-wall`, [0.16, 6.4, 8.4], palette.wall, [-5.4, 1.25, -2.25]);
-  box(`${world}-right-wall`, [0.16, 6.4, 8.4], palette.wall, [5.4, 1.25, -2.25]);
+  add(`${world}-floor`, new THREE.CircleGeometry(8.5, 96), material(palette.floor, world === "wizard" ? "stone" : "wood"), [0, -1.22, -2.3], [-Math.PI / 2, 0, 0]);
+  rounded(`${world}-back-wall`, [11.2, 6.8, 0.28], palette.wall, [0, 1.35, -6.75], world === "wizard" ? "stone" : "plaster", 0.12);
+  rounded(`${world}-left-wall`, [0.28, 6.8, 8.5], palette.wall, [-5.5, 1.35, -2.7], world === "wizard" ? "stone" : "plaster", 0.12);
+  rounded(`${world}-right-wall`, [0.28, 6.8, 8.5], palette.wall, [5.5, 1.35, -2.7], world === "wizard" ? "stone" : "plaster", 0.12);
 
   if (world === "studio") {
-    box("studio-window", [2.4, 1.65, 0.12], 0x9dcbd2, [-2.45, 1.3, -6.26]);
-    box("studio-window-cross-v", [0.07, 1.65, 0.16], 0xf8f0dc, [-2.45, 1.3, -6.15]);
-    box("studio-window-cross-h", [2.4, 0.07, 0.16], 0xf8f0dc, [-2.45, 1.3, -6.15]);
-    box("studio-shelf", [2.1, 0.12, 0.48], 0x6c4836, [2.55, 0.25, -5.95]);
-    [-0.72, 0, 0.72].forEach((offset, index) => box(`studio-book-${index}`, [0.32, 0.78 - index * 0.08, 0.28], [0xe66551, 0x4ea9aa, 0xe0af45][index], [1.9 + offset, 0.68, -5.78]));
-    cylinder("studio-pot", 0.42, 0.48, 0xd2644c, [-3.6, -0.94, -5.2]);
-    cone("studio-plant-a", 0.56, 1.55, 0x47785a, [-3.75, 0.04, -5.15], 8);
-    cone("studio-plant-b", 0.46, 1.28, 0x5b9569, [-3.3, -0.02, -5.05], 8);
+    arch("studio-window", 2.45, 2.65, 0.17, 0x7b5438, [-2.45, -0.05, -6.47], "wood");
+    add("studio-window-glass", new THREE.CircleGeometry(0.99, 48, 0, Math.PI), material(0x8fc6d2, "glass"), [-2.45, 1.29, -6.31]);
+    rounded("studio-shelf", [2.55, 0.16, 0.55], 0x68442f, [2.55, 0.12, -6.04], "wood", 0.055);
+    [-0.9, -0.54, -0.16, 0.22, 0.61, 0.92].forEach((offset, index) => rounded(`studio-book-${index}`, [0.24 + (index % 2) * 0.05, 0.7 + (index % 3) * 0.12, 0.31], [0xb6483e, 0x386d72, 0xb88435, 0x5f4c83, 0x4b7554, 0x9c5b39][index], [2.55 + offset, 0.57, -5.78], "velvet", 0.035, [0, 0, (index - 2) * 0.025]));
+    const tableTop = add("studio-sculpting-table", new THREE.CylinderGeometry(1.35, 1.38, 0.16, 48), material(0x70472f, "wood"), [2.65, -0.76, -3.85]);
+    tableTop.scale.z = 0.62;
+    column("studio-table-leg", 0.62, 0.32, 0x5c3827, [2.65, -1.18, -3.85], "wood");
+    column("studio-pot", 0.55, 0.34, 0xa34e3c, [-3.72, -1.2, -5.15], "plaster");
+    [-0.34, 0.02, 0.34].forEach((offset, index) => {
+      const stem = add(`studio-plant-stem-${index}`, new THREE.CylinderGeometry(0.035, 0.045, 1.55 - index * 0.12, 10), material(0x3f6646, "velvet"), [-3.72 + offset, -0.22, -5.15], [0, 0, offset * 0.42]);
+      stem.castShadow = true;
+      leafCluster(`studio-plant-leaf-${index}`, [0x426c4a, 0x557f50, 0x365f43][index], [-3.75 + offset * 1.7, 0.5 - index * 0.08, -5.1], [0.42, 0.72, 0.38]);
+    });
+    rounded("studio-rug", [3.9, 0.035, 2.55], 0xc97863, [-0.15, -1.17, -2.55], "velvet", 0.28);
+    pointGlow("studio-window-light", 0xffd49a, 5.2, [-2.5, 2.2, -4.9], 7);
   }
 
   if (world === "storybook") {
-    box("storybook-path", [1.6, 0.06, 7.4], 0xe7c883, [0, -1.12, -2.72]);
-    box("storybook-castle", [3.15, 2.2, 0.72], 0xf1c5ad, [0, -0.05, -5.72]);
-    [-1.8, 1.8].forEach((x, index) => {
-      cylinder(`storybook-tower-${index}`, 0.62, 2.8, 0xe8a9a5, [x, 0.08, -5.42], 16);
-      cone(`storybook-roof-${index}`, 0.86, 1.34, 0x6f79b7, [x, 2.14, -5.42], 16);
+    const pathCurve = new THREE.CatmullRomCurve3([
+      new THREE.Vector3(-0.6, -1.12, 1.2), new THREE.Vector3(0.55, -1.12, -0.3),
+      new THREE.Vector3(-0.35, -1.12, -2.2), new THREE.Vector3(0.15, -1.12, -5.6),
+    ]);
+    add("storybook-path", new THREE.TubeGeometry(pathCurve, 42, 0.62, 10, false), material(0xcaa76a, "stone"), [0, 0, 0]);
+    rounded("storybook-castle", [3.55, 2.25, 0.78], 0xc8a17e, [0, -0.02, -6.08], "stone", 0.12);
+    arch("storybook-gate", 1.14, 1.62, 0.18, 0x714937, [0, -1.1, -5.58], "wood");
+    [-1.92, 1.92].forEach((x, index) => {
+      add(`storybook-tower-${index}`, new THREE.CylinderGeometry(0.62, 0.7, 3.15, 28), material(0xb89070, "stone"), [x, 0.08, -5.8]);
+      add(`storybook-roof-${index}`, new THREE.ConeGeometry(0.9, 1.52, 28), material(0x5e557e, "velvet"), [x, 2.36, -5.8]);
+      for (let crenel = 0; crenel < 7; crenel += 1) {
+        const angle = crenel / 7 * Math.PI * 2;
+        rounded(`storybook-crenel-${index}-${crenel}`, [0.18, 0.3, 0.18], 0xcaa788, [x + Math.cos(angle) * 0.52, 1.67, -5.8 + Math.sin(angle) * 0.52], "stone", 0.025);
+      }
     });
-    box("storybook-gate", [0.78, 1.3, 0.24], 0x725044, [0, -0.46, -5.28]);
-    [-3.55, 3.55].forEach((x, index) => {
-      cylinder(`storybook-tree-trunk-${index}`, 0.18, 1.45, 0x744b34, [x, -0.46, -4.72], 10);
-      sphere(`storybook-tree-crown-${index}`, 0.88, 0x5a9c68, [x, 0.65, -4.72]);
-      sphere(`storybook-tree-crown-small-${index}`, 0.57, 0x82b86a, [x + (index ? -0.45 : 0.45), 0.5, -4.62]);
+    [-3.65, 3.55].forEach((x, index) => {
+      column(`storybook-tree-trunk-${index}`, 1.75, 0.22, 0x67432d, [x, -1.18, -4.7], "wood");
+      leafCluster(`storybook-tree-crown-${index}`, 0x396f46, [x, 0.82, -4.7], [1.2, 1.38, 1.05]);
+      leafCluster(`storybook-tree-crown-small-${index}`, 0x5e9254, [x + (index ? -0.62 : 0.62), 0.46, -4.56], [0.72, 0.92, 0.72]);
     });
-    sphere("storybook-cloud-a", 0.6, 0xffffff, [-2.4, 2.5, -5.9]);
-    sphere("storybook-cloud-b", 0.43, 0xffffff, [-1.8, 2.54, -5.85]);
+    [-2.8, -1.65, 1.55, 2.85].forEach((x, index) => {
+      const firefly = gem(`storybook-firefly-${index}`, 0xffe37b, [x, 0.2 + (index % 2) * 0.8, -3.5 - index * 0.42], 0.34, index * 0.8);
+      firefly.material = material(0xffe37b, "glow", 0xffd84e);
+    });
+    pointGlow("storybook-sun-glow", 0xffd28c, 5.8, [-2.2, 3.2, -4.4], 8);
   }
 
   if (world === "wizard") {
-    [-3.55, -2.1, 2.1, 3.55].forEach((x, index) => {
-      cylinder(`wizard-column-${index}`, 0.3, 4.6, 0x646079, [x, 0.7, -5.55], 12);
-      add(`wizard-arch-${index}`, new THREE.TorusGeometry(0.72, 0.14, 10, 24, Math.PI), worldMaterial(0x716b88), x, 2.9, -5.45);
+    arch("wizard-grand-arch", 4.45, 4.8, 0.38, 0x4a475b, [0, -1.18, -6.15], "stone");
+    [-3.95, -2.45, 2.45, 3.95].forEach((x, index) => column(`wizard-column-${index}`, 4.75, 0.34, 0x4b4859, [x, -1.2, -5.92], "stone"));
+    rounded("wizard-dais", [3.6, 0.2, 1.75], 0x34354a, [0, -1.03, -5.02], "stone", 0.12);
+    [0, 1, 2].forEach((ring) => add(`wizard-portal-ring-${ring}`, new THREE.TorusGeometry(1.18 - ring * 0.17, 0.055 + ring * 0.012, 16, 80), material(ring === 1 ? 0x8e68ff : 0x42d9dc, "glow", ring === 1 ? 0x7c54ff : 0x2fd7dd), [0, 0.66, -5.49], [0.04 * ring, 0.08 * ring, ring * 0.33]));
+    const portalMaterial = new THREE.ShaderMaterial({
+      uniforms: {
+        uTime: { value: 0 },
+        uTeal: { value: new THREE.Color(0x45e1d2) },
+        uViolet: { value: new THREE.Color(0x8667ff) },
+      },
+      vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+      fragmentShader: `
+        uniform float uTime; uniform vec3 uTeal; uniform vec3 uViolet; varying vec2 vUv;
+        void main(){
+          vec2 p = vUv - 0.5; float radius = length(p); float angle = atan(p.y, p.x);
+          float spiral = sin(angle * 7.0 - uTime * 1.8 + radius * 30.0) * 0.5 + 0.5;
+          float rings = sin(radius * 58.0 - uTime * 2.4) * 0.5 + 0.5;
+          float core = 1.0 - smoothstep(0.02, 0.49, radius);
+          vec3 color = mix(uViolet, uTeal, clamp(spiral * 0.72 + rings * 0.28, 0.0, 1.0));
+          color += vec3(0.34, 0.18, 0.62) * pow(core, 2.0);
+          float edge = 1.0 - smoothstep(0.43, 0.5, radius);
+          gl_FragColor = vec4(color * (0.72 + core * 0.78), edge * (0.72 + core * 0.24));
+        }
+      `,
+      transparent: true,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+      blending: THREE.AdditiveBlending,
     });
-    box("wizard-dais", [3.15, 0.22, 1.55], 0x4c4265, [0, -0.96, -4.82]);
-    sphere("wizard-orb-a", 0.19, 0x9cefff, [-2.5, 1.25, -4.6], 0x35c9ff);
-    sphere("wizard-orb-b", 0.14, 0xd3a4ff, [2.55, 1.85, -4.9], 0xb56cff);
-    sphere("wizard-orb-c", 0.11, 0xffd77b, [0.7, 2.45, -5.3], 0xffb52b);
-    [-1.2, 0, 1.2].forEach((x, index) => box(`wizard-rune-step-${index}`, [0.82, 0.08, 0.55], [0x57627f, 0x62577f, 0x4f6c7c][index], [x, -1.08 + index * 0.015, -3.0 - index * 0.8]));
+    const portal = add("wizard-living-portal", new THREE.CircleGeometry(0.91, 72), portalMaterial, [0, 0.66, -5.55]);
+    portal.userData.wallalivePortalShader = true;
+    portal.userData.worldMotion = { baseY: 0.66, phase: 0.4, amplitude: 0.035, speed: 1.6, spin: 0.045, spinAxis: "z" };
+    add("wizard-floor-rune-outer", new THREE.RingGeometry(1.55, 1.68, 72), material(0x9e7cff, "glow", 0x7b62ff), [0, -1.14, -3.55], [-Math.PI / 2, 0, 0.18]);
+    add("wizard-floor-rune-inner", new THREE.RingGeometry(0.72, 0.79, 64), material(0x66e4d2, "glow", 0x3fd6c2), [0, -1.135, -3.55], [-Math.PI / 2, 0, -0.2]);
+    [-3.2, 3.15].forEach((x, shelfIndex) => {
+      rounded(`wizard-bookcase-${shelfIndex}`, [1.62, 3.28, 0.48], 0x4a2e25, [x, 0.34, -6.12], "wood", 0.1);
+      [-0.9, -0.05, 0.8].forEach((y, row) => rounded(`wizard-shelf-${shelfIndex}-${row}`, [1.48, 0.1, 0.54], 0x2f1c19, [x, y + 0.4, -5.82], "wood", 0.025));
+      for (let book = 0; book < 8; book += 1) {
+        const xOffset = -0.58 + (book % 4) * 0.38;
+        const row = Math.floor(book / 4);
+        rounded(`wizard-book-${shelfIndex}-${book}`, [0.23, 0.58 + (book % 3) * 0.07, 0.25], [0x6f3453, 0x295c63, 0x72552d, 0x493b72][book % 4], [x + xOffset, -0.38 + row * 0.96, -5.53], "velvet", 0.025, [0, 0, (book % 2 ? -1 : 1) * 0.04]);
+      }
+    });
+    add("wizard-astrolabe-a", new THREE.TorusGeometry(0.68, 0.055, 12, 64), material(0xc89745, "brass"), [-2.5, 1.98, -4.95], [0.25, 0.52, 0.2]);
+    add("wizard-astrolabe-b", new THREE.TorusGeometry(0.48, 0.045, 12, 64), material(0xc89745, "brass"), [-2.5, 1.98, -4.95], [1.05, 0.15, 0.7]);
+    gem("wizard-crystal-a", 0x57e2df, [2.35, -0.37, -4.65], 1.2, 0.2);
+    gem("wizard-crystal-b", 0xa476ff, [2.72, -0.2, -4.72], 0.92, 1.3);
+    gem("wizard-crystal-c", 0xffd27a, [2.08, -0.48, -4.52], 0.72, 2.1);
+    pointGlow("wizard-portal-light", 0x6c72ff, 8.5, [0, 0.7, -4.7], 7);
+    pointGlow("wizard-lantern-light", 0xffb960, 4.8, [-2.7, 1.6, -4.7], 5);
   }
 
   if (world === "museum") {
-    [-3.75, 3.75].forEach((x, index) => {
-      cylinder(`museum-column-${index}`, 0.38, 4.8, 0xf0e7d3, [x, 0.82, -5.45], 20);
-      cylinder(`museum-column-base-${index}`, 0.55, 0.24, 0xd5c7ad, [x, -1.0, -5.45], 20);
+    [-4.05, 4.05].forEach((x, index) => column(`museum-column-${index}`, 4.85, 0.38, 0xd6c5a8, [x, -1.2, -5.85], "stone"));
+    [-2.28, 0, 2.28].forEach((x, index) => {
+      rounded(`museum-frame-${index}`, [1.72, 2.05, 0.22], 0x95662d, [x, 1.02, -6.47], "brass", 0.055);
+      rounded(`museum-art-${index}`, [1.38, 1.7, 0.23], [0x4f7779, 0x8a544c, 0xa17c35][index], [x, 1.02, -6.32], "velvet", 0.035);
+      add(`museum-picture-light-${index}`, new THREE.CylinderGeometry(0.035, 0.035, 0.9, 12), material(0xb68942, "brass"), [x, 2.38, -6.04], [0, 0, Math.PI / 2]);
     });
-    [-2.25, 0, 2.25].forEach((x, index) => {
-      box(`museum-frame-${index}`, [1.55, 1.75, 0.18], 0x9e7441, [x, 1.05, -6.18]);
-      box(`museum-art-${index}`, [1.24, 1.42, 0.2], [0x83a8a8, 0xc88371, 0xd5ad55][index], [x, 1.05, -6.05]);
-    });
-    box("museum-plinth", [1.42, 1.05, 1.15], 0xe3d9c5, [0, -0.65, -4.7]);
-    sphere("museum-sculpture", 0.55, 0x93a5a8, [0, 0.2, -4.7]);
+    rounded("museum-plinth", [1.5, 1.12, 1.22], 0xd5c8b2, [0, -0.62, -4.72], "stone", 0.08);
+    add("museum-sculpture", new THREE.TorusKnotGeometry(0.48, 0.14, 128, 18, 2, 3), material(0x799398, "brass"), [0, 0.34, -4.72], [0.42, 0.22, 0.12]);
+    add("museum-inlay", new THREE.RingGeometry(2.2, 2.3, 72), material(0xc39a58, "brass"), [0, -1.15, -3.5], [-Math.PI / 2, 0, 0]);
+    pointGlow("museum-gallery-light", 0xffe5bd, 5.6, [0, 3.25, -3.6], 8);
   }
 
-  return {
-    group,
-    background: new THREE.Color(palette.background),
-    fog: new THREE.Fog(palette.fog, 5.5, 15),
-  };
+  return { group, background: new THREE.Color(palette.background), fog: new THREE.Fog(palette.fog, 6.2, 17.5) };
 }
 
 function segmentProjection(x: number, y: number, start: ContourPoint, end: ContourPoint) {
@@ -206,6 +355,24 @@ function segmentProjection(x: number, y: number, start: ContourPoint, end: Conto
     amount,
     distance: Math.hypot(x - (start.x + dx * amount), y - (start.y + dy * amount)),
   };
+}
+
+function samplePolyline(path: ContourPoint[], amount: number) {
+  if (path.length < 2) return path[0] ?? { x: 0, y: 0 };
+  const lengths = path.slice(0, -1).map((point, index) => Math.hypot(path[index + 1].x - point.x, path[index + 1].y - point.y));
+  const total = lengths.reduce((sum, length) => sum + length, 0);
+  let remaining = THREE.MathUtils.clamp(amount, 0, 1) * total;
+  for (let index = 0; index < lengths.length; index += 1) {
+    if (remaining <= lengths[index] || index === lengths.length - 1) {
+      const local = lengths[index] ? remaining / lengths[index] : 0;
+      return {
+        x: THREE.MathUtils.lerp(path[index].x, path[index + 1].x, local),
+        y: THREE.MathUtils.lerp(path[index].y, path[index + 1].y, local),
+      };
+    }
+    remaining -= lengths[index];
+  }
+  return path[path.length - 1];
 }
 
 export function buildCharacter(
@@ -272,14 +439,26 @@ export function buildCharacter(
   // If no branch passes the gate, this degrades to one safe root bone over one continuous surface instead of inventing anatomy.
   const rootBone = new THREE.Bone();
   rootBone.name = "rig-body";
-  const branchBones = structuralParts.map((part) => {
+  const branchChains = structuralParts.map((part) => {
     const anchor = part.anchor ?? bodyPart?.center ?? { x: 0, y: 0, z: 0 };
-    const bone = new THREE.Bone();
-    bone.name = `rig-${part.id}`;
-    bone.position.set(anchor.x, anchor.y, 0);
-    bone.userData.baseRotationZ = 0;
-    rootBone.add(bone);
-    return { part, bone, anchor };
+    const sourcePath = part.path?.length && part.path.length >= 2 ? part.path : [anchor, part.center];
+    const path: ContourPoint[] = Math.hypot(sourcePath[0].x - anchor.x, sourcePath[0].y - anchor.y) > 0.035
+      ? [anchor, ...sourcePath]
+      : [{ x: anchor.x, y: anchor.y }, ...sourcePath.slice(1)];
+    const joint = samplePolyline(path, 0.52);
+    const upperBone = new THREE.Bone();
+    upperBone.name = `rig-${part.id}`;
+    upperBone.position.set(anchor.x, anchor.y, 0);
+    upperBone.userData.baseRotationZ = 0;
+    upperBone.userData.wallaliveJointRole = "proximal";
+    const tipBone = new THREE.Bone();
+    tipBone.name = `rig-${part.id}-tip`;
+    tipBone.position.set(joint.x - anchor.x, joint.y - anchor.y, 0);
+    tipBone.userData.baseRotationZ = 0;
+    tipBone.userData.wallaliveJointRole = "distal";
+    upperBone.add(tipBone);
+    rootBone.add(upperBone);
+    return { part, upperBone, tipBone, anchor, path };
   });
   const positions = compactGeometry.getAttribute("position");
   const skinIndices = new Uint16Array(positions.count * 4);
@@ -287,12 +466,10 @@ export function buildCharacter(
   for (let vertex = 0; vertex < positions.count; vertex += 1) {
     const x = positions.getX(vertex);
     const y = positions.getY(vertex);
-    let bestBone = 0;
+    let bestChain = -1;
     let bestWeight = 0;
-    branchBones.forEach(({ part, anchor }, index) => {
-      const path = part.path?.length && part.path.length >= 2
-        ? part.path
-        : [anchor, part.center];
+    let bestProgress = 0;
+    branchChains.forEach(({ part, path }, index) => {
       let minimumDistance = Infinity;
       let progress = 0;
       for (let segment = 0; segment < path.length - 1; segment += 1) {
@@ -308,22 +485,31 @@ export function buildCharacter(
       const influence = radial * radial * alongBranch;
       if (influence > bestWeight) {
         bestWeight = influence;
-        bestBone = index + 1;
+        bestChain = index;
+        bestProgress = progress;
       }
     });
     const branchWeight = Math.min(0.96, bestWeight);
+    const distalBlend = bestChain >= 0 ? THREE.MathUtils.smoothstep(bestProgress, 0.38, 0.66) : 0;
     const offset = vertex * 4;
     skinIndices[offset] = 0;
-    skinIndices[offset + 1] = bestBone;
     skinWeights[offset] = 1 - branchWeight;
-    skinWeights[offset + 1] = branchWeight;
+    if (bestChain >= 0) {
+      const upperIndex = 1 + bestChain * 2;
+      const tipIndex = upperIndex + 1;
+      skinIndices[offset + 1] = upperIndex;
+      skinIndices[offset + 2] = tipIndex;
+      skinWeights[offset + 1] = branchWeight * (1 - distalBlend);
+      skinWeights[offset + 2] = branchWeight * distalBlend;
+    }
   }
   compactGeometry.setAttribute("skinIndex", new THREE.Uint16BufferAttribute(skinIndices, 4));
   compactGeometry.setAttribute("skinWeight", new THREE.Float32BufferAttribute(skinWeights, 4));
   const skinnedVolume = new THREE.SkinnedMesh(compactGeometry, [sideMaterial, frontMaterial, backMaterial]);
   skinnedVolume.name = "silhouette-distance-lens";
   skinnedVolume.add(rootBone);
-  skinnedVolume.bind(new THREE.Skeleton([rootBone, ...branchBones.map(({ bone }) => bone)]));
+  const articulationBones = branchChains.flatMap(({ upperBone, tipBone }) => [upperBone, tipBone]);
+  skinnedVolume.bind(new THREE.Skeleton([rootBone, ...articulationBones]));
   skinnedVolume.castShadow = true;
   skinnedVolume.receiveShadow = true;
   skinnedVolume.userData.reconstruction = {
@@ -334,7 +520,7 @@ export function buildCharacter(
     contourPoints: contour.length,
     skeletonPoints: skeleton.length,
     semanticRig: rig.version,
-    skinning: `${branchBones.length} verified branch bones over one continuous surface; unreviewed anatomy cannot deform geometry`,
+    skinning: `${branchChains.length} verified two-joint chains (${articulationBones.length} branch bones) over one continuous surface; unreviewed anatomy cannot deform geometry`,
     maximumHalfDepth: shell.maximumHalfDepth,
     texturedFrontTriangles,
     neutralBackTriangles,
@@ -374,6 +560,7 @@ export function buildCharacter(
   };
   character.userData.wallaliveRig = rig;
   character.userData.wallaliveMovableParts = structuralParts.map((part) => part.id);
+  character.userData.wallaliveJointChains = branchChains.map(({ part, path }) => ({ id: part.id, joints: 2, pathPoints: path.length }));
 
   return character;
 }
@@ -431,7 +618,7 @@ export const ARStage = forwardRef<ARStageHandle, ARStageProps>(function ARStage(
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 0.9;
     renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.shadowMap.type = THREE.PCFShadowMap;
     renderer.xr.enabled = true;
     renderer.domElement.setAttribute("aria-label", "Semantic articulated 3D drawing");
     mount.appendChild(renderer.domElement);
@@ -441,6 +628,23 @@ export const ARStage = forwardRef<ARStageHandle, ARStageProps>(function ARStage(
     scene.add(environment.group);
     scene.background = environment.background;
     scene.fog = environment.fog;
+    const syncWorldDiagnostics = () => {
+      let meshes = 0;
+      let lights = 0;
+      const geometryKinds = new Set<string>();
+      environment.group.traverse((object) => {
+        if (object instanceof THREE.Mesh) {
+          meshes += 1;
+          geometryKinds.add(object.geometry.type);
+        }
+        if (object instanceof THREE.Light) lights += 1;
+      });
+      mount.dataset.world = String(environment.group.userData.world ?? worldStateRef.current);
+      mount.dataset.worldMeshes = String(meshes);
+      mount.dataset.worldLights = String(lights);
+      mount.dataset.worldGeometryKinds = String(geometryKinds.size);
+    };
+    syncWorldDiagnostics();
     const camera = new THREE.PerspectiveCamera(40, width / height, 0.01, 40);
     const firstPreset = cameraPresets[cameraPresetRef.current];
     camera.position.set(...firstPreset.position);
@@ -534,6 +738,17 @@ export const ARStage = forwardRef<ARStageHandle, ARStageProps>(function ARStage(
 
     const characterRoot = new THREE.Group();
     scene.add(characterRoot);
+    const syncCharacterDiagnostics = () => {
+      let bones = 0;
+      let articulatedChains = 0;
+      characterRoot.traverse((object) => {
+        if (object instanceof THREE.Bone) bones += 1;
+        if (object.userData.wallaliveJointRole === "distal") articulatedChains += 1;
+      });
+      mount.dataset.rigBones = String(bones);
+      mount.dataset.articulatedChains = String(articulatedChains);
+      mount.dataset.characterMode = neuralAssetUrl ? "neural-gltf" : "local-artwork-shell";
+    };
     if (neuralAssetUrl) {
       new GLTFLoader().load(
         neuralAssetUrl,
@@ -544,6 +759,7 @@ export const ARStage = forwardRef<ARStageHandle, ARStageProps>(function ARStage(
           }
           const prepared = prepareNeuralCharacter(gltf.scene, rig ?? undefined);
           characterRoot.add(prepared.character);
+          syncCharacterDiagnostics();
           onNeuralAssetInfo(prepared.info);
         },
         undefined,
@@ -579,12 +795,14 @@ export const ARStage = forwardRef<ARStageHandle, ARStageProps>(function ARStage(
         instance.userData.wallaliveInstance = index;
         characterRoot.add(instance);
       });
+      syncCharacterDiagnostics();
       onNeuralAssetInfo(null);
     } else if (contour?.length && skeleton?.length && rig) {
       characterRoot.add(buildCharacter(contour, skeleton, rig, depth, textureUrl, accent, inflation, {
         poseApplicable: false,
         topologyApplicable: false,
       }));
+      syncCharacterDiagnostics();
       onNeuralAssetInfo(null);
     }
 
@@ -602,7 +820,7 @@ export const ARStage = forwardRef<ARStageHandle, ARStageProps>(function ARStage(
     reticle.visible = false;
     scene.add(reticle);
 
-    const clock = new THREE.Clock();
+    const animationStartedAt = performance.now();
     let previousElapsed = 0;
     const pressedKeys = new Set<string>();
     const onKeyDown = (event: KeyboardEvent) => {
@@ -614,7 +832,7 @@ export const ARStage = forwardRef<ARStageHandle, ARStageProps>(function ARStage(
     renderer.domElement.addEventListener("keydown", onKeyDown);
     renderer.domElement.addEventListener("keyup", onKeyUp);
     const render = (_time?: number, frame?: XRFrame) => {
-      const elapsed = clock.getElapsedTime();
+      const elapsed = (performance.now() - animationStartedAt) / 1000;
       const delta = Math.min(0.05, Math.max(0, elapsed - previousElapsed));
       previousElapsed = elapsed;
       const currentAction = actionRef.current;
@@ -627,6 +845,15 @@ export const ARStage = forwardRef<ARStageHandle, ARStageProps>(function ARStage(
       scene.fog = syntheticWorldVisible ? environment.fog : null;
       atmosphere.visible = syntheticWorldVisible;
       controls.enabled = syntheticWorldVisible;
+      environment.group.traverse((object) => {
+        if (object.userData.wallalivePortalShader && object instanceof THREE.Mesh && object.material instanceof THREE.ShaderMaterial) {
+          object.material.uniforms.uTime.value = elapsed;
+        }
+        const motion = object.userData.worldMotion as { baseY: number; phase: number; amplitude: number; speed: number; spin: number; spinAxis?: "y" | "z" } | undefined;
+        if (!motion) return;
+        object.position.y = motion.baseY + Math.sin(elapsed * motion.speed + motion.phase) * motion.amplitude;
+        object.rotation[motion.spinAxis ?? "y"] += delta * motion.spin;
+      });
       if (cameraTransition && syntheticWorldVisible) {
         const amount = Math.min(1, (performance.now() - cameraTransition.start) / 820);
         const eased = 1 - Math.pow(1 - amount, 3);
@@ -675,12 +902,18 @@ export const ARStage = forwardRef<ARStageHandle, ARStageProps>(function ARStage(
           articulated.scale.setScalar(baseScale);
         }
         const movable = localRig?.parts.filter((part) => movableIds.has(part.id)) ?? [];
+        const chainNodes = (partId: string) => ({
+          upper: articulated.getObjectByName(`rig-${partId}`),
+          tip: articulated.getObjectByName(`rig-${partId}-tip`),
+        });
         movable.forEach((part) => {
-          const node = articulated.getObjectByName(`rig-${part.id}`);
-          if (!node) return;
-          node.rotation.x = 0;
-          node.rotation.y = 0;
-          node.rotation.z = Number(node.userData.baseRotationZ ?? 0);
+          const { upper, tip } = chainNodes(part.id);
+          [upper, tip].forEach((node) => {
+            if (!node) return;
+            node.rotation.x = 0;
+            node.rotation.y = 0;
+            node.rotation.z = Number(node.userData.baseRotationZ ?? 0);
+          });
         });
         if (instanceAction === "wave") {
           const quadruped = localRig?.topologyKind === "quadruped";
@@ -688,32 +921,38 @@ export const ARStage = forwardRef<ARStageHandle, ARStageProps>(function ARStage(
             ?? movable.find((candidate) => candidate.kind === "arm" && candidate.side === "right")
             ?? movable.find((candidate) => candidate.kind === "arm")
             ?? movable.find((candidate) => candidate.kind === "wing" || candidate.kind === "tentacle" || candidate.kind === "tail");
-          const node = part ? articulated.getObjectByName(`rig-${part.id}`) : null;
-          if (node) {
+          const chain = part ? chainNodes(part.id) : null;
+          if (chain?.upper) {
             const amplitude = quadruped || part?.kind !== "arm" ? 0.2 : 0.3;
-            node.rotation.z = Number(node.userData.baseRotationZ ?? 0) + amplitude + Math.sin(localElapsed * 7.2) * amplitude;
+            chain.upper.rotation.z = Number(chain.upper.userData.baseRotationZ ?? 0) + amplitude + Math.sin(localElapsed * 7.2) * amplitude;
+            if (chain.tip) chain.tip.rotation.z = Number(chain.tip.userData.baseRotationZ ?? 0) + Math.sin(localElapsed * 7.2 + 0.7) * amplitude * 0.72;
           }
         }
         if (instanceAction === "dance") {
           movable.forEach((part, index) => {
-            const node = articulated.getObjectByName(`rig-${part.id}`);
-            if (!node) return;
+            const { upper, tip } = chainNodes(part.id);
+            if (!upper) return;
             const direction = part.side === "right" || index % 2 ? -1 : 1;
-            node.rotation.z = Number(node.userData.baseRotationZ ?? 0) + direction * Math.sin(localElapsed * 5.2 + index * 0.45) * 0.24;
-            node.rotation.x = Math.sin(localElapsed * 3.8 + index) * 0.08;
+            upper.rotation.z = Number(upper.userData.baseRotationZ ?? 0) + direction * Math.sin(localElapsed * 5.2 + index * 0.45) * 0.24;
+            upper.rotation.x = Math.sin(localElapsed * 3.8 + index) * 0.08;
+            if (tip) tip.rotation.z = Number(tip.userData.baseRotationZ ?? 0) - direction * Math.sin(localElapsed * 5.2 + index * 0.45 + 0.8) * 0.2;
           });
         }
         if (instanceAction === "walk") {
           movable.filter((part) => part.kind === "leg").forEach((part, index) => {
-            const node = articulated.getObjectByName(`rig-${part.id}`);
-            if (!node) return;
+            const { upper, tip } = chainNodes(part.id);
+            if (!upper) return;
             const direction = part.side === "right" || index % 2 ? -1 : 1;
-            node.rotation.z = Number(node.userData.baseRotationZ ?? 0) + direction * Math.sin(localElapsed * 7) * 0.26;
-            node.rotation.x = direction * Math.sin(localElapsed * 7) * 0.12;
+            const stride = Math.sin(localElapsed * 7);
+            upper.rotation.z = Number(upper.userData.baseRotationZ ?? 0) + direction * stride * 0.26;
+            upper.rotation.x = direction * stride * 0.12;
+            if (tip) tip.rotation.z = Number(tip.userData.baseRotationZ ?? 0) - direction * Math.max(0, stride) * 0.38;
           });
           movable.filter((part) => part.kind === "arm").forEach((part, index) => {
-            const node = articulated.getObjectByName(`rig-${part.id}`);
-            if (node) node.rotation.z = Number(node.userData.baseRotationZ ?? 0) + (index % 2 ? 1 : -1) * Math.sin(localElapsed * 7) * 0.24;
+            const { upper, tip } = chainNodes(part.id);
+            const direction = index % 2 ? 1 : -1;
+            if (upper) upper.rotation.z = Number(upper.userData.baseRotationZ ?? 0) + direction * Math.sin(localElapsed * 7) * 0.24;
+            if (tip) tip.rotation.z = Number(tip.userData.baseRotationZ ?? 0) - direction * Math.sin(localElapsed * 7 + 0.5) * 0.12;
           });
         }
         if (directedActions) {
@@ -808,6 +1047,7 @@ export const ARStage = forwardRef<ARStageHandle, ARStageProps>(function ARStage(
       disposeObject(environment.group);
       environment = buildWorldEnvironment(nextWorld);
       scene.add(environment.group);
+      syncWorldDiagnostics();
       if (!renderer.xr.isPresenting) {
         scene.background = environment.background;
         scene.fog = environment.fog;
