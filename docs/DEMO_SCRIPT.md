@@ -22,11 +22,11 @@ Open **Privacy** and point to the three human-only gestures. If recording a succ
 
 Open **Tools**.
 
-**Voiceover:** “Six goal-level WebMCP tools create a shared creative loop. The agent can read the exact abilities of every rig, but there is no camera, capture, upload, or approval tool.”
+**Voiceover:** “Eight goal-level WebMCP tools create a shared creative loop. The agent can read the exact abilities of every rig, but there is no camera, capture, upload, purchase, or approval tool.”
 
 Prompt:
 
-> Inspect the creative scene and every character's verified capabilities. Stage a gentle four-beat Magic Show, use only supported actions, and wait for me to approve it.
+> Inspect the creative scene and every character's verified capabilities. Stage a gentle four-beat story that practices sequencing and cooperation, use only supported actions, and wait for me to approve playback. Do not access the camera or purchase anything.
 
 Show `inspect_creative_scene`, `inspect_character_capabilities`, and `stage_magic_show`. Point out the returned workflow phase, `availableActions`, blocked-action reasons, validated per-character moves, and `requiresHumanApproval: true`.
 
@@ -34,7 +34,7 @@ Show `inspect_creative_scene`, `inspect_character_capabilities`, and `stage_magi
 
 The typed proposal now appears inside the AR frame. Point out the cast roles, beat preview, and two human controls. Press **Approve & play** and show the planned actions and world changes. Then tap a different point manually and press **Hop**.
 
-**Voiceover:** “The agent plans; the child decides. Only the visible human approval turns the staged data into a performance, and every action keeps its author.”
+**Voiceover:** “The agent plans; the child decides. The learning loop is imagine, sequence, perform, reflect. Only the visible human approval turns the staged data into a performance, and every action keeps its author.”
 
 On compatible Android hardware, press **Enter real AR**, wait for the hit-test ring, and tap a surface. Otherwise identify camera overlay as the universal fallback.
 
@@ -63,7 +63,8 @@ Show the full UI with the rig waving, Full Neural Rig DNA, and visible history.
 ## Recording notes
 
 - Keep the final public YouTube video under three minutes.
-- Use **Play Judge Demo** as the primary take; it is deterministic and quota-free.
+- Use **Play Judge Demo** for the deterministic geometry proof and call it the on-screen **Guided Demo**. It is attributed to `WALLALIVE`, not `BROWSER AGENT`.
+- Use the primary prompt in ChatGPT's in-app browser for the actual WebMCP proof. Hold on the **AGENT STAGED** card, returned learning goal, and human approval control.
 - Record one successful camera-to-AniGen generation separately if public GPU capacity allows, then edit it into the privacy section.
 - Record at 1440×900 or a modern phone resolution and make tool names readable.
 - Show one full 360° turn and one visible bone-driven wave.

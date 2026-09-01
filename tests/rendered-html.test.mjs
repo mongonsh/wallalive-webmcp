@@ -86,6 +86,28 @@ test("registers eight goal-level WebMCP collaboration tools with spatial directi
   assert.match(page, /SHOPIFY <span>MERCH/);
   assert.match(page, /OPEN SAFE MOCK CHECKOUT/);
   assert.match(page, /No address, card, order, or Shopify account/);
+  assert.match(page, /practices sequencing and cooperation/);
+  assert.match(page, /learningGoal/);
+  assert.match(page, /stagedBy/);
+  assert.match(page, /"WALLALIVE", "judge_demo"/);
+  assert.match(page, /GUIDED DEMO/);
+  assert.match(page, /LEARNING LOOP/);
+});
+
+test("keeps submission claims aligned with the shipped eight-tool educational loop", async () => {
+  const files = await Promise.all([
+    readFile(new URL("../README.md", import.meta.url), "utf8"),
+    readFile(new URL("../docs/DEVPOST_SUBMISSION.md", import.meta.url), "utf8"),
+    readFile(new URL("../docs/SUBMISSION_COPY.md", import.meta.url), "utf8"),
+    readFile(new URL("../docs/DEMO_SCRIPT.md", import.meta.url), "utf8"),
+    readFile(new URL("../docs/YOUTUBE_UPLOAD.md", import.meta.url), "utf8"),
+  ]);
+  const claims = files.join("\n");
+  assert.doesNotMatch(claims, /(?:Six|six) (?:goal-level WebMCP|imperative) tools/);
+  assert.match(claims, /Eight goal-level WebMCP tools/);
+  assert.match(claims, /Imagine.*Sequence.*Perform.*Reflect/);
+  assert.match(claims, /not measured learning (?:gains|claims|outcomes)/i);
+  assert.doesNotMatch(claims, /art therapy/i);
 });
 
 test("ships a pressure-aware drawing wall and real switchable Three.js worlds", async () => {

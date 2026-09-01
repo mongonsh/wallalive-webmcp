@@ -12,7 +12,7 @@ Draw it. Wake it. Play.
 
 ## One-line pitch
 
-A child-safe AR playground that turns one approved drawing into a rigged 3D character a browser agent can place, animate, and direct through WebMCP.
+A child-safe creative-learning playground that turns approved drawings into rigged 3D characters a browser agent can help sequence, stage, and perform through WebMCP.
 
 ## Links
 
@@ -32,8 +32,10 @@ Children already treat drawings as living characters. A few lines can have a nam
 3. Six local ONNX graphs recognize exact face/body pixels, decode an eight-family variable skeleton, and predict distinct front and hidden-surface depth. A contour-preserving artwork shell produces a private closed `SkinnedMesh` while keeping separate drawings as separate rigs.
 4. A second visible approval explains that only the isolated drawing—not the live camera or room frame—may go to AniGen, which jointly predicts richer full geometry, an arbitrary skeleton, and skinning weights.
 5. WallAlive loads generated GLBs as Three.js `SkinnedMesh` assets. Seven actions drive bone branches; drag/spin exposes true 360° geometry and the generated back.
-6. Six goal-level WebMCP tools let the agent inspect shared state and each rig's verified abilities, request 3D, stage a typed multi-character Magic Show, direct one live ensemble moment, and inspect attributed history.
+6. Eight goal-level WebMCP tools let the agent inspect shared state and each rig's verified abilities, request 3D, stage a typed multi-character learning story, direct one live ensemble moment, orchestrate spatial cinematics, prepare a safe merchandise concept, and inspect attributed history.
 7. WebXR hit testing places the same character on a real surface when supported; every other browser gets the camera-overlay experience.
+
+The child-facing outcome is a compact learning loop: **Imagine → Sequence → Perform → Reflect**. The learner starts with their own artifact, helps shape a beginning–middle–end story, approves the agent's plan, performs it, and then explains or revises what happened.
 
 The one-click judge demo uses the exact supplied drawing and loads its precomputed full neural reconstruction immediately: 68,326 vertices, 136,648 triangles, seven active semantic bones, a complete watertight back, normalized weights, and restored approved front color without copying facial marks onto the rear. Judging never depends on shared public GPU quota. A separate official AniGen reference fixture remains in the automated evidence suite.
 
@@ -47,13 +49,15 @@ Without WebMCP, an agent would have to infer multiple rigs and coordinate dozens
 
 ## WebMCP implementation
 
-WallAlive registers six imperative tools with `document.modelContext.registerTool()` in the top-level document:
+WallAlive registers eight imperative tools with `document.modelContext.registerTool()` in the top-level document:
 
 - `inspect_creative_scene`
 - `inspect_character_capabilities`
 - `request_rigged_3d_cast`
 - `stage_magic_show`
 - `direct_live_ensemble`
+- `orchestrate_spatial_cinematics`
+- `generate_shopify_merch_pipeline`
 - `list_collaboration_history`
 
 Each tool uses narrow JSON Schema, nested `additionalProperties: false`, bounded arrays and strings, cancellation signals, read-only annotations, shared capability validation, and verification-rich results. The stage tool returns `requiresHumanApproval: true` and `approvalControlVisible: true`; the live tool returns the exact per-character actions, world, duration, visible-result flag, final idle state, and `cameraDataIncluded: false`.
@@ -91,7 +95,7 @@ The fourth challenge was anatomy. A good silhouette still gave straight, misplac
 - A locally trained 17-joint drawing pose model whose ONNX export exactly reproduces the untouched-test result
 - Generated bone-branch animation instead of whole-object-only motion
 - Real WebXR surface hit testing plus universal camera overlay
-- Six goal-level WebMCP tools sharing one capability and performance layer with the human UI
+- Eight goal-level WebMCP tools sharing one capability and performance layer with the human UI
 - Visible attribution for every human, agent, and system action
 - Human-only authority for camera, capture, and isolated-image upload
 - A quota-free one-click judge demo
@@ -100,6 +104,7 @@ The fourth challenge was anatomy. A good silhouette still gave straight, misplac
 
 - Self-host AniGen on a dedicated 18 GB+ NVIDIA GPU
 - Expand the eight-family held-out benchmark to hundreds of photographed child drawings with human-reviewed 3D preference scores
+- Run a teacher-led pilot measuring time to first story, beginning–middle–end coherence, retelling vocabulary, turn-taking, and revision behavior; no learning-gain claim is made before that evidence exists
 - Add optional SAM 2 point/box refinement for difficult backgrounds
 - Retarget richer motion clips to generated skeletons
 - Multi-character classroom stories with teacher-controlled privacy
@@ -117,7 +122,7 @@ WebMCP, image-to-3D, rigging, WebXR, augmented reality, Three.js, children’s a
 
 - [x] Working judge-accessible public URL
 - [x] Text explains WebMCP fit, UX improvement, human-agent collaboration, and implementation
-- [x] Demo video is under three minutes and contains narration
+- [ ] Final 2–2.5 minute video re-recorded from the current public build with narration, the real Browser Agent prompt, the guided-demo label, and the learning loop visible
 - [ ] Demo video uploaded to YouTube with **Public** visibility
 - [x] Public GitHub repository
 - [x] Functional source, assets, attribution, and instructions included

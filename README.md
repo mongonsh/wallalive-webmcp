@@ -8,7 +8,13 @@
 
 WallAlive turns one or more human-approved drawings into colored, 360° **rigged 3D characters** in a navigable Three.js world. Drawing-specific point extraction runs before the compact drawing mask; general MediaPipe MagicTouch is only a gated last resort. Six local ONNX graphs then look for facial, pose, articulated-part, or variable-topology evidence. A rectangular paper/screen patch or unverified mask is rejected, and every accepted transparent cutout stops for a visible human review. [AniGen](https://github.com/VAST-AI-Research/AniGen) is the optional live path for jointly generated unseen surfaces, skeleton, and skinning weights. WebMCP turns the browser agent into a spatial creative director and commerce collaborator: it can inspect rigs, direct camera and lighting, stage typed choreography, and prepare a visible Shopify merchandise concept while human-only boundaries remain explicit.
 
-**Perfect judge prompt:** `Inspect this WallAlive app context, discover our registered WebMCP tools, spin the character 360 degrees, change the lighting mood to cyberpunk-neon, and generate a Shopify merch print layout for a t-shirt.`
+**Perfect judge prompt:** `Inspect the creative scene and every character's verified capabilities. Stage a gentle four-beat story that practices sequencing and cooperation, use only supported actions, and wait for me to approve playback. Do not access the camera or purchase anything.`
+
+## Educational end result
+
+WallAlive is a child-authored storytelling scaffold, not an automatic homework system. The complete learning loop is **Imagine → Sequence → Perform → Reflect**: a learner creates a drawing, the agent turns verified character abilities into a beginning–middle–end plan, the child approves and performs it, then retells or revises the story. That loop can support narrative sequencing, oral language and emotion vocabulary, collaboration, creative confidence, and practical AI consent literacy.
+
+Those are intended learning benefits, not measured outcomes. WallAlive has not yet completed a classroom efficacy study and is not an assessment or therapy tool. The next evidence milestone is a teacher-led pilot measuring time to first story, sequence coherence, vocabulary used during retelling, turn-taking, and child willingness to revise.
 
 ## Why this needs WebMCP
 

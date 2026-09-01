@@ -51,10 +51,12 @@ type MagicShowPlan = {
   id: string;
   title: string;
   theme: string;
+  learningGoal: string;
   tone: "gentle" | "silly" | "adventurous" | "dreamy";
   world: WorldId;
   cast: ShowCastMember[];
   beats: ShowBeat[];
+  stagedBy: Actor;
   status: "awaiting-human-approval" | "playing" | "complete" | "dismissed";
 };
 
@@ -98,7 +100,7 @@ const toolNames = [
   ["list_collaboration_history", "READ"],
 ] as const;
 
-const perfectJudgePrompt = "Inspect this WallAlive app context, discover our registered WebMCP tools, spin the character 360 degrees, change the lighting mood to cyberpunk-neon, and generate a Shopify merch print layout for a t-shirt.";
+const perfectJudgePrompt = "Inspect the creative scene and every character's verified capabilities. Stage a gentle four-beat story that practices sequencing and cooperation, use only supported actions, and wait for me to approve playback. Do not access the camera or purchase anything.";
 
 const worlds: Array<{ id: WorldId; label: string; short: string }> = [
   { id: "studio", label: "My room", short: "ROOM" },
@@ -724,7 +726,7 @@ export default function Home() {
       characterCreated: characterRef.current.created,
       character: characterRef.current.created ? { name: characterRef.current.name, personality: characterRef.current.personality, surface: characterRef.current.surface } : null,
       availableWorlds: worlds.map(({ id, label }) => ({ id, label })),
-      pendingShow: pending ? { id: pending.id, title: pending.title, status: pending.status, beats: pending.beats.length, cast: pending.cast.length } : null,
+      pendingShow: pending ? { id: pending.id, title: pending.title, learningGoal: pending.learningGoal, status: pending.status, beats: pending.beats.length, cast: pending.cast.length, stagedBy: pending.stagedBy } : null,
       humanOnlyControls: ["open_camera", "capture_frame", "approve_cutout", "approve_external_3d", "approve_and_play_staged_show"],
       agentWorkflow: characterRef.current.created
         ? ["inspect_character_capabilities", "stage_magic_show", "wait_for_visible_human_approval"]
@@ -787,7 +789,7 @@ export default function Home() {
     };
   }, [animateCharacter, changeWorld, commitCharacter, currentCharacterCapabilities, parseShowMoves, record]);
 
-  const stageMagicShow = useCallback((input: Record<string, unknown>) => {
+  const stageMagicShow = useCallback((input: Record<string, unknown>, actor: Actor = "BROWSER AGENT", toolName = "stage_magic_show") => {
     if (!characterRef.current.created) throw new Error("No playable cast exists. The human must approve a rigged 3D cast first.");
     const capabilities = currentCharacterCapabilities();
     const rawCast = Array.isArray(input.cast) ? input.cast.filter(isRecord).slice(0, 6) : [];
@@ -825,20 +827,26 @@ export default function Home() {
       id: `show-${makeId()}`,
       title: stringValue(input.title, "A tiny Magic Show", 72),
       theme: stringValue(input.theme, "friendship", 72),
+      learningGoal: stringValue(input.learningGoal, "story sequencing and confident expression", 96),
       tone,
       world,
       cast,
       beats,
+      stagedBy: actor,
       status: "awaiting-human-approval",
     };
     magicShowPlanRef.current = plan;
     setMagicShowPlan(plan);
-    setAgentLine(`I staged “${plan.title}” from the verified abilities of ${plan.cast.length} character${plan.cast.length === 1 ? "" : "s"}. Only you can start it.`);
-    setNotice("The browser agent staged a Magic Show. Review it, then choose Approve & play or Not yet.");
-    record("BROWSER AGENT", "Staged a Magic Show for human review", `${plan.title} · ${plan.cast.length} cast · ${plan.beats.length} beats · ${worlds.find((candidate) => candidate.id === plan.world)?.label}.`, "stage_magic_show");
+    setAgentLine(actor === "BROWSER AGENT"
+      ? `I staged “${plan.title}” from the verified abilities of ${plan.cast.length} character${plan.cast.length === 1 ? "" : "s"}. Only you can start it.`
+      : `The guided demo staged “${plan.title}.” A real browser agent uses the same validated planning function through WebMCP.`);
+    setNotice(`${actor === "BROWSER AGENT" ? "The browser agent" : "WallAlive's guided demo"} staged a learning story. Review it, then choose Approve & play or Not yet.`);
+    record(actor, "Staged a learning story for human review", `${plan.title} · goal: ${plan.learningGoal} · ${plan.cast.length} cast · ${plan.beats.length} beats · ${worlds.find((candidate) => candidate.id === plan.world)?.label}.`, toolName);
     return {
       planId: plan.id,
       status: plan.status,
+      learningGoal: plan.learningGoal,
+      stagedBy: plan.stagedBy,
       requiresHumanApproval: true,
       approvalControlVisible: true,
       validatedCast: plan.cast.map(({ characterIndex, name, role }) => ({ characterIndex, name, role })),
@@ -972,6 +980,7 @@ export default function Home() {
           properties: {
             title: { type: "string", minLength: 1, maxLength: 72 },
             theme: { type: "string", minLength: 1, maxLength: 72 },
+            learningGoal: { type: "string", minLength: 1, maxLength: 96 },
             tone: { type: "string", enum: ["gentle", "silly", "adventurous", "dreamy"] },
             world: { type: "string", enum: ["studio", "storybook", "wizard", "museum"] },
             cast: {
@@ -1136,14 +1145,15 @@ export default function Home() {
       commitNeuralAsset(bundledAsset);
       externalUploadApprovedRef.current = false;
       setNeuralProgress({ phase: "ready", progress: 1, message: "Verified neural sketch rig loaded." });
-      setAgentLine("The browser agent is reading the real cast abilities before it proposes a show.");
+      setAgentLine("The guided demo is loading a verified rig. A real agent can inspect and direct it through the eight WebMCP tools.");
       await wait(450);
-      createCharacter({ name: "Pip", personality: "brave on the outside, shy on the inside", accent: "#ce919f", inflation: 1 }, "BROWSER AGENT", "request_rigged_3d_cast");
+      createCharacter({ name: "Pip", personality: "brave on the outside, shy on the inside", accent: "#ce919f", inflation: 1 }, "WALLALIVE", "judge_demo");
       placeCharacter(.68, .53, "wall", 1, "WALLALIVE");
       await wait(500);
       stageMagicShow({
         title: "Pip Finds a Brave Hello",
         theme: "finding courage with a new friend",
+        learningGoal: "sequence a beginning, middle, and ending; name an emotion; retell the story",
         tone: "gentle",
         world: "storybook",
         cast: [{ characterIndex: 0, name: "Pip", role: "the shy explorer", personality: "shy, curious, and secretly brave" }],
@@ -1153,8 +1163,8 @@ export default function Home() {
           { caption: "Pip waves hello with a verified arm branch.", durationMs: 1100, moves: [{ characterIndex: 0, action: "wave" }] },
           { caption: "A full turn reveals the generated back.", durationMs: 1400, world: "museum", moves: [{ characterIndex: 0, action: "spin" }] },
         ],
-      });
-      setAgentLine("The agent staged a capability-checked show. The performance cannot begin until you approve it.");
+      }, "WALLALIVE", "judge_demo");
+      setAgentLine("The guided example is ready. A real browser agent can stage a new version; either way, only you can approve playback.");
     } finally {
       setDemoRunning(false);
     }
@@ -1470,7 +1480,7 @@ export default function Home() {
 
         <section className="magic-stage">
           <div className="stage-copy">
-            <div><p className="kicker">CAMERA · PAPER · MAGIC</p><h1>Draw it.<br /><em>Wake it.</em></h1></div>
+            <div><p className="kicker">CREATIVE LEARNING · HOME + CLASSROOM</p><h1>Draw it.<br /><em>Wake it.</em></h1><p className="stage-purpose">Turn an idea into a sequenced story, a shared performance, and something the child can explain.</p></div>
             <div className="stage-ctas">
               {immersiveAR && character.created ? <button className="ar-button" onClick={enterAR}>ENTER REAL AR <span>◎</span></button> : null}
               {cameraState === "active" ? <button className="stop-camera" onClick={stopCamera}>STOP CAMERA</button> : null}
@@ -1512,9 +1522,10 @@ export default function Home() {
             </div> : null}
             {neuralBusy ? <div className="neural-progress" role="status" onPointerDown={(event) => event.stopPropagation()}><span>ANIGEN · RIGGED 3D</span><b>{neuralProgress.message}</b><div><i style={{ width: `${Math.round(neuralProgress.progress * 100)}%` }} /></div><small>{Math.round(neuralProgress.progress * 100)}% · PUBLIC GPU</small></div> : null}
             {magicShowPlan?.status === "awaiting-human-approval" ? <div className="magic-show-approval" role="dialog" aria-modal="false" aria-labelledby="magic-show-title" onPointerDown={(event) => event.stopPropagation()}>
-              <div><span>AGENT STAGED · YOU DECIDE</span><b>{magicShowPlan.tone} · {magicShowPlan.beats.length} beats</b></div>
+              <div><span>{magicShowPlan.stagedBy === "BROWSER AGENT" ? "AGENT STAGED" : "GUIDED DEMO"} · YOU DECIDE</span><b>{magicShowPlan.tone} · {magicShowPlan.beats.length} beats</b></div>
               <h2 id="magic-show-title">{magicShowPlan.title}</h2>
               <p>{magicShowPlan.cast.map((member) => `${member.name} · ${member.role}`).join("  /  ")}</p>
+              <p className="show-learning-goal"><b>LEARNING GOAL</b>{magicShowPlan.learningGoal}</p>
               <div className="show-beat-preview">{magicShowPlan.beats.map((beat, index) => <i key={`${magicShowPlan.id}-${index}`}>{index + 1}<small>{beat.moves.map((move) => move.action).join(" + ")}</small></i>)}</div>
               <div className="show-approval-actions"><button onClick={approveAndPlayMagicShow}>APPROVE &amp; PLAY <span>▶</span></button><button onClick={dismissMagicShow}>NOT YET</button></div>
             </div> : null}
@@ -1545,6 +1556,7 @@ export default function Home() {
             {actions.map((item) => <button key={item.action} disabled={!character.created || showPlaying} className={character.action === item.action ? "active" : ""} onClick={() => animateCharacter(item.action, "CHILD")}><i>{item.glyph}</i>{item.label}</button>)}
           </div>
           <p className="placement-tip">{character.created ? neuralAsset ? "Drag for 360° · Generated back · Move through the perspective world" : "Drag for 360° · Filled backs · Every figure moves on its own rig" : capture ? "Check the cutout, then choose instant private 3D or full AI sculpt" : "Photograph a clear figure—uncertain recognition is blocked before 3D"}</p>
+          <div className="learning-loop" aria-label="WallAlive learning loop"><b>LEARNING LOOP</b><span>Imagine</span><i>→</i><span>Sequence</span><i>→</i><span>Perform</span><i>→</i><span>Reflect</span></div>
         </section>
 
         <aside className={`agent-panel ${inspectorOpen ? "is-open" : ""}`} aria-hidden={!inspectorOpen}>
