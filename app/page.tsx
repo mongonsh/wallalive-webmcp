@@ -2,7 +2,7 @@
 "use client";
 
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ARStageHandle, ARWorld, CharacterAction } from "./components/ARStage";
+import type { ARStageHandle, ARWorld, CameraPreset, CharacterAction, LightingMood } from "./components/ARStage";
 import { DrawingWall } from "./components/DrawingWall";
 import { createAniGenDemoDrawing, createDemoDoodle, POSE_SKELETON_EDGES, selectAnimatableRigParts, type CaptureTarget, type DrawingExtraction, type SemanticPart, type SemanticPartKind, type SemanticSide } from "./lib/drawing";
 import { inspectCharacterCapabilities as buildCharacterCapabilities, SAFE_SHOW_ACTIONS, validateCharacterMove, type CharacterCapability } from "./lib/creative-show";
@@ -16,7 +16,7 @@ const ARStage = lazy(() => import("./components/ARStage").then((module) => ({ de
 type Actor = "CHILD" | "BROWSER AGENT" | "WALLALIVE";
 type AppStep = "ready" | "camera" | "captured" | "alive";
 type CameraState = "idle" | "requesting" | "active" | "denied" | "unavailable";
-type PanelTab = "agent" | "tools" | "privacy" | "history";
+type PanelTab = "agent" | "tools" | "commerce" | "privacy" | "history";
 type WorldId = ARWorld;
 
 type CharacterState = {
@@ -41,6 +41,8 @@ type Activity = {
 };
 
 type PendingUpload = { url: string; fileName: string };
+type MerchProduct = "t-shirt" | "ceramic-mug";
+type MerchPipeline = { product: MerchProduct; title: string; status: "mockup-ready"; createdAt: string };
 
 type ShowMove = { characterIndex: number; action: CharacterAction };
 type ShowBeat = { caption: string; durationMs: number; world?: WorldId; moves: ShowMove[] };
@@ -91,8 +93,12 @@ const toolNames = [
   ["request_rigged_3d_cast", "REQUEST"],
   ["stage_magic_show", "STAGE"],
   ["direct_live_ensemble", "LIVE"],
+  ["orchestrate_spatial_cinematics", "LIVE"],
+  ["generate_shopify_merch_pipeline", "COMMERCE"],
   ["list_collaboration_history", "READ"],
 ] as const;
+
+const perfectJudgePrompt = "Inspect this WallAlive app context, discover our registered WebMCP tools, spin the character 360 degrees, change the lighting mood to cyberpunk-neon, and generate a Shopify merch print layout for a t-shirt.";
 
 const worlds: Array<{ id: WorldId; label: string; short: string }> = [
   { id: "studio", label: "My room", short: "ROOM" },
@@ -110,6 +116,10 @@ const actions: Array<{ action: CharacterAction; label: string; glyph: string }> 
   { action: "spin", label: "Spin", glyph: "↻" },
 ];
 
+const spatialActions = ["walk", "spin", "float", "dance"] as const;
+const lightingMoods = ["cyberpunk-neon", "sunset-warm", "moonlight"] as const satisfies readonly LightingMood[];
+const cameraPresets = ["cinematic-orbit", "low-angle-hero", "overhead"] as const satisfies readonly CameraPreset[];
+
 const anatomyKinds = ["eye", "cheek", "nose", "mouth", "ear", "arm", "hand", "leg", "foot"] as const satisfies readonly SemanticPartKind[];
 const anatomyLabel: Record<(typeof anatomyKinds)[number], string> = {
   eye: "Eye", cheek: "Cheek", nose: "Nose", mouth: "Mouth", ear: "Ear",
@@ -124,6 +134,7 @@ const actionProgressive: Record<CharacterAction, string> = {
   walk: "walking",
   hide: "hiding",
   spin: "spinning",
+  float: "floating",
 };
 
 const stringValue = (value: unknown, fallback = "", max = 180) => typeof value === "string" ? value.trim().slice(0, max) || fallback : fallback;
@@ -164,6 +175,8 @@ export default function Home() {
   const magicShowPlanRef = useRef<MagicShowPlan | null>(null);
   const showAbortRef = useRef<AbortController | null>(null);
   const showPlayingRef = useRef(false);
+  const lightingMoodRef = useRef<LightingMood>("sunset-warm");
+  const cameraPresetRef = useRef<CameraPreset>("cinematic-orbit");
 
   const [step, setStep] = useState<AppStep>("ready");
   const [cameraState, setCameraState] = useState<CameraState>("idle");
@@ -193,6 +206,9 @@ export default function Home() {
   const [magicShowPlan, setMagicShowPlan] = useState<MagicShowPlan | null>(null);
   const [ensembleActions, setEnsembleActions] = useState<CharacterAction[] | null>(null);
   const [showPlaying, setShowPlaying] = useState(false);
+  const [lightingMood, setLightingMood] = useState<LightingMood>("sunset-warm");
+  const [cameraPreset, setCameraPreset] = useState<CameraPreset>("cinematic-orbit");
+  const [merchPipeline, setMerchPipeline] = useState<MerchPipeline | null>(null);
 
   const record = useCallback((actor: Actor, action: string, detail: string, toolName?: string) => {
     const item: Activity = { id: makeId(), time: timeLabel(), actor, action, detail, toolName };
@@ -546,6 +562,59 @@ export default function Home() {
     return next;
   }, [commitCharacter, record]);
 
+  const orchestrateSpatialCinematics = useCallback((input: Record<string, unknown>, actor: Actor = "BROWSER AGENT") => {
+    if (!characterRef.current.created) throw new Error("Create the character before directing the 3D scene.");
+    const actionType = stringValue(input.actionType, "spin", 20) as (typeof spatialActions)[number];
+    const nextMood = stringValue(input.lightingMood, "sunset-warm", 30) as LightingMood;
+    const nextCamera = stringValue(input.cameraPreset, "cinematic-orbit", 30) as CameraPreset;
+    if (!spatialActions.includes(actionType)) throw new Error("actionType must be walk, spin, float, or dance.");
+    if (!lightingMoods.includes(nextMood)) throw new Error("Unknown lightingMood.");
+    if (!cameraPresets.includes(nextCamera)) throw new Error("Unknown cameraPreset.");
+    lightingMoodRef.current = nextMood;
+    cameraPresetRef.current = nextCamera;
+    setLightingMood(nextMood);
+    setCameraPreset(nextCamera);
+    const next = animateCharacter(actionType, actor, "orchestrate_spatial_cinematics", `${characterRef.current.name} enters a ${nextMood} cinematic shot.`);
+    setAgentLine(`Live scene directed: ${actionType}, ${nextMood}, ${nextCamera}.`);
+    setInspectorOpen(true);
+    setPanelTab("agent");
+    setNotice(`Cinematic live: ${actionType} · ${nextMood} · ${nextCamera}. Drag, zoom, pan, or use the movement pad.`);
+    return {
+      actionType,
+      lightingMood: nextMood,
+      cameraPreset: nextCamera,
+      character: next.name,
+      visibleSceneUpdated: true,
+      controls: ["orbit", "wheel-zoom", "two-finger-pan", "WASD", "movement-pad"],
+    };
+  }, [animateCharacter]);
+
+  const generateShopifyMerchPipeline = useCallback((input: Record<string, unknown>) => {
+    if (!captureRef.current) throw new Error("Approve a drawing before generating merchandise.");
+    const product = stringValue(input.productType, "t-shirt", 24) as MerchProduct;
+    if (product !== "t-shirt" && product !== "ceramic-mug") throw new Error("productType must be t-shirt or ceramic-mug.");
+    const pipeline: MerchPipeline = {
+      product,
+      title: stringValue(input.productTitle, `${characterRef.current.name || "My Living Art"} Studio Edition`, 64),
+      status: "mockup-ready",
+      createdAt: new Date().toISOString(),
+    };
+    setMerchPipeline(pipeline);
+    setInspectorOpen(true);
+    setPanelTab("commerce");
+    setAgentLine("The agent prepared a print-safe product concept from the approved artwork.");
+    setNotice("Agent Commerce Pipeline Connected · Shopify merchandise mockup ready.");
+    record("BROWSER AGENT", "Generated Shopify merchandise pipeline", `${product} · ${pipeline.title} · mock checkout only.`, "generate_shopify_merch_pipeline");
+    return {
+      pipeline,
+      storefront: "Shopify mock storefront handoff",
+      source: "human-approved isolated artwork",
+      printLayout: { background: "transparent", fit: "centered", safeAreaPercent: 82 },
+      checkout: "visible mock checkout; no purchase was made",
+      visibleSidebarUpdated: true,
+    };
+  }, [record]);
+
   const placeCharacter = useCallback((x: number, y: number, surface: CharacterState["surface"], scale: number, actor: Actor, toolName?: string) => {
     const current = characterRef.current;
     if (!current.created) throw new Error("Create the character before placing it.");
@@ -562,6 +631,12 @@ export default function Home() {
   const inspectScene = useCallback(() => ({
     world: worldRef.current,
     worldRendering: "Procedural Three.js geometry with perspective camera, lights, occlusion, fog, and cast/receive shadows; no CSS world image",
+    spatialCinematics: {
+      lightingMood: lightingMoodRef.current,
+      cameraPreset: cameraPresetRef.current,
+      orbitControls: { rotate: true, zoom: true, pan: true },
+      worldNavigation: ["WASD", "arrow-keys", "movement-pad", "walk-action"],
+    },
     drawingApproved: Boolean(captureRef.current),
     drawingAnalysis: captureRef.current?.analysis ?? null,
     reconstruction: captureRef.current ? {
@@ -811,6 +886,7 @@ export default function Home() {
     const fail = (error: unknown) => ({ ok: false, error: error instanceof Error ? error.message : "Tool execution failed." });
     const guard = (signal: AbortSignal) => { if (signal.aborted) throw new DOMException("Tool call cancelled", "AbortError"); };
     const executionSignal = (options?: { signal?: AbortSignal }) => options?.signal ?? controller.signal;
+    const afterVisiblePaint = () => new Promise<void>((resolve) => window.requestAnimationFrame(() => window.requestAnimationFrame(() => resolve())));
     const tools: WebMCPTool[] = [
       {
         name: "inspect_creative_scene",
@@ -971,6 +1047,55 @@ export default function Home() {
         },
       },
       {
+        name: "orchestrate_spatial_cinematics",
+        title: "Direct the live 3D cinematics",
+        description: "Direct one visible spatial performance by choosing movement, lighting, and camera. Updates the live Three.js scene before returning. Never reads camera frames or image pixels.",
+        inputSchema: {
+          ...base,
+          properties: {
+            actionType: { type: "string", enum: spatialActions, description: "Movement performed by the current 3D character." },
+            lightingMood: { type: "string", enum: lightingMoods, description: "Physically lit cinematic mood applied to the live world." },
+            cameraPreset: { type: "string", enum: cameraPresets, description: "Orbit-camera composition applied to the live stage." },
+          },
+          required: ["actionType", "lightingMood", "cameraPreset"],
+        },
+        annotations: { readOnlyHint: false, untrustedContentHint: true },
+        execute: async (input, options) => {
+          const signal = executionSignal(options);
+          try {
+            guard(signal);
+            const result = orchestrateSpatialCinematics(input);
+            await afterVisiblePaint();
+            guard(signal);
+            return ok({ cinematic: result, observedAt: new Date().toISOString(), cameraDataIncluded: false });
+          } catch (error) { return fail(error); }
+        },
+      },
+      {
+        name: "generate_shopify_merch_pipeline",
+        title: "Generate a Shopify merch concept",
+        description: "Turn the approved isolated drawing into a visible Shopify-ready product mockup and print layout. Opens a mock checkout but never places an order or charges money.",
+        inputSchema: {
+          ...base,
+          properties: {
+            productType: { type: "string", enum: ["t-shirt", "ceramic-mug"], description: "Product shown in the visible merchandise mockup." },
+            productTitle: { type: "string", minLength: 1, maxLength: 64, description: "Short storefront title for the merchandise concept." },
+          },
+          required: ["productType"],
+        },
+        annotations: { readOnlyHint: false, untrustedContentHint: true },
+        execute: async (input, options) => {
+          const signal = executionSignal(options);
+          try {
+            guard(signal);
+            const result = generateShopifyMerchPipeline(input);
+            await afterVisiblePaint();
+            guard(signal);
+            return ok(result);
+          } catch (error) { return fail(error); }
+        },
+      },
+      {
         name: "list_collaboration_history",
         title: "List attributed human-agent history",
         description: "Read recent staged plans, human approvals, performances, and system actions. Camera pixels and drawing image data are excluded.",
@@ -985,7 +1110,7 @@ export default function Home() {
       setNotice(`${tools.length} WebMCP tools are ready. Camera capture remains human-only.`);
     }).catch(() => setWebMcpReady(false));
     return () => controller.abort();
-  }, [commitNeuralAsset, createCharacter, currentCharacterCapabilities, directEnsembleBeat, inspectCreativeScene, parseShowMoves, requestNeuralConsent, stageMagicShow]);
+  }, [commitNeuralAsset, createCharacter, currentCharacterCapabilities, directEnsembleBeat, generateShopifyMerchPipeline, inspectCreativeScene, orchestrateSpatialCinematics, parseShowMoves, requestNeuralConsent, stageMagicShow]);
 
   const runMagicDemo = useCallback(async () => {
     if (demoRunning) return;
@@ -1046,11 +1171,13 @@ export default function Home() {
   }, [cameraState, placeCharacter]);
 
   const handleStagePointerDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (characterRef.current.created && event.target instanceof HTMLCanvasElement) return;
     rotateGestureRef.current = { pointerId: event.pointerId, lastX: event.clientX, lastY: event.clientY, moved: false };
     event.currentTarget.setPointerCapture(event.pointerId);
   }, []);
 
   const handleStagePointerMove = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.target instanceof HTMLCanvasElement) return;
     const gesture = rotateGestureRef.current;
     if (!gesture || gesture.pointerId !== event.pointerId || !characterRef.current.created || cameraState === "active") return;
     const dx = event.clientX - gesture.lastX;
@@ -1063,6 +1190,7 @@ export default function Home() {
   }, [cameraState]);
 
   const handleStagePointerUp = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.target instanceof HTMLCanvasElement) return;
     const gesture = rotateGestureRef.current;
     rotateGestureRef.current = null;
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
@@ -1073,6 +1201,12 @@ export default function Home() {
     activateStagePoint(event);
   }, [activateStagePoint]);
 
+  const nudgeCharacter = useCallback((x: number, z: number) => {
+    if (!characterRef.current.created) return;
+    stageRef.current?.moveBy(x, z);
+    setNotice("Character moved through the 3D world. Drag to orbit, wheel or pinch to zoom, and right-drag or two-finger pan.");
+  }, []);
+
   const handleARCapability = useCallback((supported: boolean) => {
     setImmersiveAR(supported);
   }, []);
@@ -1082,12 +1216,19 @@ export default function Home() {
   }, [commitCharacter]);
 
   const copyDemoPrompt = useCallback(async () => {
-    if (!navigator.clipboard) {
-      setNotice("Clipboard access is unavailable. The prompt is shown in the agent panel.");
-      return;
+    try {
+      await navigator.clipboard.writeText(perfectJudgePrompt);
+    } catch {
+      const textarea = document.createElement("textarea");
+      textarea.value = perfectJudgePrompt;
+      textarea.style.position = "fixed";
+      textarea.style.opacity = "0";
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand("copy");
+      textarea.remove();
     }
-    await navigator.clipboard.writeText("Inspect the creative scene and every character's verified capabilities. Then stage a gentle three-beat Magic Show in the best world. Give each character a role, use only supported actions, and wait for me to approve playback.");
-    setNotice("Demo prompt copied.");
+    setNotice("Perfect judge demo prompt copied.");
   }, []);
 
   const commitRigEdit = useCallback((parts: SemanticPart[], message: string) => {
@@ -1232,6 +1373,12 @@ export default function Home() {
           <button className="judge-demo" onClick={runMagicDemo} disabled={demoRunning}>{demoRunning ? "PLAYING…" : "PLAY JUDGE DEMO"}</button>
         </div>
       </header>
+      <button className="judge-prompt-banner" onClick={copyDemoPrompt} aria-label="Copy Perfect Judge Demo Prompt">
+        <span>JUDGE SHORTCUT</span>
+        <b>COPY PERFECT JUDGE DEMO PROMPT</b>
+        <small>{perfectJudgePrompt}</small>
+        <i>⧉</i>
+      </button>
 
       <section className="alive-layout" id="play">
         <aside className="steps-panel">
@@ -1314,7 +1461,7 @@ export default function Home() {
             {capture && cameraState !== "active" && !character.created ? <div className="cutout-review" onPointerDown={(event) => event.stopPropagation()}><img src={capture.textureUrl} alt="Isolated character cutout to review" /><span>{captureEnsemble.length > 1 ? `${captureEnsemble.length} SEPARATE FIGURES FOUND` : "IS THE WHOLE CHARACTER VISIBLE?"}</span><div><button onClick={requestNeuralConsent}>YES · CONTINUE</button><button onClick={() => capture.sourceScope === "camera" ? startCamera() : uploadRef.current?.click()}>NO · TRY AGAIN</button></div></div> : null}
             {step === "camera" ? <><div className="capture-guide"><span /><b>TAP CHARACTER · THEN CAPTURE</b></div><div className="capture-target" style={{ left: `${captureTarget.x * 100}%`, top: `${captureTarget.y * 100}%` }}><i /></div></> : null}
             {character.created ? <Suspense fallback={<div className="three-layer" aria-hidden="true" />}>
-              <ARStage ref={stageRef} characters={character.created && !neuralAsset ? captureEnsemble : null} contour={capture?.contour ?? null} skeleton={capture?.skeleton ?? null} textureUrl={capture?.textureUrl ?? null} rig={capture?.rig ?? null} depth={capture?.depthRecognition ?? null} action={character.action} ensembleActions={ensembleActions} world={world} accent={character.accent} inflation={character.inflation} neuralAssetUrl={neuralAsset?.meshUrl ?? null} visible onCapability={handleARCapability} onPlaced={handleARPlaced} onNeuralAssetInfo={handleRiggedAssetInfo} />
+              <ARStage ref={stageRef} characters={character.created && !neuralAsset ? captureEnsemble : null} contour={capture?.contour ?? null} skeleton={capture?.skeleton ?? null} textureUrl={capture?.textureUrl ?? null} rig={capture?.rig ?? null} depth={capture?.depthRecognition ?? null} action={character.action} ensembleActions={ensembleActions} world={world} lightingMood={lightingMood} cameraPreset={cameraPreset} accent={character.accent} inflation={character.inflation} neuralAssetUrl={neuralAsset?.meshUrl ?? null} visible onCapability={handleARCapability} onPlaced={handleARPlaced} onNeuralAssetInfo={handleRiggedAssetInfo} />
             </Suspense> : null}
             {neuralConsentVisible ? <div className="neural-consent" role="dialog" aria-modal="true" aria-labelledby="neural-consent-title" onPointerDown={(event) => event.stopPropagation()}>
               <span>CHOOSE YOUR 3D</span><h2 id="neural-consent-title">Wake {captureEnsemble.length > 1 ? "the whole cast" : "this drawing"}</h2><p>{captureEnsemble.length > 1 ? "Separate closed 3D puppets, separate rigs, one shared world." : "Instant private puppet now—or send only the cutout for a full AI sculpt."}</p><div><button onClick={startLocalReconstruction}>INSTANT 3D · PRIVATE</button>{captureEnsemble.length === 1 ? <button onClick={startNeuralReconstruction}>GENERATE REAL 3D · AI</button> : null}<button onClick={() => { setNeuralConsentVisible(false); setPartEditorOpen(true); }}>CHECK PARTS</button></div>
@@ -1328,12 +1475,26 @@ export default function Home() {
               <div className="show-approval-actions"><button onClick={approveAndPlayMagicShow}>APPROVE &amp; PLAY <span>▶</span></button><button onClick={dismissMagicShow}>NOT YET</button></div>
             </div> : null}
             {showPlaying ? <div className="magic-show-live" role="status"><i /> AGENT PLAN · HUMAN APPROVED · LIVE</div> : null}
+            {character.created ? <div className="spatial-controls" onPointerDown={(event) => event.stopPropagation()}>
+              <div className="movement-pad" aria-label="Move character through the 3D world">
+                <button onClick={() => nudgeCharacter(0, -0.45)} aria-label="Walk forward">↑</button>
+                <button onClick={() => nudgeCharacter(-0.45, 0)} aria-label="Move left">←</button>
+                <button onClick={() => nudgeCharacter(0, 0.45)} aria-label="Walk backward">↓</button>
+                <button onClick={() => nudgeCharacter(0.45, 0)} aria-label="Move right">→</button>
+              </div>
+              <span>DRAG ORBIT · PINCH ZOOM · PAN</span>
+            </div> : null}
             <div className="camera-hud"><span><i /> {cameraState === "active" ? "LIVE CAMERA · LOCAL" : neuralAsset && character.created ? `FULL NEURAL RIG · ${riggedAssetInfo?.bones ?? "…"} BONES` : character.created ? `${captureEnsemble.length} LOCAL 3D PUPPET${captureEnsemble.length === 1 ? "" : "S"}` : capture ? "CUTOUT REVIEW · LOCAL" : "SAFE DEMO ROOM"}</span><strong>{immersiveAR ? "WEBXR READY" : `${world.toUpperCase()} · REAL 3D SCENE`}</strong></div>
             {character.created && storyCaption ? <div className="story-caption"><span>{character.storyTitle || "LIVE MOMENT"}</span><p>{storyCaption}</p></div> : null}
             {cameraState === "denied" || cameraState === "unavailable" ? <div className="camera-message"><b>CAMERA OPTIONAL</b><p>The demo doodle still proves the complete WebMCP and 3D workflow.</p></div> : null}
           </div>
 
           <div className="world-switcher" aria-label="Choose a 3D world"><div><span>3D WORLDS</span><small>{worlds.find((item) => item.id === world)?.label}</small></div>{worlds.map((item) => <button key={item.id} className={world === item.id ? "active" : ""} onClick={() => changeWorld(item.id, "CHILD")}><i>{item.id === "studio" ? "⌂" : item.id === "storybook" ? "♜" : item.id === "wizard" ? "✦" : "◉"}</i>{item.short}</button>)}</div>
+
+          <div className="cinematic-switcher">
+            <div><span>LIGHT</span>{lightingMoods.map((mood) => <button key={mood} className={lightingMood === mood ? "active" : ""} onClick={() => { lightingMoodRef.current = mood; setLightingMood(mood); record("CHILD", "Changed cinematic lighting", mood); }}>{mood.replace("-", " ")}</button>)}</div>
+            <div><span>CAMERA</span>{cameraPresets.map((preset) => <button key={preset} className={cameraPreset === preset ? "active" : ""} onClick={() => { cameraPresetRef.current = preset; setCameraPreset(preset); record("CHILD", "Changed camera preset", preset); }}>{preset.replaceAll("-", " ")}</button>)}</div>
+          </div>
 
           <div className="action-tray">
             <div><span>CHARACTER ACTIONS</span><small>{character.created ? `${character.name.toUpperCase()} · ${character.personality.toUpperCase()}` : "WAKE A DRAWING TO PLAY"}</small></div>
@@ -1345,7 +1506,7 @@ export default function Home() {
         <aside className={`agent-panel ${inspectorOpen ? "is-open" : ""}`} aria-hidden={!inspectorOpen}>
           <button className="inspector-close" onClick={() => setInspectorOpen(false)} aria-label="Close WebMCP inspector">×</button>
           <div className="right-tabs" role="tablist" aria-label="WallAlive inspector">
-            {(["agent", "tools", "privacy", "history"] as const).map((tab) => <button key={tab} role="tab" aria-selected={panelTab === tab} className={panelTab === tab ? "active" : ""} onClick={() => setPanelTab(tab)}>{tab}</button>)}
+            {(["agent", "tools", "commerce", "privacy", "history"] as const).map((tab) => <button key={tab} role="tab" aria-selected={panelTab === tab} className={panelTab === tab ? "active" : ""} onClick={() => setPanelTab(tab)}>{tab}</button>)}
           </div>
 
           {panelTab === "agent" ? (
@@ -1355,8 +1516,8 @@ export default function Home() {
               <h2>{agentLine}</h2>
               <p>The agent reads each real rig, assigns compatible roles, and stages ensemble choreography. The child approves the final performance.</p>
               <div className="agent-call"><span>↳</span><div><b>{latestAgentActivity?.toolName ?? "inspect_creative_scene"}</b><small>{latestAgentActivity?.detail ?? "Shared state visible · Camera private"}</small></div></div>
-              <blockquote>“Inspect every character, stage a gentle museum show, and wait for me to approve it.”</blockquote>
-              <button className="copy-prompt" onClick={copyDemoPrompt}>COPY WINNING DEMO PROMPT <span>⧉</span></button>
+              <blockquote>“{perfectJudgePrompt}”</blockquote>
+              <button className="copy-prompt" onClick={copyDemoPrompt}>COPY PERFECT JUDGE PROMPT <span>⧉</span></button>
             </div>
           ) : null}
 
@@ -1364,6 +1525,21 @@ export default function Home() {
             <div className="panel-body">
               <p className="kicker">WEBMCP INSPECTOR</p><h2>One shared creative loop.</h2><p>Inspect state → check abilities → stage a show → human approves → perform and verify. Camera authority never crosses into the tool surface.</p>
               <div className="tools-list">{toolNames.map(([name, mode], index) => <div key={name}><span>{String(index + 1).padStart(2, "0")}</span><code>{name}</code><i>{mode}</i></div>)}</div>
+            </div>
+          ) : null}
+
+          {panelTab === "commerce" ? (
+            <div className="panel-body commerce-panel">
+              <p className="kicker">AGENT COMMERCE PIPELINE CONNECTED</p>
+              <h2>{merchPipeline ? merchPipeline.title : "Living art, ready for a shelf."}</h2>
+              <p>{merchPipeline ? "The agent composed a transparent print layout from the approved artwork." : "Ask the agent to generate a Shopify t-shirt or ceramic mug mockup."}</p>
+              <div className={`merch-mockup ${merchPipeline?.product === "ceramic-mug" ? "is-mug" : "is-shirt"}`}>
+                <div>{capture ? <img src={capture.textureUrl} alt="Approved drawing printed on merchandise" /> : <span>YOUR ART</span>}</div>
+                <small>{merchPipeline?.product === "ceramic-mug" ? "CERAMIC MUG" : "PREMIUM WHITE T-SHIRT"}</small>
+              </div>
+              <div className="commerce-steps"><span>1 ARTWORK</span><i>→</i><span>2 PRINT LAYOUT</span><i>→</i><span>3 SHOPIFY</span></div>
+              <button className="shopify-checkout" disabled={!merchPipeline} onClick={() => { setNotice("Mock Shopify checkout opened. No order or payment was created."); record("CHILD", "Opened mock Shopify checkout", "Demo only · no purchase was made."); }}>BUY YOUR LIVING ART ON SHOPIFY <span>↗</span></button>
+              <small className="commerce-disclaimer">DEMO CHECKOUT · NO CHARGE · HUMAN CONFIRMATION REQUIRED</small>
             </div>
           ) : null}
 
@@ -1380,7 +1556,7 @@ export default function Home() {
               <div className="history-list">{activity.length ? activity.map((item) => <article key={item.id}><span>{item.time}</span><div><small>{item.actor}</small><b>{item.action}</b><p>{item.detail}</p></div></article>) : <p className="empty-history">The first human or agent action will appear here.</p>}</div>
             </div>
           ) : null}
-          <footer className="agent-footer"><span>THE AGENT DIRECTS</span><b>THE CHILD DECIDES</b></footer>
+          <footer className="agent-footer"><span>CHROME WEBMCP · CHATGPT SITES · SHOPIFY</span><b>THE CHILD DECIDES</b></footer>
         </aside>
       </section>
       <DrawingWall open={drawingWallOpen} onClose={() => setDrawingWallOpen(false)} onMake3D={processWallDrawing} />

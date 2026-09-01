@@ -3,18 +3,23 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import * as THREE from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 import { selectAnimatableRigParts, type CharacterRig, type ContourPoint, type DrawingExtraction, type LearnedDepthField, type SkeletonPoint } from "../lib/drawing";
 import { buildArtworkShellGeometry } from "../lib/artwork-shell";
 import { hasRecognizableArtworkSurface } from "../lib/mesh-materials";
 import { disposeObject, prepareNeuralCharacter, type NeuralRigMap, type NeuralSemanticMap, type RiggedAssetInfo } from "../lib/rigged-model";
 
-export type CharacterAction = "idle" | "wave" | "dance" | "hop" | "walk" | "hide" | "spin";
+export type CharacterAction = "idle" | "wave" | "dance" | "hop" | "walk" | "hide" | "spin" | "float";
 export type ARWorld = "studio" | "storybook" | "wizard" | "museum";
+export type LightingMood = "cyberpunk-neon" | "sunset-warm" | "moonlight";
+export type CameraPreset = "cinematic-orbit" | "low-angle-hero" | "overhead";
 
 export type ARStageHandle = {
   enterImmersiveAR: () => Promise<{ ok: boolean; error?: string }>;
   placeNormalized: (x: number, y: number, scale?: number) => void;
   rotateBy: (yaw: number, pitch: number) => void;
+  moveBy: (x: number, z: number) => void;
 };
 
 type ARStageProps = {
@@ -27,6 +32,8 @@ type ARStageProps = {
   action: CharacterAction;
   ensembleActions?: CharacterAction[] | null;
   world: ARWorld;
+  lightingMood: LightingMood;
+  cameraPreset: CameraPreset;
   accent: string;
   inflation: number;
   neuralAssetUrl: string | null;
@@ -43,6 +50,9 @@ type SceneHandles = {
   character: THREE.Group;
   reticle: THREE.Mesh;
   setWorld: (world: ARWorld) => void;
+  setLightingMood: (mood: LightingMood) => void;
+  setCameraPreset: (preset: CameraPreset) => void;
+  controls: OrbitControls;
   dispose: () => void;
 };
 
@@ -50,6 +60,31 @@ type WorldEnvironment = {
   group: THREE.Group;
   background: THREE.Color;
   fog: THREE.Fog;
+};
+
+const cameraPresets: Record<CameraPreset, { position: [number, number, number]; target: [number, number, number] }> = {
+  "cinematic-orbit": { position: [3.1, 1.15, 4.9], target: [0, -0.12, -1.75] },
+  "low-angle-hero": { position: [2.4, -0.62, 3.45], target: [0, 0.05, -1.65] },
+  overhead: { position: [0.35, 5.25, 2.25], target: [0, -0.62, -2.15] },
+};
+
+const moodPalettes: Record<LightingMood, {
+  hemisphere: [number, number, number];
+  key: [number, number];
+  fill: [number, number];
+  rim: [number, number];
+  grid: number;
+  exposure: number;
+}> = {
+  "cyberpunk-neon": {
+    hemisphere: [0x7bf7ff, 0x160c2d, 0.58], key: [0xff4fd8, 2.7], fill: [0x2ff3ff, 2.15], rim: [0xa5ff48, 1.25], grid: 0x42f5e9, exposure: 1.02,
+  },
+  "sunset-warm": {
+    hemisphere: [0xffe3b0, 0x2f4258, 0.88], key: [0xffc178, 2.35], fill: [0x8ccce4, 0.82], rim: [0xff6b4d, 0.76], grid: 0xffb85c, exposure: 0.94,
+  },
+  moonlight: {
+    hemisphere: [0xb8ccff, 0x0b1626, 0.48], key: [0xc7d8ff, 1.45], fill: [0x6f7cff, 1.05], rim: [0x58e1ff, 1.18], grid: 0x6c8cff, exposure: 0.78,
+  },
 };
 
 const worldMaterial = (color: number, roughness = 0.82, emissive = 0x000000) => new THREE.MeshStandardMaterial({
@@ -344,7 +379,7 @@ export function buildCharacter(
 }
 
 export const ARStage = forwardRef<ARStageHandle, ARStageProps>(function ARStage(
-  { characters, contour, skeleton, textureUrl, rig, depth, action, ensembleActions = null, world, accent, inflation, neuralAssetUrl, visible, onCapability, onPlaced, onNeuralAssetInfo },
+  { characters, contour, skeleton, textureUrl, rig, depth, action, ensembleActions = null, world, lightingMood, cameraPreset, accent, inflation, neuralAssetUrl, visible, onCapability, onPlaced, onNeuralAssetInfo },
   ref,
 ) {
   const mountRef = useRef<HTMLDivElement>(null);
@@ -353,7 +388,9 @@ export const ARStage = forwardRef<ARStageHandle, ARStageProps>(function ARStage(
   const actionRef = useRef(action);
   const ensembleActionsRef = useRef<CharacterAction[] | null>(ensembleActions);
   const worldStateRef = useRef<ARWorld>(world);
-  const placementRef = useRef({ x: 0, y: -0.15, scale: 1 });
+  const moodStateRef = useRef<LightingMood>(lightingMood);
+  const cameraPresetRef = useRef<CameraPreset>(cameraPreset);
+  const placementRef = useRef({ x: 0, y: -0.15, z: -0.5, scale: 1 });
   const rotationRef = useRef({ yaw: 0, pitch: 0 });
   const xrHitSourceRef = useRef<XRHitTestSource | null>(null);
   const xrReferenceSpaceRef = useRef<XRReferenceSpace | null>(null);
@@ -405,7 +442,29 @@ export const ARStage = forwardRef<ARStageHandle, ARStageProps>(function ARStage(
     scene.background = environment.background;
     scene.fog = environment.fog;
     const camera = new THREE.PerspectiveCamera(40, width / height, 0.01, 40);
-    camera.position.set(0, 0.05, 4.15);
+    const firstPreset = cameraPresets[cameraPresetRef.current];
+    camera.position.set(...firstPreset.position);
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.target.set(...firstPreset.target);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.075;
+    controls.enableRotate = true;
+    controls.enableZoom = true;
+    controls.enablePan = true;
+    controls.screenSpacePanning = false;
+    controls.minDistance = 1.45;
+    controls.maxDistance = 11;
+    controls.minPolarAngle = 0.08;
+    controls.maxPolarAngle = Math.PI * 0.91;
+    controls.zoomToCursor = true;
+    controls.update();
+
+    const pmrem = new THREE.PMREMGenerator(renderer);
+    const roomEnvironment = new RoomEnvironment();
+    const environmentMap = pmrem.fromScene(roomEnvironment, 0.04).texture;
+    scene.environment = environmentMap;
+    roomEnvironment.dispose();
+    pmrem.dispose();
 
     const ambient = new THREE.HemisphereLight(0xfff4dc, 0x253d42, 0.85);
     scene.add(ambient);
@@ -423,6 +482,55 @@ export const ARStage = forwardRef<ARStageHandle, ARStageProps>(function ARStage(
     const rim = new THREE.DirectionalLight(0xffc7a8, 0.5);
     rim.position.set(0.6, 2.5, -3.2);
     scene.add(rim);
+
+    const atmosphere = new THREE.Group();
+    atmosphere.name = "wallalive-cinematic-atmosphere";
+    const grid = new THREE.GridHelper(12, 30, 0xffb85c, 0x58706c);
+    grid.position.set(0, -1.145, -2.2);
+    const gridMaterials = Array.isArray(grid.material) ? grid.material : [grid.material];
+    gridMaterials.forEach((material) => { material.transparent = true; material.opacity = 0.2; });
+    atmosphere.add(grid);
+    const particles = new THREE.BufferGeometry();
+    const particlePositions = new Float32Array(210);
+    for (let index = 0; index < particlePositions.length; index += 3) {
+      const seed = index / 3;
+      particlePositions[index] = Math.sin(seed * 12.9898) * 4.7;
+      particlePositions[index + 1] = 0.15 + ((seed * 37) % 29) / 8;
+      particlePositions[index + 2] = -2.4 - ((seed * 19) % 37) / 9;
+    }
+    particles.setAttribute("position", new THREE.BufferAttribute(particlePositions, 3));
+    const particleMaterial = new THREE.PointsMaterial({ color: 0xffd59a, size: 0.035, transparent: true, opacity: 0.52, depthWrite: false });
+    const particleField = new THREE.Points(particles, particleMaterial);
+    particleField.name = "cinematic-particles";
+    atmosphere.add(particleField);
+    scene.add(atmosphere);
+
+    const applyLightingMood = (mood: LightingMood) => {
+      const palette = moodPalettes[mood];
+      ambient.color.setHex(palette.hemisphere[0]);
+      ambient.groundColor.setHex(palette.hemisphere[1]);
+      ambient.intensity = palette.hemisphere[2];
+      key.color.setHex(palette.key[0]); key.intensity = palette.key[1];
+      fill.color.setHex(palette.fill[0]); fill.intensity = palette.fill[1];
+      rim.color.setHex(palette.rim[0]); rim.intensity = palette.rim[1];
+      gridMaterials.forEach((material) => material.color.setHex(palette.grid));
+      particleMaterial.color.setHex(palette.rim[0]);
+      renderer.toneMappingExposure = palette.exposure;
+      atmosphere.userData.lightingMood = mood;
+    };
+    applyLightingMood(moodStateRef.current);
+
+    let cameraTransition: { start: number; fromPosition: THREE.Vector3; fromTarget: THREE.Vector3; toPosition: THREE.Vector3; toTarget: THREE.Vector3 } | null = null;
+    const applyCameraPreset = (preset: CameraPreset) => {
+      const next = cameraPresets[preset];
+      cameraTransition = {
+        start: performance.now(),
+        fromPosition: camera.position.clone(),
+        fromTarget: controls.target.clone(),
+        toPosition: new THREE.Vector3(...next.position),
+        toTarget: new THREE.Vector3(...next.target),
+      };
+    };
 
     const characterRoot = new THREE.Group();
     scene.add(characterRoot);
@@ -495,8 +603,20 @@ export const ARStage = forwardRef<ARStageHandle, ARStageProps>(function ARStage(
     scene.add(reticle);
 
     const clock = new THREE.Clock();
+    let previousElapsed = 0;
+    const pressedKeys = new Set<string>();
+    const onKeyDown = (event: KeyboardEvent) => {
+      const keyName = event.key.toLowerCase();
+      if (["arrowup", "arrowdown", "arrowleft", "arrowright", "w", "a", "s", "d"].includes(keyName)) pressedKeys.add(keyName);
+    };
+    const onKeyUp = (event: KeyboardEvent) => { pressedKeys.delete(event.key.toLowerCase()); };
+    renderer.domElement.tabIndex = 0;
+    renderer.domElement.addEventListener("keydown", onKeyDown);
+    renderer.domElement.addEventListener("keyup", onKeyUp);
     const render = (_time?: number, frame?: XRFrame) => {
       const elapsed = clock.getElapsedTime();
+      const delta = Math.min(0.05, Math.max(0, elapsed - previousElapsed));
+      previousElapsed = elapsed;
       const currentAction = actionRef.current;
       const directedActions = ensembleActionsRef.current;
       const placement = placementRef.current;
@@ -505,12 +625,28 @@ export const ARStage = forwardRef<ARStageHandle, ARStageProps>(function ARStage(
       environment.group.visible = syntheticWorldVisible;
       scene.background = syntheticWorldVisible ? environment.background : null;
       scene.fog = syntheticWorldVisible ? environment.fog : null;
-      camera.position.x = Math.sin(rotationRef.current.yaw * 0.12) * 0.22;
-      camera.position.y = 0.05 + rotationRef.current.pitch * 0.12;
-      camera.lookAt(0, -0.04, -0.85);
+      atmosphere.visible = syntheticWorldVisible;
+      controls.enabled = syntheticWorldVisible;
+      if (cameraTransition && syntheticWorldVisible) {
+        const amount = Math.min(1, (performance.now() - cameraTransition.start) / 820);
+        const eased = 1 - Math.pow(1 - amount, 3);
+        camera.position.lerpVectors(cameraTransition.fromPosition, cameraTransition.toPosition, eased);
+        controls.target.lerpVectors(cameraTransition.fromTarget, cameraTransition.toTarget, eased);
+        if (amount >= 1) cameraTransition = null;
+      }
+      if (syntheticWorldVisible) controls.update();
+      const navigationSpeed = delta * 1.35;
+      if (pressedKeys.has("arrowleft") || pressedKeys.has("a")) placement.x -= navigationSpeed;
+      if (pressedKeys.has("arrowright") || pressedKeys.has("d")) placement.x += navigationSpeed;
+      if (pressedKeys.has("arrowup") || pressedKeys.has("w")) placement.z -= navigationSpeed;
+      if (pressedKeys.has("arrowdown") || pressedKeys.has("s")) placement.z += navigationSpeed;
+      if (!directedActions && currentAction === "walk") placement.z -= delta * 0.42;
+      placement.x = THREE.MathUtils.clamp(placement.x, -3.8, 3.8);
+      placement.z = THREE.MathUtils.clamp(placement.z, -4.9, 1.25);
       root.visible = visible;
       root.position.x = placement.x;
       root.position.y = placement.y + Math.sin(elapsed * 1.65) * 0.018;
+      root.position.z = placement.z;
       root.scale.setScalar(placement.scale);
       root.rotation.x = rotationRef.current.pitch + Math.sin(elapsed * 1.1) * 0.018;
       root.rotation.y = rotationRef.current.yaw - 0.07 + Math.sin(elapsed * 0.72) * 0.035;
@@ -589,6 +725,7 @@ export const ARStage = forwardRef<ARStageHandle, ARStageProps>(function ARStage(
           }
           if (instanceAction === "spin") articulated.rotation.y = localElapsed * 2.15;
           if (instanceAction === "dance") articulated.rotation.z = Math.sin(localElapsed * 5.2) * 0.15;
+          if (instanceAction === "float") articulated.position.y = (basePosition?.y ?? articulated.position.y) + 0.18 + Math.sin(localElapsed * 2.1) * 0.22;
         }
       });
       [neuralSemantic?.eyeLeft, neuralSemantic?.eyeRight, neuralSemantic?.eyeCenter, neuralSemantic?.pupilLeft, neuralSemantic?.pupilRight, neuralSemantic?.pupilCenter]
@@ -620,9 +757,9 @@ export const ARStage = forwardRef<ARStageHandle, ARStageProps>(function ARStage(
       if (!directedActions && currentAction === "walk") {
         neuralRig?.legs.forEach((leg, index) => leg.rotateX((index % 2 ? -1 : 1) * Math.sin(elapsed * 7 + index * 0.25) * 0.48));
         neuralRig?.arms.forEach((arm, index) => arm.rotateX((index % 2 ? 1 : -1) * Math.sin(elapsed * 7 + index * 0.25) * 0.24));
-        root.position.x = placement.x + Math.sin(elapsed * 1.5) * 0.85;
+        root.position.x = placement.x + Math.sin(elapsed * 5.5) * 0.035;
         root.rotation.z = Math.sin(elapsed * 6) * 0.055;
-        root.rotation.y = rotationRef.current.yaw + Math.sin(elapsed * 3) * 0.12;
+        root.rotation.y = rotationRef.current.yaw + Math.sin(elapsed * 3) * 0.06;
       }
       if (!directedActions && currentAction === "hide") {
         root.position.x = placement.x + 1.08;
@@ -630,9 +767,14 @@ export const ARStage = forwardRef<ARStageHandle, ARStageProps>(function ARStage(
         root.rotation.z = -0.16;
       }
       if (!directedActions && currentAction === "spin") root.rotation.y = rotationRef.current.yaw + elapsed * 2.15;
+      if (!directedActions && currentAction === "float") {
+        root.position.y = placement.y + 0.25 + Math.sin(elapsed * 2.15) * 0.25;
+        root.rotation.z = Math.sin(elapsed * 1.55) * 0.055;
+      }
 
       shadow.position.x = root.position.x;
       shadow.position.y = placement.y - 0.92;
+      shadow.position.z = root.position.z - 0.18;
       shadow.scale.x = placement.scale * (currentAction === "hop" ? 1 - Math.abs(Math.sin(elapsed * 4.6)) * 0.35 : 1);
       shadow.visible = visible && !renderer.xr.isPresenting;
 
@@ -675,6 +817,10 @@ export const ARStage = forwardRef<ARStageHandle, ARStageProps>(function ARStage(
     const dispose = () => {
       disposed = true;
       observer.disconnect();
+      renderer.domElement.removeEventListener("keydown", onKeyDown);
+      renderer.domElement.removeEventListener("keyup", onKeyUp);
+      controls.dispose();
+      environmentMap.dispose();
       renderer.setAnimationLoop(null);
       disposeObject(scene);
       renderer.dispose();
@@ -682,7 +828,7 @@ export const ARStage = forwardRef<ARStageHandle, ARStageProps>(function ARStage(
       if (renderer.domElement.parentNode === mount) mount.removeChild(renderer.domElement);
     };
 
-    handlesRef.current = { renderer, scene, camera, character: characterRoot, reticle, setWorld: setStageWorld, dispose };
+    handlesRef.current = { renderer, scene, camera, character: characterRoot, reticle, setWorld: setStageWorld, setLightingMood: applyLightingMood, setCameraPreset: applyCameraPreset, controls, dispose };
     if (navigator.xr) navigator.xr.isSessionSupported("immersive-ar").then(onCapability).catch(() => onCapability(false));
     else onCapability(false);
 
@@ -697,9 +843,19 @@ export const ARStage = forwardRef<ARStageHandle, ARStageProps>(function ARStage(
     handlesRef.current?.setWorld(world);
   }, [world]);
 
+  useEffect(() => {
+    moodStateRef.current = lightingMood;
+    handlesRef.current?.setLightingMood(lightingMood);
+  }, [lightingMood]);
+
+  useEffect(() => {
+    cameraPresetRef.current = cameraPreset;
+    handlesRef.current?.setCameraPreset(cameraPreset);
+  }, [cameraPreset]);
+
   useImperativeHandle(ref, () => ({
     placeNormalized(x: number, y: number, scale = placementRef.current.scale) {
-      placementRef.current = { x: (x - 0.5) * 2.3, y: (0.5 - y) * 1.65 - 0.1, scale: Math.min(1.55, Math.max(0.55, scale)) };
+      placementRef.current = { x: (x - 0.5) * 2.3, y: (0.5 - y) * 1.65 - 0.1, z: placementRef.current.z, scale: Math.min(1.55, Math.max(0.55, scale)) };
       onPlaced("screen", Number(x.toFixed(2)), Number(y.toFixed(2)));
     },
     rotateBy(yaw: number, pitch: number) {
@@ -710,6 +866,10 @@ export const ARStage = forwardRef<ARStageHandle, ARStageProps>(function ARStage(
         // confusing horizontal blob on a phone screen.
         pitch: Math.min(0.24, Math.max(-0.24, rotationRef.current.pitch + pitch)),
       };
+    },
+    moveBy(x: number, z: number) {
+      placementRef.current.x = THREE.MathUtils.clamp(placementRef.current.x + x, -3.8, 3.8);
+      placementRef.current.z = THREE.MathUtils.clamp(placementRef.current.z + z, -4.9, 1.25);
     },
     async enterImmersiveAR() {
       const handles = handlesRef.current;
@@ -732,7 +892,7 @@ export const ARStage = forwardRef<ARStageHandle, ARStageProps>(function ARStage(
           const position = new THREE.Vector3();
           position.setFromMatrixPosition(handles.reticle.matrix);
           handles.character.position.copy(position);
-          placementRef.current = { x: position.x, y: position.y, scale: placementRef.current.scale };
+          placementRef.current = { x: position.x, y: position.y, z: position.z, scale: placementRef.current.scale };
           onPlaced("world", Number(position.x.toFixed(2)), Number(position.y.toFixed(2)));
         });
         session.addEventListener("end", () => {

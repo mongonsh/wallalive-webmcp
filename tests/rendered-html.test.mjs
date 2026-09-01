@@ -36,7 +36,7 @@ test("server-renders the WallAlive product shell and security headers", async ()
   assert.doesNotMatch(html, /codex-preview|react-loading-skeleton|Starter Project|CutRoom/i);
 });
 
-test("registers six goal-level WebMCP collaboration tools with human approval", async () => {
+test("registers eight goal-level WebMCP collaboration tools with spatial direction and commerce", async () => {
   const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
   const expectedTools = [
     "inspect_creative_scene",
@@ -44,13 +44,15 @@ test("registers six goal-level WebMCP collaboration tools with human approval", 
     "request_rigged_3d_cast",
     "stage_magic_show",
     "direct_live_ensemble",
+    "orchestrate_spatial_cinematics",
+    "generate_shopify_merch_pipeline",
     "list_collaboration_history",
   ];
 
   for (const tool of expectedTools) assert.match(page, new RegExp(`name: ["']${tool}["']`));
 
   const registeredNames = [...page.matchAll(/name: ["']([^"']+)["']/g)].map((match) => match[1]);
-  assert.equal(registeredNames.filter((name) => expectedTools.includes(name)).length, 6);
+  assert.equal(registeredNames.filter((name) => expectedTools.includes(name)).length, 8);
   assert.equal(registeredNames.some((name) => /camera|capture|upload/.test(name)), false);
   assert.match(page, /document\.modelContext/);
   assert.match(page, /registerTool\(tool, \{ signal: controller\.signal \}\)/);
@@ -79,6 +81,9 @@ test("registers six goal-level WebMCP collaboration tools with human approval", 
   assert.match(page, /world: worldRef\.current/);
   assert.match(page, /DRAW ON WALL/);
   assert.match(page, /recognizeDrawingsFromImageUrl\(dataUrl, target, 6\)/);
+  assert.match(page, /COPY PERFECT JUDGE DEMO PROMPT/);
+  assert.match(page, /cyberpunk-neon/);
+  assert.match(page, /BUY YOUR LIVING ART ON SHOPIFY/);
 });
 
 test("ships a pressure-aware drawing wall and real switchable Three.js worlds", async () => {
@@ -98,6 +103,11 @@ test("ships a pressure-aware drawing wall and real switchable Three.js worlds", 
   for (const landmark of ["studio-window", "storybook-castle", "wizard-column", "museum-frame"]) assert.match(stage, new RegExp(landmark));
   assert.match(stage, /perspective, lighting, occlusion, and shadows/);
   assert.match(page, /world=\{world\}/);
+  assert.match(stage, /new OrbitControls/);
+  assert.match(stage, /controls\.enableZoom = true/);
+  assert.match(stage, /controls\.enablePan = true/);
+  assert.match(stage, /placement\.z -= delta \* 0\.42/);
+  assert.doesNotMatch(stage, /camera\.position\.x = Math\.sin/);
 });
 
 test("implements local drawing extraction and real WebXR hit testing", async () => {

@@ -6,7 +6,9 @@
 
 **Public source:** https://github.com/mongonsh/wallalive-webmcp
 
-WallAlive turns one or more human-approved drawings into colored, 360° **rigged 3D characters** in the camera view. Drawing-specific point extraction runs before the compact drawing mask; general MediaPipe MagicTouch is only a gated last resort. Six local ONNX graphs then look for facial, pose, articulated-part, or variable-topology evidence. A rectangular paper/screen patch or unverified mask is rejected, and every accepted transparent cutout stops for a visible human review. [AniGen](https://github.com/VAST-AI-Research/AniGen) is the optional live path for jointly generated unseen surfaces, skeleton, and skinning weights. WebMCP turns the browser agent into a creative director: it reads the actual abilities of every rig, stages typed multi-character choreography, and waits for the human to approve the visible show.
+WallAlive turns one or more human-approved drawings into colored, 360° **rigged 3D characters** in a navigable Three.js world. Drawing-specific point extraction runs before the compact drawing mask; general MediaPipe MagicTouch is only a gated last resort. Six local ONNX graphs then look for facial, pose, articulated-part, or variable-topology evidence. A rectangular paper/screen patch or unverified mask is rejected, and every accepted transparent cutout stops for a visible human review. [AniGen](https://github.com/VAST-AI-Research/AniGen) is the optional live path for jointly generated unseen surfaces, skeleton, and skinning weights. WebMCP turns the browser agent into a spatial creative director and commerce collaborator: it can inspect rigs, direct camera and lighting, stage typed choreography, and prepare a visible Shopify merchandise concept while human-only boundaries remain explicit.
+
+**Perfect judge prompt:** `Inspect this WallAlive app context, discover our registered WebMCP tools, spin the character 360 degrees, change the lighting mood to cyberpunk-neon, and generate a Shopify merch print layout for a t-shirt.`
 
 ## Why this needs WebMCP
 
@@ -38,9 +40,20 @@ WallAlive turns one or more human-approved drawings into colored, 360° **rigged
 | `request_rigged_3d_cast` | Request | Surfaces the visible 3D choice. It cannot approve external processing, open the camera, capture, or receive pixels. |
 | `stage_magic_show` | Stage | Validates a typed cast and one-to-five-beat ensemble plan, then displays it without playing it. Human approval is required. |
 | `direct_live_ensemble` | Live | Performs one short capability-checked moment with distinct per-character actions and returns a verifiable final state. |
+| `orchestrate_spatial_cinematics` | Live | Maps typed movement, PBR lighting mood, and camera composition directly onto the visible Three.js scene before returning. |
+| `generate_shopify_merch_pipeline` | Commerce | Opens a visible t-shirt or ceramic-mug print mockup and mock Shopify checkout from the approved cutout; it never orders or charges. |
 | `list_collaboration_history` | Read | Returns attributed plan, approval, performance, and system activity without image data. |
 
-All tools are registered imperatively in the top-level document. They use strict schemas, nested `additionalProperties: false`, short bounded inputs, cancellation signals, read-only annotations, capability validation, and explicit result evidence. Human UI and WebMCP executors share the same state and action functions. There is no camera, capture, upload, or approval tool.
+All tools are registered imperatively on `document.modelContext`. They use strict schemas, nested `additionalProperties: false`, short bounded inputs, cancellation signals, read-only annotations, capability validation, and explicit result evidence. Human UI and WebMCP executors share the same state and action functions. Mutating tools wait for a visible browser paint before returning. There is no camera, capture, upload, purchase, or approval tool.
+
+## Spatial studio and supporter fit
+
+- `OrbitControls` provides true 360° orbit, wheel/pinch zoom, and pan. WASD, arrow keys, and the visible movement pad translate the character through world space; the walk action advances continuously instead of looping in place.
+- Three cinematic light rigs—`cyberpunk-neon`, `sunset-warm`, and `moonlight`—control real Hemisphere/Directional lights, exposure, grid color, particles, shadows, fog, and the PBR environment map.
+- Three camera presets transition the same live perspective camera: `cinematic-orbit`, `low-angle-hero`, and `overhead`.
+- **Chrome/WebMCP:** strict imperative tools, cancellation, runtime validation, annotations, and visible-before-return execution follow the current Chrome guidance.
+- **Shopify:** the commerce tool demonstrates an agent-to-human product pipeline using only the reviewed transparent drawing; checkout is intentionally a non-transactional mock.
+- **ChatGPT Sites:** the public HTTPS deployment is packaged and versioned from the exact pushed source commit.
 
 ## Privacy boundary
 
@@ -107,7 +120,7 @@ rigged GLB → local Blob URL → Three.js GLTFLoader / SkinnedMesh
 - WallAlive local stack: a 288,109-parameter whole-character network, 109,832-parameter 96² and 435,624-parameter 128² face networks, a 402,052-parameter spatial variable-topology network, a 161,133-parameter optional 17-joint pose network, and an 80,486-parameter compact U-Net front/back depth prior, loaded through `onnxruntime-web`
 - Instance-aware decoding preserves multiple same-side arms/legs and separate facial features; a 22-feature standardized logistic gate judges individual cheek/ear masks from model agreement, probability, size, shape, fill, and position before every accepted region snaps back to high-resolution pixel geometry
 - Original eyes, cheeks, mouth, color, and line quality remain in the reviewed transparent cutout. The old local relief code is retained only for offline regression research and is not displayed as a finished character.
-- Semantic and topology outputs remain inspectable and manually editable, but only a full neural asset becomes playable. This prevents false anatomy or a wrong mask from turning into frightening geometry.
+- Semantic and topology outputs remain inspectable and manually editable. The private local path creates an artwork-preserving closed puppet only after the cutout review; the optional neural path upgrades one figure to a fully generated rigged asset.
 - Lazy-loaded `@gradio/client` connection to AniGen
 - `document.modelContext.registerTool()` imperative WebMCP integration
 - One canonical action layer shared by UI and tool executors
