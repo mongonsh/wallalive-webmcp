@@ -19,7 +19,7 @@ A shared drawing-to-story world where friends create a cast together and a WebMC
 
 ## Short description
 
-WallAlive lets friends join by guest username, paint one vector wall, combine separate figures into a cast, and play cooperative activities in original 3D worlds. Six local ONNX graphs preserve artwork, decode variable skeletons, and lock uncertain movement. The private tier is honestly labeled an articulated spatial puppet; optional AniGen generates full unseen surfaces. Thirteen WebMCP tools inspect the room and verified rigs, prepare invites without sending messages, stage capability-safe stories, activate real 3D quest objects, recommend collaborative products, and stage a creator-credited Shopify handoff. Camera, pixels, performance approval, contributor permission, publishing, and purchase stay human-controlled.
+WallAlive lets friends join by guest username, paint one vector wall, combine separate figures into a cast, and play cooperative activities in original 3D worlds. Seven local ONNX graphs isolate the selected figure, preserve artwork, decode variable skeletons, and lock uncertain movement. The private tier is honestly labeled an articulated spatial puppet; optional AniGen generates full unseen surfaces. Thirteen WebMCP tools inspect the room and verified rigs, prepare invites without sending messages, stage capability-safe stories, activate real 3D quest objects, recommend collaborative products, and stage a creator-credited Shopify handoff. Camera, pixels, performance approval, contributor permission, publishing, and purchase stay human-controlled.
 
 ## Judging case
 
@@ -29,7 +29,7 @@ WebMCP is the creative control plane, not decorative integration. Thirteen imper
 
 ### 2. Quality of idea and execution
 
-This is a working responsive camera + neural 3D + WebGL + WebXR application. It includes local target-aware isolation, a six-graph ONNX/WASM stack for semantic parts, face detail, topology, pose, and asymmetric depth; explicit external-processing consent; live Gradio/AniGen integration; GLB preservation in browser Blob URLs; `GLTFLoader`; real `SkinnedMesh` assets; bone actions; 360° rotation; normalized and hit-test placement; stories; provenance; mobile fallbacks; security headers; a one-click exact-drawing judge demo; and automated binary geometry/skin inspection. The depth model was selected without opening its 768-example sealed test; the eight-family post-split human-drawing benchmark classifies and exports all eight as closed colored rigs.
+This is a working responsive camera + neural 3D + WebGL + WebXR application. It includes a seven-graph ONNX/WASM stack for target-aware isolation, semantic parts, face detail, topology, pose, and asymmetric depth; explicit external-processing consent; live Gradio/AniGen integration; GLB preservation in browser Blob URLs; `GLTFLoader`; real `SkinnedMesh` assets; bone actions; 360° rotation; normalized and hit-test placement; stories; provenance; mobile fallbacks; security headers; a one-click exact-drawing judge demo; and automated binary geometry/skin inspection. The depth model was selected without opening its 768-example sealed test; the eight-family post-split human-drawing benchmark classifies and exports all eight as closed colored rigs.
 
 ### 3. Potential impact
 

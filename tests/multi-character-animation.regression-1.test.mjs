@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import { chooseCharacterTargets, selectAnimatableRigParts } from "../app/lib/drawing.ts";
+import { areDuplicateRecognizedDrawings } from "../app/lib/learned-parts.ts";
 
 test("keeps separate drawing figures as separate recognition prompts", () => {
   const primary = { x: 0.72, y: 0.48 };
@@ -18,6 +19,22 @@ test("keeps separate drawing figures as separate recognition prompts", () => {
   assert.equal(selected.length, 3, "near-duplicate prompts merge but separate figures remain");
   assert.ok(selected.some((target) => target.x < 0.3));
   assert.ok(selected.some((target) => target.x > 0.65));
+});
+
+test("keeps identical-looking figures when their source crops do not overlap", () => {
+  const drawing = (sourceTarget, sourceBounds) => ({ textureUrl: "data:image/png;base64,SAME", sourceTarget, sourceBounds });
+  assert.equal(areDuplicateRecognizedDrawings(
+    drawing({ x: 0.22, y: 0.5 }, { x: 0.08, y: 0.24, width: 0.28, height: 0.54 }),
+    drawing({ x: 0.76, y: 0.5 }, { x: 0.62, y: 0.24, width: 0.28, height: 0.54 }),
+  ), false);
+});
+
+test("merges repeated prompts whose recognized source crops overlap", () => {
+  const drawing = (sourceTarget, sourceBounds) => ({ textureUrl: "data:image/png;base64,SAME", sourceTarget, sourceBounds });
+  assert.equal(areDuplicateRecognizedDrawings(
+    drawing({ x: 0.38, y: 0.49 }, { x: 0.2, y: 0.16, width: 0.42, height: 0.68 }),
+    drawing({ x: 0.56, y: 0.5 }, { x: 0.205, y: 0.165, width: 0.415, height: 0.675 }),
+  ), true);
 });
 
 test("only learned pose/topology limb paths become deformation bones", () => {

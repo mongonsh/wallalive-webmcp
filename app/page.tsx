@@ -122,7 +122,7 @@ const toolNames = [
   ["list_collaboration_history", "READ"],
 ] as const;
 
-const perfectJudgePrompt = "Inspect our shared room, creative scene, verified character abilities, and current story-world objects. Stage a four-beat cooperation quest, use only supported character actions, and wait for my approval. Do not access the camera, share pixels, publish products, or buy anything.";
+const suggestedJudgePrompt = "Inspect our shared room, creative scene, verified character abilities, and current story-world objects. Stage a four-beat cooperation quest, use only supported character actions, and wait for my approval. Do not access the camera, share pixels, publish products, or buy anything.";
 
 const worlds: Array<{ id: WorldId; label: string; short: string }> = [
   { id: "studio", label: "My room", short: "ROOM" },
@@ -1091,7 +1091,10 @@ export default function Home() {
     const controller = new AbortController();
     const base = { type: "object", additionalProperties: false };
     const ok = (payload: Record<string, unknown>) => ({ ok: true, ...payload });
-    const fail = (error: unknown) => ({ ok: false, error: error instanceof Error ? error.message : "Tool execution failed." });
+    const fail = (error: unknown) => {
+      if (error instanceof DOMException && error.name === "AbortError") throw error;
+      return { ok: false, error: error instanceof Error ? error.message : "Tool execution failed." };
+    };
     const guard = (signal: AbortSignal) => { if (signal.aborted) throw new DOMException("Tool call cancelled", "AbortError"); };
     const executionSignal = (options?: { signal?: AbortSignal }) => options?.signal ?? controller.signal;
     const afterVisiblePaint = () => new Promise<void>((resolve) => window.requestAnimationFrame(() => window.requestAnimationFrame(() => resolve())));
@@ -1127,7 +1130,7 @@ export default function Home() {
             if (!captureRef.current) throw new Error("No drawing is approved. The child must capture or choose a drawing first.");
             if (input.reconstructionMode === "local-articulated") {
               commitNeuralAsset(null);
-              return ok({
+              const result = ok({
                 character: createCharacter(input, "BROWSER AGENT", "request_rigged_3d_cast"),
                 reconstructionMode: "local-articulated",
                 localRig: {
@@ -1137,17 +1140,25 @@ export default function Home() {
                 },
                 generatedAsset: null,
               });
+              await afterVisiblePaint();
+              guard(signal);
+              return result;
             }
             if (!neuralAssetRef.current) {
               requestNeuralConsent();
+              await afterVisiblePaint();
+              guard(signal);
               return ok({ requiresHumanApproval: true, phase: "choice-required", message: "Use the visible card to choose instant local articulated 3D or approve a single-figure full AI sculpt." });
             }
-            return ok({
+            const result = ok({
               character: createCharacter(input, "BROWSER AGENT", "request_rigged_3d_cast"),
               reconstructionMode: "neural-full",
               localRig: null,
               generatedAsset: riggedAssetInfoRef.current,
             });
+            await afterVisiblePaint();
+            guard(signal);
+            return result;
           } catch (error) { return fail(error); }
         },
       },
@@ -1211,7 +1222,16 @@ export default function Home() {
           required: ["title", "theme", "tone", "world", "cast", "beats"],
         },
         annotations: { readOnlyHint: false, untrustedContentHint: true },
-        execute: async (input, options) => { const signal = executionSignal(options); try { guard(signal); return ok(stageMagicShow(input)); } catch (error) { return fail(error); } },
+        execute: async (input, options) => {
+          const signal = executionSignal(options);
+          try {
+            guard(signal);
+            const result = stageMagicShow(input);
+            await afterVisiblePaint();
+            guard(signal);
+            return ok(result);
+          } catch (error) { return fail(error); }
+        },
       },
       {
         name: "direct_live_ensemble",
@@ -1373,12 +1393,16 @@ export default function Home() {
             guard(signal);
             if (!sharedRoomStateRef.current.session) {
               setSharedRoomOpen(true);
+              await afterVisiblePaint();
+              guard(signal);
               return ok({ requiresHumanAction: true, action: "Create or join a room in the visible collaboration panel.", messageSent: false });
             }
             const result = await prepareRoomInvite(stringValue(input.username, "", 24));
             setSharedRoomOpen(true);
             setAgentLine(`Invite prepared for @${result.friend}. You decide where to share it.`);
             record("BROWSER AGENT", "Prepared a room invite", `@${result.friend} · no message sent`, "prepare_room_invite");
+            await afterVisiblePaint();
+            guard(signal);
             return ok({ username: result.friend, inviteUrl: result.inviteUrl, visibleReviewOpen: true, messageSent: false, pixelsIncluded: false });
           } catch (error) { return fail(error); }
         },
@@ -1523,10 +1547,10 @@ export default function Home() {
 
   const copyDemoPrompt = useCallback(async () => {
     try {
-      await navigator.clipboard.writeText(perfectJudgePrompt);
+      await navigator.clipboard.writeText(suggestedJudgePrompt);
     } catch {
       const textarea = document.createElement("textarea");
-      textarea.value = perfectJudgePrompt;
+      textarea.value = suggestedJudgePrompt;
       textarea.style.position = "fixed";
       textarea.style.opacity = "0";
       document.body.appendChild(textarea);
@@ -1534,7 +1558,7 @@ export default function Home() {
       document.execCommand("copy");
       textarea.remove();
     }
-    setNotice("Perfect judge demo prompt copied.");
+    setNotice("Suggested judge demo prompt copied.");
   }, []);
 
   const commitRigEdit = useCallback((parts: SemanticPart[], message: string) => {
@@ -1874,8 +1898,8 @@ export default function Home() {
               <h2>{agentLine}</h2>
               <p>The agent reads each real rig, assigns compatible roles, and stages ensemble choreography. The child approves the final performance.</p>
               <div className="agent-call"><span>↳</span><div><b>{latestAgentActivity?.toolName ?? "inspect_creative_scene"}</b><small>{latestAgentActivity?.detail ?? "Shared state visible · Camera private"}</small></div></div>
-              <blockquote>“{perfectJudgePrompt}”</blockquote>
-              <button className="copy-prompt" onClick={copyDemoPrompt}>COPY PERFECT JUDGE PROMPT <span>⧉</span></button>
+              <blockquote>“{suggestedJudgePrompt}”</blockquote>
+              <button className="copy-prompt" onClick={copyDemoPrompt}>COPY JUDGE DEMO PROMPT <span>⧉</span></button>
             </div>
           ) : null}
 

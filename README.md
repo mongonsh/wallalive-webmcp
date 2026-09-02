@@ -6,9 +6,9 @@
 
 **Public source:** https://github.com/mongonsh/wallalive-webmcp
 
-WallAlive is a collaborative drawing-to-story world for children, families, and classrooms. Friends join a shared room by guest username, paint one vector wall together, turn separate figures into a combined cast, and play cooperative activities in original interactive 3D sets. Drawing-specific segmentation and six local ONNX graphs look for faces, pose, articulated parts, and variable topology. Uncertain masks and skeleton branches are blocked instead of displayed as finished characters. The instant private tier is honestly labeled an articulated spatial puppet; [AniGen](https://github.com/VAST-AI-Research/AniGen) is the optional full-sculpt tier for generated unseen surfaces and skinning. Thirteen WebMCP tools let a browser agent inspect the shared room, respect each figure's verified movement, stage stories, activate real world objects, recommend collaborative products, and prepare an adult-reviewed Shopify handoff.
+WallAlive is a collaborative drawing-to-story world for children, families, and classrooms. Friends join a shared room by guest username, paint one vector wall together, turn separate figures into a combined cast, and play cooperative activities in original interactive 3D sets. Seven drawing-specific local ONNX graphs isolate a selected figure and look for faces, pose, articulated parts, variable topology, and depth. Uncertain masks and skeleton branches are blocked instead of displayed as finished characters. The instant private tier is honestly labeled an articulated spatial puppet; [AniGen](https://github.com/VAST-AI-Research/AniGen) is the optional full-sculpt tier for generated unseen surfaces and skinning. Thirteen WebMCP tools let a browser agent inspect the shared room, respect each figure's verified movement, stage stories, activate real world objects, recommend collaborative products, and prepare an adult-reviewed Shopify handoff.
 
-**Perfect judge prompt:** `Inspect our shared room, creative scene, verified character abilities, and current story-world objects. Stage a four-beat cooperation quest, use only supported character actions, and wait for my approval. Do not access the camera, share pixels, publish products, or buy anything.`
+**Suggested judge prompt:** `Inspect our shared room, creative scene, verified character abilities, and current story-world objects. Stage a four-beat cooperation quest, use only supported character actions, and wait for my approval. Do not access the camera, share pixels, publish products, or buy anything.`
 
 ## Educational end result
 
@@ -50,7 +50,7 @@ Those are intended learning benefits, not measured outcomes. WallAlive has not y
 | `stage_magic_show` | Stage | Validates a typed cast and one-to-five-beat ensemble plan, then displays it without playing it. Human approval is required. |
 | `direct_live_ensemble` | Live | Performs one short capability-checked moment with distinct per-character actions and returns a verifiable final state. |
 | `orchestrate_spatial_cinematics` | Live | Maps typed movement, PBR lighting mood, and camera composition directly onto the visible Three.js scene before returning. |
-| `recommend_creator_products` | Advise | Ranks five product formats from figure count, silhouette, detail, color, audience, and creator goal, with visible reasoning and no image pixels in the result. |
+| `recommend_creator_products` | Advise | Ranks eight product formats from figure count, silhouette, detail, color, audience, and creator goal, with visible reasoning and no image pixels in the result. |
 | `stage_shopify_creator_drop` | Stage | Builds a visible draft collection, product copy, print placement, pricing, palette, and storefront section plan. Adult approval is required before export. |
 | `inspect_creator_drop` | Read | Returns the staged draft, recommendation evidence, approval state, and Shopify handoff without pixels, payment data, or order data. |
 | `inspect_shared_room` | Read | Returns guest handles, vector-operation count, sync status, and the current interactive quest without pixels or tokens. |
@@ -76,7 +76,7 @@ Vercel, Render, and Netlify are intentionally not claimed as active integrations
 
 - Camera start and capture are human-only UI gestures.
 - Drawing-aware segmentation, semantic suggestions, character validation, and cutout review happen locally.
-- The 5.72 MiB six-model primary ONNX stack is served from WallAlive’s own origin and runs with WebAssembly; it does not send the image to an inference API. Body parts, the 96²/128² face ensemble, variable topology, optional 17-joint pose, and front/back depth run concurrently. A learned closed-form component gate rejects false cheek/ear islands without another model download. Older fallback checkpoints load only when the primary stack misses a basic eye, mouth, or limb anchor.
+- The 7.25 MiB seven-model primary ONNX stack is served from WallAlive’s own origin and runs with WebAssembly; it does not send the image to an inference API. A 160² point-prompted mixed-domain cutout model isolates the selected figure before body parts, the 96²/128² face ensemble, variable topology, optional 17-joint pose, and front/back depth run concurrently. A learned closed-form component gate rejects false cheek/ear islands without another model download. Older fallback checkpoints load only when the primary stack misses a basic eye, mouth, or limb anchor.
 - The agent never receives live frames or raw image pixels.
 - Neural generation requires a separate visible human approval.
 - Only the isolated drawing is sent to the selected AniGen Space.
@@ -104,7 +104,7 @@ human camera gesture + tap
         │
         ▼
 drawing-aware closed-line extraction
-        ├── compact point-prompted drawing mask
+        ├── 160² mixed-domain point-prompted drawing mask
         └── MediaPipe MagicTouch gated last resort
         │
         ▼
@@ -139,7 +139,7 @@ guest usernames → D1 room + vector operation log → shared drawing wall
 
 - React 19 + TypeScript, built with vinext for Cloudflare/Sites
 - Three.js `GLTFLoader`, `SkinnedMesh`, procedural bone actions, and WebXR hit testing
-- WallAlive local stack: a 288,109-parameter whole-character network, 109,832-parameter 96² and 435,624-parameter 128² face networks, a 402,052-parameter spatial variable-topology network, a 161,133-parameter optional 17-joint pose network, and an 80,486-parameter compact U-Net front/back depth prior, loaded through `onnxruntime-web`
+- WallAlive local stack: a 392,939-parameter mixed-domain target cutout network, a 288,109-parameter whole-character network, 109,832-parameter 96² and 435,624-parameter 128² face networks, a 402,052-parameter spatial variable-topology network, a 161,133-parameter optional 17-joint pose network, and an 80,486-parameter compact U-Net front/back depth prior, loaded through `onnxruntime-web`
 - Instance-aware decoding preserves multiple same-side arms/legs and separate facial features; a 22-feature standardized logistic gate judges individual cheek/ear masks from model agreement, probability, size, shape, fill, and position before every accepted region snaps back to high-resolution pixel geometry
 - Original eyes, cheeks, mouth, color, and line quality remain in the reviewed transparent cutout. The displayed private tier is an explicitly labeled articulated relief preview, using subdivision level 3 and semantic-outline-clipped skin weights to prevent a limb from dragging unrelated face/body pixels.
 - Semantic and topology outputs remain inspectable and manually editable. Unsupported wave/walk/dance controls are disabled until the relevant branch is verified; the optional neural path upgrades one figure to a fully generated rigged asset.
@@ -150,7 +150,9 @@ guest usernames → D1 room + vector operation log → shared drawing wall
 
 ## Local model training
 
-`ml/train_childlike_detector.py` trains the checked-in v3 models from the official pixel-labeled ChildlikeSHAPES release. `ml/train_face_detector_v4.py` adds a 128² residual-SE face parser with rare-class sampling, boundary/Tversky loss, graph-paper augmentation, label hard negatives, a three-epoch high-recall warmup, and five moderate-weight refinement epochs. `ml/evaluate_face_ensemble.py` searches blend weights and thresholds on validation only. `ml/train_component_gate_v5.py` then splits those 1,000 validation drawings into 700 meta-training and 300 calibration drawings to learn per-component cheek/ear confidence; eyes and mouths are deliberate no-ops. `ml/prepare_amateur_benchmark.py`, `ml/evaluate_amateur_benchmark.py`, `ml/train_amateur_pose_v6.py`, and `ml/evaluate_amateur_pose_onnx.py` build, measure, train, and export-check the independent Meta Amateur Drawings pose benchmark. The official test splits remain outside all fitting and threshold selection.
+`ml/train_target_cutout_v3.py` trains the checked-in 160² point-prompted cutout model from 12,992 ChildlikeSHAPES training figures and 352 Meta Amateur Drawings training figures. It adds paper/grid/handwriting clutter, perspective, shadow, blur, JPEG artifacts, neighboring figures, and identical-character hard negatives so the selected figure remains separate even when the same drawing appears twice. `ml/evaluate_target_cutout_onnx.py` reopens the four sealed domains through ONNX Runtime and fails on any measurable PyTorch/export mismatch. `ml/train_childlike_detector.py` trains the checked-in part model from the official pixel-labeled ChildlikeSHAPES release. `ml/train_face_detector_v4.py` adds a 128² residual-SE face parser with rare-class sampling, boundary/Tversky loss, graph-paper augmentation, label hard negatives, a three-epoch high-recall warmup, and five moderate-weight refinement epochs. `ml/evaluate_face_ensemble.py` searches blend weights and thresholds on validation only. `ml/train_component_gate_v5.py` then splits those 1,000 validation drawings into 700 meta-training and 300 calibration drawings to learn per-component cheek/ear confidence; eyes and mouths are deliberate no-ops. `ml/prepare_amateur_benchmark.py`, `ml/evaluate_amateur_benchmark.py`, `ml/train_amateur_pose_v6.py`, and `ml/evaluate_amateur_pose_onnx.py` build, measure, train, and export-check the independent Meta Amateur Drawings pose benchmark. The official test splits remain outside all fitting and threshold selection.
+
+On the untouched cutout tests, v3 reaches 0.7160 global IoU / 0.6124 one-pixel boundary F1 on 1,986 clean ChildlikeSHAPES drawings and 0.8948 / 0.8948 when those same figures are placed into unseen multi-character paper scenes. On 75 untouched Meta Amateur Drawings it reaches 0.6056 / 0.5287 clean and 0.9290 / 0.9403 in unseen wall scenes. Prompt hit rate is 0.9935–1.0. The checked-in ONNX export reproduces all four metric sets exactly. This replaces the earlier 350-image target model; it does not imply perfect isolation for every possible photograph.
 
 On the untouched official ChildlikeSHAPES test set, the body/limb model scores 0.901 body, 0.603 arm, 0.540 hand, 0.696 leg, and 0.656 foot IoU. The frozen v3+v4 face ensemble improves every face class over v3 alone: eye 0.642→0.658, cheek/facial accessory 0.165→0.196, mouth 0.569→0.575, and ear 0.449→0.479. Macro face IoU rises from 0.4563 to 0.4771. At the browser component level, the recall-preserving v5 gate raises cheek precision 0.332→0.382 and F1 0.457→0.490, while ear precision rises 0.623→0.742 and F1 0.698→0.727. Cheek/ear absent-image false-positive rates fall 0.240→0.181 and 0.145→0.075; eye and mouth behavior is unchanged.
 

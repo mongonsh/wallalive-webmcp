@@ -20,9 +20,29 @@ from scipy import ndimage
 
 
 PARTS = ("eye", "cheek", "mouth", "ear")
+BODY_PARTS = ("body", "eye", "cheek", "mouth", "ear", "arm", "hand", "leg", "foot")
+BODY_THRESHOLDS = (0.54, 0.72, 0.24, 0.70, 0.72, 0.72, 0.60, 0.72, 0.72)
 BODY_SIZE = 96
 FACE_V3_SIZE = 96
 FACE_SIZE = 128
+POSE_SIZE = 48
+POSE_JOINTS = (
+    "nose", "left_eye", "right_eye", "left_ear", "right_ear",
+    "left_shoulder", "right_shoulder", "left_elbow", "right_elbow",
+    "left_wrist", "right_wrist", "left_hip", "right_hip",
+    "left_knee", "right_knee", "left_ankle", "right_ankle",
+)
+POSE_EDGES = (
+    ("left_eye", "nose"), ("nose", "right_eye"),
+    ("left_ear", "left_eye"), ("right_eye", "right_ear"),
+    ("left_ear", "left_shoulder"), ("right_ear", "right_shoulder"),
+    ("left_shoulder", "right_shoulder"), ("left_shoulder", "left_elbow"),
+    ("left_elbow", "left_wrist"), ("right_shoulder", "right_elbow"),
+    ("right_elbow", "right_wrist"), ("left_shoulder", "left_hip"),
+    ("right_shoulder", "right_hip"), ("left_hip", "right_hip"),
+    ("left_hip", "left_knee"), ("left_knee", "left_ankle"),
+    ("right_hip", "right_knee"), ("right_knee", "right_ankle"),
+)
 
 
 def sigmoid(values: np.ndarray) -> np.ndarray:
@@ -30,7 +50,12 @@ def sigmoid(values: np.ndarray) -> np.ndarray:
 
 
 def square_fit(image: Image.Image, size: int) -> tuple[Image.Image, tuple[float, float, float, float]]:
-    image = image.convert("RGB")
+    # Match the browser canvas exactly: transparent cutout pixels reveal the
+    # white canvas rather than becoming black during PIL's RGB conversion.
+    rgba = image.convert("RGBA")
+    background = Image.new("RGBA", rgba.size, "white")
+    background.alpha_composite(rgba)
+    image = background.convert("RGB")
     scale = min(size / image.width, size / image.height)
     width = image.width * scale
     height = image.height * scale
@@ -139,11 +164,12 @@ def main() -> None:
     args = parser.parse_args()
 
     args.output.mkdir(parents=True, exist_ok=True)
-    source = Image.open(args.image).convert("RGB")
+    source = Image.open(args.image)
     if args.crop:
         source = source.crop(tuple(args.crop))
     prepared, content_rect = square_fit(source, BODY_SIZE)
     part_logits, coarse_logits = run(args.models / "wallalive-parts-v3.onnx", tensor(prepared))
+    pose_logits = run(args.models / "wallalive-amateur-pose-v6.onnx", tensor(prepared))[0][0]
     head_rect = locate_head(coarse_logits, content_rect)
     source_head_box = model_rect_to_source(head_rect, content_rect, source)
     head = source.crop(source_head_box)
@@ -167,6 +193,8 @@ def main() -> None:
         "source_size": list(source.size),
         "head_crop": list(source_head_box),
         "parts": {},
+        "whole_character_parts": {},
+        "pose": {},
     }
     contact = Image.new("RGB", (FACE_SIZE * 2, FACE_SIZE * 2), "white")
     draw = ImageDraw.Draw(contact)
@@ -183,6 +211,49 @@ def main() -> None:
             "components": components(masks[index], minimum=3 if part in ("eye", "mouth") else 4),
         }
     contact.save(args.output / "contact-sheet.png")
+    whole_probabilities = sigmoid(part_logits)[0]
+    whole_masks = whole_probabilities >= np.asarray(BODY_THRESHOLDS)[:, None, None]
+    whole_palette = (
+        (38, 208, 137), (95, 102, 255), (255, 93, 143),
+        (64, 154, 255), (255, 179, 64), (161, 92, 255),
+        (235, 78, 68), (45, 200, 211), (142, 107, 72),
+    )
+    whole_contact = Image.new("RGB", (BODY_SIZE * 3, BODY_SIZE * 3), "white")
+    whole_draw = ImageDraw.Draw(whole_contact)
+    for index, part in enumerate(BODY_PARTS):
+        maximum_fraction = 0.18 if part in ("arm", "leg") else 0.14 if part in ("hand", "foot") else 0.34 if part == "body" else 0.13 if part == "ear" else 0.09
+        minimum = 3 if part in ("eye", "mouth") else 4
+        part_overlay = overlay(prepared, whole_masks[index], whole_palette[index])
+        x = (index % 3) * BODY_SIZE
+        y = (index // 3) * BODY_SIZE
+        whole_contact.paste(part_overlay, (x, y))
+        whole_draw.text((x + 3, y + 3), part, fill="black", stroke_width=2, stroke_fill="white")
+        part_overlay.save(args.output / f"whole-{part}.png")
+        report["whole_character_parts"][part] = {
+            "threshold": BODY_THRESHOLDS[index],
+            "maximum_probability": round(float(whole_probabilities[index].max()), 4),
+            "components": components(whole_masks[index], minimum=minimum, maximum_fraction=maximum_fraction),
+        }
+    whole_contact.save(args.output / "whole-contact-sheet.png")
+    pose_points: dict[str, tuple[float, float, float]] = {}
+    for index, name in enumerate(POSE_JOINTS):
+        flat = int(np.argmax(pose_logits[index]))
+        x = (flat % POSE_SIZE + 0.5) * BODY_SIZE / POSE_SIZE
+        y = (flat // POSE_SIZE + 0.5) * BODY_SIZE / POSE_SIZE
+        confidence = float(sigmoid(pose_logits[index]).max())
+        pose_points[name] = (x, y, confidence)
+        report["pose"][name] = {"x": round(x, 2), "y": round(y, 2), "confidence": round(confidence, 4)}
+    pose_overlay = prepared.convert("RGB")
+    pose_draw = ImageDraw.Draw(pose_overlay)
+    for left, right in POSE_EDGES:
+        x1, y1, c1 = pose_points[left]
+        x2, y2, c2 = pose_points[right]
+        color = (35, 211, 143) if min(c1, c2) >= 0.48 else (160, 160, 160)
+        pose_draw.line((x1, y1, x2, y2), fill=color, width=2)
+    for name, (x, y, confidence) in pose_points.items():
+        color = (255, 72, 129) if confidence >= 0.48 else (150, 150, 150)
+        pose_draw.ellipse((x - 2.5, y - 2.5, x + 2.5, y + 2.5), fill=color, outline="white", width=1)
+    pose_overlay.resize((BODY_SIZE * 3, BODY_SIZE * 3), Image.Resampling.NEAREST).save(args.output / "pose-skeleton.png")
     (args.output / "report.json").write_text(json.dumps(report, indent=2) + "\n")
     print(json.dumps(report, indent=2))
 

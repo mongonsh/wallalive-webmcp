@@ -59,9 +59,16 @@ test("registers thirteen goal-level WebMCP collaboration tools with spatial dire
 
   const registeredNames = [...page.matchAll(/name: ["']([^"']+)["']/g)].map((match) => match[1]);
   assert.equal(registeredNames.filter((name) => expectedTools.includes(name)).length, 13);
+  const toolSurface = page.slice(page.indexOf("const tools: WebMCPTool[]"), page.indexOf("Promise.all(tools.map"));
+  assert.equal([...toolSurface.matchAll(/\n\s+name: ["']/g)].length, 13, "every registered tool must be represented exactly once");
+  assert.equal([...toolSurface.matchAll(/\n\s+title: ["']/g)].length, 13, "every registered tool needs a human-readable title");
+  assert.equal([...toolSurface.matchAll(/\n\s+annotations: \{ readOnlyHint: (?:true|false), untrustedContentHint: true \}/g)].length, 13, "every tool must declare trust and read/write intent");
   assert.equal(registeredNames.some((name) => /camera|capture|upload/.test(name)), false);
   assert.match(page, /document\.modelContext/);
   assert.match(page, /registerTool\(tool, \{ signal: controller\.signal \}\)/);
+  assert.match(page, /error instanceof DOMException && error\.name === "AbortError"/);
+  assert.match(toolSurface, /const result = stageMagicShow\(input\);\s+await afterVisiblePaint\(\);\s+guard\(signal\);/);
+  assert.match(toolSurface, /const result = await prepareRoomInvite[\s\S]+?await afterVisiblePaint\(\);\s+guard\(signal\);/);
   assert.match(page, /additionalProperties: false/);
   assert.match(page, /readOnlyHint/);
   assert.match(page, /Camera capture is human-only/);
@@ -112,6 +119,8 @@ test("keeps submission claims aligned with the shipped thirteen-tool educational
   ]);
   const claims = files.join("\n");
   assert.doesNotMatch(claims, /(?:Six|six) (?:goal-level WebMCP|imperative) tools/);
+  assert.doesNotMatch(claims, /(?:Six|six)(?:-graph| local| same-origin| ONNX)|six-model/);
+  assert.match(claims, /Seven local ONNX graphs/);
   assert.match(claims, /Thirteen goal-level WebMCP tools/);
   assert.match(claims, /Imagine.*Sequence.*Perform.*Reflect/);
   assert.match(claims, /not measured learning (?:gains|claims|outcomes)/i);
@@ -174,6 +183,8 @@ test("implements local drawing extraction and real WebXR hit testing", async () 
   assert.doesNotMatch(stage, /MarchingCubes|volume\.field\.fill|volume\.blur/);
   assert.match(stage, /wallalive-semantic-character/);
   assert.match(stage, /SkinnedMesh/);
+  assert.match(stage, /getContext\("webgl2"/);
+  assert.match(stage, /dataset\.renderer = "unavailable"/);
   assert.match(stage, /skinIndex/);
   assert.match(stage, /skinWeight/);
   assert.doesNotMatch(stage, /CapsuleGeometry/);

@@ -156,7 +156,8 @@ export function assessReconstructionReadiness(extraction: DrawingExtraction): Re
   if (!validation.accepted || validation.score < 0.44) blockers.push(validation.reason);
   if (cutoutConfidence < 0.62) blockers.push("The character boundary is too uncertain. Tap the character again or use a cleaner photo.");
   if (areaPercent < 1.2) blockers.push("The selected character is too small to reconstruct safely.");
-  if (areaPercent > 56) blockers.push("The selection still contains too much paper or background.");
+  const maximumTrustedArea = extraction.cutoutRecognition?.model === "flat-artwork-alpha-v1" ? 82 : 56;
+  if (areaPercent > maximumTrustedArea) blockers.push("The selection still contains too much paper or background.");
   if (extraction.contour.length < 12) blockers.push("The outline is too simple to preserve the drawing safely.");
   if (!poseReady && !topologyReady) warnings.push("The automatic skeleton is not reliable yet. Review the joints before asking it to move.");
   if (!poseReady && !topologyReady && learnedBranches < 2) warnings.push("Arms and legs were not verified. Movement stays locked instead of inventing anatomy.");

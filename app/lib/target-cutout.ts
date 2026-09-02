@@ -7,11 +7,12 @@ import {
   type ExtractionScope,
 } from "./drawing.ts";
 
-const MODEL_PATH = "/models/wallalive-target-cutout-v2.onnx";
+const MODEL_PATH = "/models/wallalive-target-cutout-v3.onnx";
 const MAGIC_TOUCH_MODEL = "https://storage.googleapis.com/mediapipe-models/interactive_segmenter_v2/magic_touch/int8/1/interactive_segmentation.task";
 const MEDIAPIPE_WASM = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.0.1/wasm";
-const MODEL_SIZE = 128;
-const MASK_THRESHOLD = 0.54;
+const MODEL_SIZE = 160;
+const MASK_THRESHOLD = 0.60;
+const PROMPT_SEARCH_RADIUS = Math.round(MODEL_SIZE * 15 / 128);
 const CROP_SCALES = [0.46, 0.62, 0.8, 1] as const;
 
 type SourceFrame = {
@@ -46,6 +47,59 @@ let interactiveSegmenterPromise: Promise<{
 
 const clamp = (value: number, minimum: number, maximum: number) => Math.min(maximum, Math.max(minimum, value));
 const sigmoid = (value: number) => 1 / (1 + Math.exp(-value));
+
+export function assessFlatArtworkIsolation(
+  source: Uint8ClampedArray,
+  cleaned: Uint8ClampedArray,
+  width: number,
+  height: number,
+) {
+  const area = width * height;
+  if (width < 1 || height < 1 || source.length < area * 4 || cleaned.length < area * 4) {
+    throw new Error("Artwork pixels do not match the canvas dimensions.");
+  }
+  const border: number[] = [];
+  for (let x = 0; x < width; x += 1) border.push(x, (height - 1) * width + x);
+  for (let y = 1; y < height - 1; y += 1) border.push(y * width, y * width + width - 1);
+  const buckets = new Map<string, number>();
+  let opaqueBorder = 0;
+  for (const pixel of border) {
+    const offset = pixel * 4;
+    if (source[offset + 3] < 16) continue;
+    opaqueBorder += 1;
+    const key = `${source[offset] >> 4}:${source[offset + 1] >> 4}:${source[offset + 2] >> 4}`;
+    buckets.set(key, (buckets.get(key) ?? 0) + 1);
+  }
+  const dominantBorder = Math.max(0, ...buckets.values());
+  const borderShare = dominantBorder / Math.max(1, opaqueBorder);
+  let visible = 0;
+  let minX = width;
+  let minY = height;
+  let maxX = -1;
+  let maxY = -1;
+  for (let pixel = 0; pixel < area; pixel += 1) {
+    if (cleaned[pixel * 4 + 3] <= 24) continue;
+    visible += 1;
+    const x = pixel % width;
+    const y = Math.floor(pixel / width);
+    minX = Math.min(minX, x);
+    minY = Math.min(minY, y);
+    maxX = Math.max(maxX, x);
+    maxY = Math.max(maxY, y);
+  }
+  const boxArea = visible ? (maxX - minX + 1) * (maxY - minY + 1) : area;
+  const visibleFraction = visible / area;
+  const boxFraction = boxArea / area;
+  const boxFill = visible / Math.max(1, boxArea);
+  const pageLike = boxFraction >= 0.08 && boxFill >= 0.83;
+  return {
+    usable: borderShare >= 0.72 && visibleFraction >= 0.005 && visibleFraction <= 0.82 && !pageLike,
+    borderShare,
+    visibleFraction,
+    boxFraction,
+    boxFill,
+  };
+}
 
 /**
  * Removes only canvas background pixels that are connected to an outer edge.
@@ -124,6 +178,37 @@ export function makeTransparentArtworkPixels(
   return result;
 }
 
+function isolateWithFlatArtworkBackground(frame: SourceFrame, started: number) {
+  const context = frame.canvas.getContext("2d", { willReadFrequently: true });
+  if (!context) return null;
+  const image = context.getImageData(0, 0, frame.canvas.width, frame.canvas.height);
+  const cleaned = makeTransparentArtworkPixels(image.data, frame.canvas.width, frame.canvas.height, 28);
+  const assessment = assessFlatArtworkIsolation(image.data, cleaned, frame.canvas.width, frame.canvas.height);
+  if (!assessment.usable) return null;
+  const canvas = document.createElement("canvas");
+  canvas.width = frame.canvas.width;
+  canvas.height = frame.canvas.height;
+  const output = canvas.getContext("2d", { willReadFrequently: true });
+  if (!output) return null;
+  image.data.set(cleaned);
+  output.putImageData(image, 0, 0);
+  const extraction = extractDrawingFromCanvas(canvas, frame.target, "selected-image");
+  if (extraction.analysis.coveragePercent <= 1) return null;
+  return {
+    ...extraction,
+    previewUrl: frame.canvas.toDataURL("image/jpeg", 0.86),
+    sourceTarget: frame.target,
+    sourceScope: frame.scope,
+    cutoutRecognition: {
+      model: "flat-artwork-alpha-v1" as const,
+      latencyMs: Math.round(performance.now() - started),
+      confidence: Number(clamp(0.82 + (assessment.borderShare - 0.72) * 0.5, 0.82, 0.98).toFixed(3)),
+      areaPercent: Number((assessment.visibleFraction * 100).toFixed(1)),
+      cropScale: 1,
+    },
+  };
+}
+
 function loadSession() {
   if (!sessionPromise) {
     runtimePromise ??= import("onnxruntime-web/wasm");
@@ -167,6 +252,23 @@ function sourceCanvas(source: CanvasImageSource, width: number, height: number) 
   context.imageSmoothingQuality = "high";
   context.drawImage(source, 0, 0, canvas.width, canvas.height);
   return canvas;
+}
+
+function remapSourceBounds(
+  extraction: DrawingExtraction,
+  crop: { x: number; y: number; width: number; height: number },
+  frame: SourceFrame,
+) {
+  if (!extraction.sourceBounds) return extraction;
+  return {
+    ...extraction,
+    sourceBounds: {
+      x: (crop.x + extraction.sourceBounds.x * crop.width) / frame.canvas.width,
+      y: (crop.y + extraction.sourceBounds.y * crop.height) / frame.canvas.height,
+      width: extraction.sourceBounds.width * crop.width / frame.canvas.width,
+      height: extraction.sourceBounds.height * crop.height / frame.canvas.height,
+    },
+  };
 }
 
 function loadImage(url: string) {
@@ -232,8 +334,8 @@ function promptedComponent(probabilities: Float32Array, prompt: CaptureTarget) {
   if (!active[seed]) {
     let bestDistance = Infinity;
     let bestProbability = 0;
-    for (let y = Math.max(0, promptY - 15); y <= Math.min(MODEL_SIZE - 1, promptY + 15); y += 1) {
-      for (let x = Math.max(0, promptX - 15); x <= Math.min(MODEL_SIZE - 1, promptX + 15); x += 1) {
+    for (let y = Math.max(0, promptY - PROMPT_SEARCH_RADIUS); y <= Math.min(MODEL_SIZE - 1, promptY + PROMPT_SEARCH_RADIUS); y += 1) {
+      for (let x = Math.max(0, promptX - PROMPT_SEARCH_RADIUS); x <= Math.min(MODEL_SIZE - 1, promptX + PROMPT_SEARCH_RADIUS); x += 1) {
         const index = y * MODEL_SIZE + x;
         if (!active[index]) continue;
         const distance = Math.hypot(x - promptX, y - promptY);
@@ -489,6 +591,12 @@ function cropMagicMask(frame: SourceFrame, decoded: MagicMask) {
       y: clamp((frame.target.y * decoded.height - cropY) / extent, 0, 1),
     },
     cropScale: extent / Math.min(decoded.width, decoded.height),
+    sourceCrop: {
+      x: cropX / decoded.width * frame.canvas.width,
+      y: cropY / decoded.height * frame.canvas.height,
+      width: extent / decoded.width * frame.canvas.width,
+      height: extent / decoded.height * frame.canvas.height,
+    },
   };
 }
 
@@ -510,7 +618,11 @@ async function isolateWithMagicTouch(frame: SourceFrame): Promise<DrawingExtract
     const decoded = promptedMagicComponent(result.getAsUint8Array(), result.width, result.height, frame.target);
     if (!decoded || decoded.quality < 0.64) throw new Error("The selected character mask is uncertain.");
     const cropped = cropMagicMask(frame, decoded);
-    const extraction = extractDrawingFromCanvas(cropped.canvas, cropped.target, "selected-image");
+    const extraction = remapSourceBounds(
+      extractDrawingFromCanvas(cropped.canvas, cropped.target, "selected-image"),
+      cropped.sourceCrop,
+      frame,
+    );
     return {
       ...extraction,
       previewUrl: frame.canvas.toDataURL("image/jpeg", 0.86),
@@ -550,7 +662,11 @@ function isolateWithTargetedLocalExtraction(frame: SourceFrame, started: number)
       y: clamp((frame.target.y * frame.canvas.height - crop.y) / crop.size, 0, 1),
     };
     try {
-      const extraction = extractDrawingFromCanvas(canvas, prompt, "camera");
+      const extraction = remapSourceBounds(
+        extractDrawingFromCanvas(canvas, prompt, "camera"),
+        { x: crop.x, y: crop.y, width: crop.size, height: crop.size },
+        frame,
+      );
       if (extraction.analysis.coveragePercent <= 1) {
         throw new Error("The tapped drawing is too faint or too far away for a safe 3D reconstruction.");
       }
@@ -595,7 +711,16 @@ async function isolateWithCompactDrawingModel(frame: SourceFrame, started: numbe
   // The prompt mask is authoritative. Running classical extraction on the
   // unmasked crop can select the paper, monitor, or nearby drawing even after
   // the network found the intended figure correctly.
-  const extraction = extractDrawingFromCanvas(sourceCrop(frame, decoded, true), decoded.candidate.prompt, "selected-image");
+  const extraction = remapSourceBounds(
+    extractDrawingFromCanvas(sourceCrop(frame, decoded, true), decoded.candidate.prompt, "selected-image"),
+    {
+      x: decoded.candidate.crop.x,
+      y: decoded.candidate.crop.y,
+      width: decoded.candidate.crop.size,
+      height: decoded.candidate.crop.size,
+    },
+    frame,
+  );
   if (extraction.analysis.coveragePercent <= 1) {
     throw new Error("That drawing is too faint or too far away for a safe reconstruction. Move closer so the character fills more of the frame.");
   }
@@ -605,7 +730,7 @@ async function isolateWithCompactDrawingModel(frame: SourceFrame, started: numbe
     sourceTarget: frame.target,
     sourceScope: frame.scope,
     cutoutRecognition: {
-      model: "wallalive-target-cutout-v2",
+      model: "wallalive-target-cutout-v3",
       latencyMs: Math.round(performance.now() - started),
       confidence: Number(decoded.confidence.toFixed(3)),
       areaPercent: Number(decoded.areaPercent.toFixed(1)),
@@ -621,6 +746,13 @@ async function isolate(frame: SourceFrame): Promise<DrawingExtraction> {
     if (context && hasMeaningfulSelectedAlpha(context.getImageData(0, 0, frame.canvas.width, frame.canvas.height).data, frame.scope)) {
       return extractDrawingFromCanvas(frame.canvas, frame.target, "selected-image");
     }
+    // Uploaded cartoons and screenshots often have a perfectly flat white or
+    // coloured background. In that case exact edge-connected alpha is safer
+    // and much sharper than asking a compact segmentation head to rediscover the
+    // boundary. A page-like filled rectangle is explicitly rejected so paper
+    // photographed on a wall still goes through the 160px mixed-domain model.
+    const flatArtwork = isolateWithFlatArtworkBackground(frame, started);
+    if (flatArtwork) return flatArtwork;
   }
   // Prompted models decide the foreground before the low-confidence local
   // rescue. The rescue is useful for faint line art, but must never overrule a

@@ -62,7 +62,7 @@ test("builds a watertight rounded shell while preserving the exact drawing silho
 
 test("skins one continuous reconstructed surface instead of attaching generic capsules", () => {
   assert.match(source, /new THREE\.SkinnedMesh\(compactGeometry, \[sideMaterial, frontMaterial, backMaterial\]\)/);
-  assert.match(source, /buildArtworkShellGeometry\(contour, depth, requestedHalfDepth, inflation, 3\)/);
+  assert.match(source, /buildArtworkShellGeometry\(contour, depth, requestedHalfDepth, inflation, 3, reliefParts\)/);
   assert.match(source, /contour-preserving rounded 3D puppet/);
   assert.match(source, /setAttribute\("skinIndex"/);
   assert.match(source, /setAttribute\("skinWeight"/);
@@ -73,4 +73,29 @@ test("skins one continuous reconstructed surface instead of attaching generic ca
   assert.doesNotMatch(source, /DecalGeometry|raised-lens|raised-pupil|addInkFeature/);
   assert.doesNotMatch(source, /volumetric-appendage/);
   assert.doesNotMatch(source, /new THREE\.CapsuleGeometry/);
+});
+
+test("verified facial parts shape subtle relief on the same closed surface", () => {
+  const baseline = buildArtworkShellGeometry(characterContour, null, 0.15, 1, 3);
+  const relieved = buildArtworkShellGeometry(characterContour, null, 0.15, 1, 3, [{
+    kind: "nose",
+    center: { x: 0, y: 0.12 },
+    size: { x: 0.22, y: 0.18 },
+    confidence: 0.95,
+  }]);
+  const frontAt = (result, x, y) => {
+    const positions = result.geometry.getAttribute("position");
+    let best = { distance: Infinity, z: -Infinity };
+    for (let vertex = 0; vertex < positions.count; vertex += 1) {
+      const z = positions.getZ(vertex);
+      if (z <= 0) continue;
+      const distance = Math.hypot(positions.getX(vertex) - x, positions.getY(vertex) - y);
+      if (distance < best.distance) best = { distance, z };
+    }
+    return best.z;
+  };
+
+  assert.ok(frontAt(relieved, 0, 0.12) > frontAt(baseline, 0, 0.12) + 0.012);
+  assert.ok(relieved.maximumFrontDepth > baseline.maximumFrontDepth);
+  assert.equal(relieved.geometry.getIndex().count, baseline.geometry.getIndex().count, "relief must not attach separate primitives");
 });

@@ -761,6 +761,70 @@ export function decodeTopology(
   };
 }
 
+const HUMANOID_CORE_JOINTS = [
+  "left_shoulder", "right_shoulder", "left_elbow", "right_elbow", "left_wrist", "right_wrist",
+  "left_hip", "right_hip", "left_knee", "right_knee", "left_ankle", "right_ankle",
+] as const;
+
+export function assessHumanoidPoseEvidence(
+  limbHints: LearnedPartHint[],
+  joints: LearnedPose["joints"],
+  topology: Pick<LearnedTopology, "kind" | "kindConfidence">,
+) {
+  const byName = new Map(joints.map((joint) => [joint.name, joint]));
+  const averageY = (...names: Array<(typeof POSE_JOINT_NAMES)[number]>) => names.reduce((total, name) => total + (byName.get(name)?.y ?? 0.5), 0) / names.length;
+  const count = (kind: LearnedPartHint["kind"]) => limbHints.filter((hint) => hint.kind === kind).length;
+  const arms = count("arm");
+  const hands = count("hand");
+  const legs = count("leg");
+  const feet = count("foot");
+  const eyes = count("eye");
+  const mouths = count("mouth");
+  const orderedHumanoid = averageY("left_shoulder", "right_shoulder") < averageY("left_hip", "right_hip")
+    && averageY("left_hip", "right_hip") < averageY("left_knee", "right_knee")
+    && averageY("left_knee", "right_knee") < averageY("left_ankle", "right_ankle");
+  const confidentCoreJoints = HUMANOID_CORE_JOINTS.filter((name) => (byName.get(name)?.confidence ?? 0) >= 0.48).length;
+  const wristSeparation = Math.abs((byName.get("left_wrist")?.x ?? 0.5) - (byName.get("right_wrist")?.x ?? 0.5));
+  const ankleSeparation = Math.abs((byName.get("left_ankle")?.x ?? 0.5) - (byName.get("right_ankle")?.x ?? 0.5));
+  const plausibleLimbCounts = arms >= 1 && arms <= 2 && legs >= 1 && legs <= 2;
+  const topologyBacked = topology.kind === "biped" && topology.kindConfidence >= 0.42;
+  // A coarse eight-family classifier must not erase a much stronger local
+  // anatomy signal. This path is intentionally strict: face, distal limb masks,
+  // separated left/right pose chains, and ten confident joints must all agree.
+  // It recovers square and blob-shaped humanoids without turning a face drawn on
+  // a tree, vehicle, or many-legged creature into a human skeleton.
+  const semanticOverride = eyes >= 2 && mouths >= 1
+    && hands >= 1 && feet >= 1
+    && plausibleLimbCounts
+    && confidentCoreJoints >= 10
+    && wristSeparation >= 0.08
+    && ankleSeparation >= 0.035;
+  return {
+    applicable: orderedHumanoid && plausibleLimbCounts && (topologyBacked || semanticOverride),
+    semanticOverride: orderedHumanoid && semanticOverride,
+    orderedHumanoid,
+    confidentCoreJoints,
+    counts: { eyes, mouths, arms, hands, legs, feet },
+  };
+}
+
+function suppressConflictingTopology(
+  topology: LearnedTopology,
+  poseEvidence: ReturnType<typeof assessHumanoidPoseEvidence>,
+): LearnedTopology {
+  if (!poseEvidence.semanticOverride || topology.kind === "biped") return topology;
+  // Keep the strong pose evidence auditable through poseRecognition, and do not
+  // let a contradictory graph create branches/trunks or delete a verified face and
+  // limbs. The pose-backed biped label controls instance limits while the bad
+  // graph itself is marked inapplicable and therefore cannot create bones.
+  return {
+    ...topology,
+    kind: "biped",
+    kindConfidence: Math.max(0.62, Math.min(topology.kindConfidence, 0.78)),
+    applicable: false,
+  };
+}
+
 function decodePose(
   output: import("onnxruntime-web/wasm").Tensor,
   prepared: PreparedImage,
@@ -785,16 +849,8 @@ function decodePose(
     const point = prepared.mapPoint((x + 0.5) * 2, (y + 0.5) * 2);
     return { name, ...point, confidence: sigmoid(bestLogit) };
   });
-  const byName = new Map(joints.map((joint) => [joint.name, joint]));
-  const averageY = (...names: Array<(typeof POSE_JOINT_NAMES)[number]>) => names.reduce((total, name) => total + (byName.get(name)?.y ?? 0.5), 0) / names.length;
-  const arms = limbHints.filter((hint) => hint.kind === "arm").length;
-  const legs = limbHints.filter((hint) => hint.kind === "leg").length;
-  const orderedHumanoid = averageY("left_shoulder", "right_shoulder") < averageY("left_hip", "right_hip")
-    && averageY("left_hip", "right_hip") < averageY("left_knee", "right_knee")
-    && averageY("left_knee", "right_knee") < averageY("left_ankle", "right_ankle");
-  const applicable = topology.kind === "biped" && topology.kindConfidence >= 0.42
-    && arms >= 1 && arms <= 2 && legs >= 1 && legs <= 2 && orderedHumanoid;
-  return { model: "wallalive-amateur-pose-v6", latencyMs, applicable, joints };
+  const evidence = assessHumanoidPoseEvidence(limbHints, joints, topology);
+  return { model: "wallalive-amateur-pose-v6", latencyMs, applicable: evidence.applicable, joints };
 }
 
 function modelRectToImageCrop(rect: { x: number; y: number; width: number; height: number }, mapPoint: PointMap) {
@@ -973,28 +1029,19 @@ export async function recognizeDrawingParts(extraction: DrawingExtraction): Prom
     hints = supplementFallbackHints(hints, oldHints);
   }
 
-  // Avoid a self-reinforcing topology error: a few false vertical limb blobs
-  // can make an upright round person read as a quadruped, which would then
-  // authorize four legs and erase its arms. A compact upright silhouette with
-  // a conventional two-eye face and mouth is stronger posture evidence.
-  const uprightFace = extraction.analysis.aspectRatio <= 1.06
-    && hints.filter((hint) => hint.kind === "eye").length >= 2
-    && hints.some((hint) => hint.kind === "mouth");
-  if (learnedTopology.kind === "quadruped" && uprightFace) {
-    learnedTopology = {
-      ...learnedTopology,
-      kind: "biped",
-      kindConfidence: Math.min(learnedTopology.kindConfidence, 0.78),
-      applicable: true,
-    };
-    learnedPose = decodePose(
-      poseResults.joint_heatmaps ?? Object.values(poseResults)[0],
-      prepared,
-      hints,
-      Math.round(performance.now() - poseStarted),
-      learnedTopology,
-    );
-  }
+  // Re-evaluate pose after the high-resolution face pass and fallback anchors.
+  // A square cartoon can have excellent two-eye, hand, foot, and joint evidence
+  // while the coarse family head confidently calls its outline a tree. In that
+  // conflict, preserve the verified pose and suppress the contradictory graph.
+  learnedPose = decodePose(
+    poseResults.joint_heatmaps ?? Object.values(poseResults)[0],
+    prepared,
+    hints,
+    Math.round(performance.now() - poseStarted),
+    learnedTopology,
+  );
+  const poseEvidence = assessHumanoidPoseEvidence(hints, learnedPose.joints, learnedTopology);
+  learnedTopology = suppressConflictingTopology(learnedTopology, poseEvidence);
 
   const instanceLimits: Partial<Record<LearnedPartHint["kind"], number>> = learnedTopology.kind === "biped"
     ? { eye: 2, cheek: 2, mouth: 1, ear: 2, arm: 2, hand: 2, leg: 2, foot: 2 }
@@ -1029,15 +1076,7 @@ async function recognizeTargetEnsemble(
     try {
       const drawing = await recognize(target);
       const sourceTarget = drawing.sourceTarget ?? target;
-      const duplicate = recognized.some((existing) => {
-        const existingTarget = existing.sourceTarget ?? { x: 0.5, y: 0.5 };
-        // A wide connected drawing can generate a center prompt plus one
-        // prompt per horizontal slice. Compare the resulting transparent
-        // artwork as well as prompt positions so one real figure is never
-        // counted twice merely because it was reached from two seeds.
-        return existing.textureUrl === drawing.textureUrl
-          || Math.hypot(sourceTarget.x - existingTarget.x, sourceTarget.y - existingTarget.y) < 0.065;
-      });
+      const duplicate = recognized.some((existing) => areDuplicateRecognizedDrawings(existing, { ...drawing, sourceTarget }));
       if (!duplicate) recognized.push({ ...drawing, sourceTarget });
     } catch (error) {
       firstError ??= error;
@@ -1045,6 +1084,24 @@ async function recognizeTargetEnsemble(
   }
   if (!recognized.length) throw firstError instanceof Error ? firstError : new Error("No complete drawn characters were verified in this image.");
   return recognized;
+}
+
+export function areDuplicateRecognizedDrawings(left: DrawingExtraction, right: DrawingExtraction) {
+  const leftTarget = left.sourceTarget ?? { x: 0.5, y: 0.5 };
+  const rightTarget = right.sourceTarget ?? { x: 0.5, y: 0.5 };
+  const targetDistance = Math.hypot(leftTarget.x - rightTarget.x, leftTarget.y - rightTarget.y);
+  if (targetDistance < 0.065) return true;
+  if (left.textureUrl !== right.textureUrl) return false;
+  if (!left.sourceBounds || !right.sourceBounds) return targetDistance < 0.18;
+  const intersectionWidth = Math.max(0, Math.min(left.sourceBounds.x + left.sourceBounds.width, right.sourceBounds.x + right.sourceBounds.width)
+    - Math.max(left.sourceBounds.x, right.sourceBounds.x));
+  const intersectionHeight = Math.max(0, Math.min(left.sourceBounds.y + left.sourceBounds.height, right.sourceBounds.y + right.sourceBounds.height)
+    - Math.max(left.sourceBounds.y, right.sourceBounds.y));
+  const intersection = intersectionWidth * intersectionHeight;
+  const leftArea = left.sourceBounds.width * left.sourceBounds.height;
+  const rightArea = right.sourceBounds.width * right.sourceBounds.height;
+  const union = leftArea + rightArea - intersection;
+  return intersection / Math.max(1e-6, union) >= 0.68;
 }
 
 export async function recognizeDrawingsFromVideo(

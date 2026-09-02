@@ -1,0 +1,151 @@
+{
+  "model": "wallalive-target-cutout-v3",
+  "architecture": "mixed-domain residual point-prompted U-Net",
+  "input": [
+    1,
+    4,
+    160,
+    160
+  ],
+  "output": [
+    1,
+    1,
+    160,
+    160
+  ],
+  "parameters": 392939,
+  "training_drawings": {
+    "childlike": 12992,
+    "amateur": 352
+  },
+  "validation_drawings": {
+    "childlike_clean": 1000,
+    "childlike_wall_multi": 1000,
+    "amateur_clean": 63,
+    "amateur_wall": 63
+  },
+  "sealed_test_drawings": {
+    "childlike_official": 1986,
+    "childlike_official_wall_multi": 1986,
+    "amateur_official": 75,
+    "amateur_official_wall": 75
+  },
+  "samples_per_epoch": 4096,
+  "epochs": 10,
+  "best_epoch": 10,
+  "threshold": 0.6,
+  "validation": {
+    "childlike_clean": {
+      "global_iou": 0.7161,
+      "mean_iou": 0.7092,
+      "boundary_f1_1px": 0.6144,
+      "prompt_hit_rate": 0.998,
+      "drawings": 1000
+    },
+    "childlike_wall_multi": {
+      "global_iou": 0.9006,
+      "mean_iou": 0.8864,
+      "boundary_f1_1px": 0.8961,
+      "prompt_hit_rate": 0.997,
+      "drawings": 1000
+    },
+    "amateur_clean": {
+      "global_iou": 0.626,
+      "mean_iou": 0.6135,
+      "boundary_f1_1px": 0.5476,
+      "prompt_hit_rate": 0.9841,
+      "drawings": 63
+    },
+    "amateur_wall": {
+      "global_iou": 0.9279,
+      "mean_iou": 0.9211,
+      "boundary_f1_1px": 0.9338,
+      "prompt_hit_rate": 1.0,
+      "drawings": 63
+    }
+  },
+  "official_test": {
+    "childlike_official": {
+      "global_iou": 0.716,
+      "mean_iou": 0.7092,
+      "boundary_f1_1px": 0.6124,
+      "prompt_hit_rate": 0.9935,
+      "drawings": 1986
+    },
+    "childlike_official_wall_multi": {
+      "global_iou": 0.8948,
+      "mean_iou": 0.8816,
+      "boundary_f1_1px": 0.8948,
+      "prompt_hit_rate": 0.9955,
+      "drawings": 1986
+    },
+    "amateur_official": {
+      "global_iou": 0.6056,
+      "mean_iou": 0.585,
+      "boundary_f1_1px": 0.5287,
+      "prompt_hit_rate": 1.0,
+      "drawings": 75
+    },
+    "amateur_official_wall": {
+      "global_iou": 0.929,
+      "mean_iou": 0.9218,
+      "boundary_f1_1px": 0.9403,
+      "prompt_hit_rate": 1.0,
+      "drawings": 75
+    }
+  },
+  "test_split_used_for_selection": false,
+  "datasets": [
+    {
+      "name": "ChildlikeSHAPES",
+      "license": "CC-BY-4.0"
+    },
+    {
+      "name": "Meta Amateur Drawings Dataset v1.0",
+      "license": "MIT"
+    }
+  ],
+  "augmentations": [
+    "point prompt",
+    "negative paper boundary",
+    "paper grid",
+    "neighbor strokes",
+    "identical-character hard negative",
+    "perspective",
+    "shadow",
+    "blur",
+    "JPEG"
+  ],
+  "seconds": 3754.7,
+  "onnx_official_test": {
+    "childlike_official": {
+      "global_iou": 0.716,
+      "mean_iou": 0.7092,
+      "boundary_f1_1px": 0.6124,
+      "prompt_hit_rate": 0.9935,
+      "drawings": 1986
+    },
+    "childlike_official_wall_multi": {
+      "global_iou": 0.8948,
+      "mean_iou": 0.8816,
+      "boundary_f1_1px": 0.8948,
+      "prompt_hit_rate": 0.9955,
+      "drawings": 1986
+    },
+    "amateur_official": {
+      "global_iou": 0.6056,
+      "mean_iou": 0.585,
+      "boundary_f1_1px": 0.5287,
+      "prompt_hit_rate": 1.0,
+      "drawings": 75
+    },
+    "amateur_official_wall": {
+      "global_iou": 0.929,
+      "mean_iou": 0.9218,
+      "boundary_f1_1px": 0.9403,
+      "prompt_hit_rate": 1.0,
+      "drawings": 75
+    }
+  },
+  "onnx_export_verified": true
+}

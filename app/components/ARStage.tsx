@@ -456,7 +456,11 @@ export function buildCharacter(
   // This replaces the old voxel bounds (`localFront - fieldZ` and
   // `localBack + fieldZ`) while retaining independent learned front/back depth.
   const requestedHalfDepth = Math.min(0.16, Math.max(0.075, (bodyPart?.size.z ?? 0.28) * 0.42));
-  const shell = buildArtworkShellGeometry(contour, depth, requestedHalfDepth, inflation, 3);
+  const reliefParts = rig.parts.filter((part) => (
+    ["eye", "cheek", "nose", "mouth"].includes(part.kind)
+    && (part.reviewed || ["learned-model", "learned-pose"].includes(part.source))
+  ));
+  const shell = buildArtworkShellGeometry(contour, depth, requestedHalfDepth, inflation, 3, reliefParts);
   const compactGeometry = shell.geometry;
   const texturedFrontTriangles = shell.frontTriangleCount;
   const neutralBackTriangles = shell.backTriangleCount;
@@ -556,12 +560,15 @@ export function buildCharacter(
     semanticRig: rig.version,
     skinning: `${branchChains.length} verified two-joint chains (${articulationBones.length} branch bones) with semantic-outline-clipped weights; unreviewed anatomy cannot deform geometry`,
     maximumHalfDepth: shell.maximumHalfDepth,
+    maximumFrontDepth: shell.maximumFrontDepth,
     texturedFrontTriangles,
     neutralBackTriangles,
     sideTriangles: shell.sideTriangleCount,
     silhouetteError: 0,
     artworkSurfaceCoverage,
     projectedSemanticFeatures: false,
+    continuousSemanticRelief: true,
+    semanticReliefParts: reliefParts.length,
     learnedDepth: depth ? {
       model: depth.model,
       meanThickness: depth.meanThickness,
@@ -579,11 +586,14 @@ export function buildCharacter(
     bodyTopology: "closed",
     backPrior: "bounded neutral relief; full unseen-view reconstruction requires the neural sculpt path",
     maximumHalfDepth: shell.maximumHalfDepth,
+    maximumFrontDepth: shell.maximumFrontDepth,
     texturedFrontTriangles,
     neutralBackTriangles,
     artworkSurfaceCoverage,
     artworkPreservedOnFront: true,
     projectedSemanticFeatures: false,
+    continuousSemanticRelief: true,
+    semanticReliefParts: reliefParts.length,
     unreviewedAnatomyDeformsGeometry: false,
     depthModel: depth?.model ?? null,
     meanDepthAsymmetry: depth?.meanAsymmetry ?? 0,
@@ -627,6 +637,18 @@ export const ARStage = forwardRef<ARStageHandle, ARStageProps>(function ARStage(
 
     const width = Math.max(1, mount.clientWidth);
     const height = Math.max(1, mount.clientHeight);
+    // Probe once before constructing Three renderers. THREE logs several hard
+    // console errors for each failed profile, which turns an expected
+    // no-WebGL browser fallback into noisy false alarms during judging.
+    const probeCanvas = document.createElement("canvas");
+    const probe = probeCanvas.getContext("webgl2", { alpha: true, antialias: false });
+    if (!probe) {
+      mount.dataset.renderer = "unavailable";
+      setRendererError(true);
+      onCapability(false);
+      return;
+    }
+    probe.getExtension("WEBGL_lose_context")?.loseContext();
     let renderer: THREE.WebGLRenderer | null = null;
     const rendererOptions: THREE.WebGLRendererParameters[] = [
       { antialias: true, alpha: true, powerPreference: "high-performance" },

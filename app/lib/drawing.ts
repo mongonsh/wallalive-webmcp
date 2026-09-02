@@ -118,6 +118,31 @@ export type SemanticPart = {
   path?: Array<{ x: number; y: number; z: number }>;
 };
 
+/**
+ * Chooses the parts that can occupy a bilateral biped slot. A low-resolution
+ * mask commonly joins two legs (or two arms) into one high-confidence centre
+ * blob. Once pose refinement has recovered both lateral chains, keeping that
+ * blob displaces a real limb and produces the familiar melted-character
+ * failure. Prefer the verified left/right pair whenever both are available;
+ * otherwise keep the strongest available evidence, including centre parts for
+ * genuinely one-limbed drawings.
+ */
+export function selectBipedRigParts(candidates: SemanticPart[], limit: number) {
+  const winners = (["left", "right", "center"] as const)
+    .map((side) => candidates
+      .filter((part) => part.side === side)
+      .sort((left, right) => right.confidence - left.confidence)[0])
+    .filter((part): part is SemanticPart => Boolean(part));
+  const lateral = winners.filter((part) => part.side !== "center");
+  if (limit === 2 && lateral.length === 2) return lateral;
+  return winners
+    .sort((left, right) => {
+      const lateralBonus = (part: SemanticPart) => part.side === "center" && limit > 1 ? 0 : 0.08;
+      return right.confidence + lateralBonus(right) - left.confidence - lateralBonus(left);
+    })
+    .slice(0, limit);
+}
+
 export type CharacterRig = {
   version: "wallalive-semantic-rig-v2";
   bodyColor: string;
@@ -161,8 +186,10 @@ export type DrawingExtraction = {
   semanticRegions?: SemanticRegionCandidate[];
   sourceTarget?: CaptureTarget;
   sourceScope?: ExtractionScope;
+  /** Character crop in normalized coordinates of the original camera/image. */
+  sourceBounds?: { x: number; y: number; width: number; height: number };
   cutoutRecognition?: {
-    model: "mediapipe-magic-touch-v2" | "targeted-local-extraction-v3" | "wallalive-target-cutout-v2";
+    model: "flat-artwork-alpha-v1" | "mediapipe-magic-touch-v2" | "targeted-local-extraction-v3" | "wallalive-target-cutout-v3";
     latencyMs: number;
     confidence: number;
     areaPercent: number;
@@ -1561,23 +1588,9 @@ export function mergeLearnedPartHints(
   const accepted = hints.filter((hint) => hint.confidence >= (hint.kind === "cheek" ? 0.18 : hint.kind === "mouth" ? 0.42 : 0.48));
   const body = extraction.rig.parts.find((part) => part.kind === "body");
   if (!body) return extraction;
-  const learnedEyeHints = accepted.filter((hint) => hint.kind === "eye");
-  const learnedEyeRigY = learnedEyeHints.length
-    ? learnedEyeHints.reduce((total, eye) => total + (0.5 - eye.center.y) * 1.4, 0) / learnedEyeHints.length
-    : null;
-  const preserveSilhouetteEars = learnedEyeHints.length >= 2 && !accepted.some((hint) => hint.kind === "ear");
-  const isEvidenceBackedEar = (part: SemanticPart) => preserveSilhouetteEars
-    && part.kind === "ear"
-    && part.source === "silhouette-branch"
-    && part.side !== "center"
-    && part.size.x <= body.size.x * 0.24
-    && part.size.y <= body.size.y * 0.3
-    && Math.abs(part.center.x - body.center.x) >= body.size.x * 0.1
-    && learnedEyeRigY !== null
-    && part.center.y >= learnedEyeRigY + body.size.y * 0.035;
   const withoutHeuristicFace = () => {
     const parts = extraction.rig.parts.filter((part) => (
-      (!replaceableFaceKinds.has(part.kind) || isEvidenceBackedEar(part)) && part.kind !== "pupil"
+      !replaceableFaceKinds.has(part.kind) && part.kind !== "pupil"
     ));
     const joints = parts.filter((part) => part.parentId && parts.some((parent) => parent.id === part.parentId)).map((part) => ({
       id: `joint-${part.id}`,
@@ -2157,7 +2170,7 @@ export function mergeLearnedPartHints(
     });
   }
 
-  if (topology?.applicable && topology.kind === "biped") {
+  if ((topology?.applicable && topology.kind === "biped") || pose?.applicable) {
     const bipedLimits: Partial<Record<SemanticPartKind, number>> = {
       eye: 2, pupil: 2, cheek: 2, nose: 1, mouth: 1, ear: 2,
       arm: 2, hand: 2, leg: 2, foot: 2,
@@ -2165,15 +2178,7 @@ export function mergeLearnedPartHints(
     const keep = new Set<string>();
     for (const [kind, limit] of Object.entries(bipedLimits) as Array<[SemanticPartKind, number]>) {
       const candidates = parts.filter((part) => part.kind === kind);
-      const sideWinners = (["left", "right", "center"] as const)
-        .map((side) => candidates.filter((part) => part.side === side).sort((left, right) => right.confidence - left.confidence)[0])
-        .filter((part): part is SemanticPart => Boolean(part));
-      const selected = sideWinners
-        .sort((left, right) => {
-          const bilateralBonus = (part: SemanticPart) => part.side === "center" && limit > 1 ? 0 : 0.08;
-          return right.confidence + bilateralBonus(right) - left.confidence - bilateralBonus(left);
-        })
-        .slice(0, limit);
+      const selected = selectBipedRigParts(candidates, limit);
       selected.forEach((part) => keep.add(part.id));
     }
     parts = parts.filter((part) => bipedLimits[part.kind] === undefined || keep.has(part.id));
@@ -2445,6 +2450,12 @@ function extractDrawingFromSource(sourceImage: CanvasImageSource, sourceWidth: n
     semanticRegions: semantic.regions,
     sourceTarget: target,
     sourceScope: scope,
+    sourceBounds: {
+      x: minX / width,
+      y: minY / height,
+      width: cropWidth / width,
+      height: cropHeight / height,
+    },
     analysis: {
       dominantColor: toHex(dominant),
       secondaryColor: toHex(background),

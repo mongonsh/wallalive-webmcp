@@ -1,5 +1,12 @@
 import * as THREE from "three";
-import type { ContourPoint, LearnedDepthField } from "./drawing";
+import type { ContourPoint, LearnedDepthField, SemanticPartKind } from "./drawing";
+
+export type ArtworkReliefPart = {
+  kind: SemanticPartKind;
+  center: { x: number; y: number };
+  size: { x: number; y: number };
+  confidence: number;
+};
 
 export type ArtworkShellResult = {
   geometry: THREE.BufferGeometry;
@@ -7,6 +14,7 @@ export type ArtworkShellResult = {
   backTriangleCount: number;
   sideTriangleCount: number;
   maximumHalfDepth: number;
+  maximumFrontDepth: number;
   boundaryVertexCount: number;
 };
 
@@ -116,6 +124,7 @@ export function buildArtworkShellGeometry(
   requestedHalfDepth: number,
   inflation = 1,
   subdivisions = 2,
+  reliefParts: ArtworkReliefPart[] = [],
 ): ArtworkShellResult {
   const contour = cleanContour(sourceContour);
   const triangulationContour = contour.map((point) => new THREE.Vector2(point.x, point.y));
@@ -127,13 +136,36 @@ export function buildArtworkShellGeometry(
   const maximumHalfDepth = clamp(requestedHalfDepth * inflation, 0.065, 0.18);
   const rimHalfDepth = clamp(maximumHalfDepth * 0.14, 0.012, 0.024);
 
+  const semanticRelief = (x: number, y: number) => {
+    let amount = 0;
+    for (const part of reliefParts) {
+      if (part.confidence < 0.48) continue;
+      const strength = part.kind === "nose" ? 0.18
+        : part.kind === "eye" ? 0.12
+          : part.kind === "cheek" ? 0.06
+            : part.kind === "mouth" ? -0.035 : 0;
+      if (!strength) continue;
+      const radiusX = Math.max(0.018, part.size.x * 0.62);
+      const radiusY = Math.max(0.014, part.size.y * 0.62);
+      const normalized = ((x - part.center.x) / radiusX) ** 2 + ((y - part.center.y) / radiusY) ** 2;
+      if (normalized >= 1) continue;
+      const falloff = (1 - normalized) ** 2;
+      amount += maximumHalfDepth * strength * falloff * clamp(part.confidence, 0, 1);
+    }
+    return clamp(amount, -maximumHalfDepth * 0.08, maximumHalfDepth * 0.26);
+  };
+
   const shellDepth = (x: number, y: number, side: "front" | "back") => {
     const normalizedDistance = clamp(distanceToContour(x, y, outline) / maximumDistance, 0, 1);
     const envelope = rimHalfDepth + (maximumHalfDepth - rimHalfDepth) * Math.pow(normalizedDistance, 0.58);
-    if (!depth) return envelope;
-    const learned = sampleLearnedDepth(side === "front" ? depth.front : depth.back, depth, x, y) * inflation;
-    const learnedRatio = clamp(learned / Math.max(0.001, maximumHalfDepth), 0.72, 1.16);
-    return clamp(envelope * (0.82 + learnedRatio * 0.18), rimHalfDepth, maximumHalfDepth * 1.04);
+    let shaped = envelope;
+    if (depth) {
+      const learned = sampleLearnedDepth(side === "front" ? depth.front : depth.back, depth, x, y) * inflation;
+      const learnedRatio = clamp(learned / Math.max(0.001, maximumHalfDepth), 0.72, 1.16);
+      shaped = envelope * (0.82 + learnedRatio * 0.18);
+    }
+    if (side === "front") shaped += semanticRelief(x, y);
+    return clamp(shaped, rimHalfDepth * 0.92, maximumHalfDepth * 1.28);
   };
 
   const positions: number[] = [];
@@ -200,6 +232,7 @@ export function buildArtworkShellGeometry(
   geometry.computeVertexNormals();
   geometry.computeBoundingBox();
   geometry.computeBoundingSphere();
+  const maximumFrontDepth = positions.reduce((maximum, value, index) => index % 3 === 2 ? Math.max(maximum, value) : maximum, 0);
 
   return {
     geometry,
@@ -207,6 +240,7 @@ export function buildArtworkShellGeometry(
     backTriangleCount: backIndices.length / 3,
     sideTriangleCount: sideIndices.length / 3,
     maximumHalfDepth,
+    maximumFrontDepth,
     boundaryVertexCount: outline.length * edgeSegments * 2,
   };
 }

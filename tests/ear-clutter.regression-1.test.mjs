@@ -38,7 +38,7 @@ test("rejects oversized ear clutter and completes the learned bilateral pair", (
   assert.ok(ears.some((ear) => ear.center.x > 0));
 });
 
-test("keeps small bilateral silhouette ears when the face model finds both eyes but no ear mask", () => {
+test("does not claim silhouette branches are ears when the learned model found no ears", () => {
   const body = { id: "body", kind: "body", side: "center", parentId: null, center: { x: 0, y: 0, z: 0 }, size: { x: 0.8, y: 1.1, z: 0.46 }, rotation: 0, color: "#f5eee5", confidence: 1, source: "silhouette-branch" };
   const ear = (side, x) => ({
     id: `ear-${side}`,
@@ -76,7 +76,27 @@ test("keeps small bilateral silhouette ears when the face model finds both eyes 
   ], 11);
 
   const ears = result.rig.parts.filter((part) => part.kind === "ear");
-  assert.equal(ears.length, 2);
-  assert.ok(ears.every((part) => part.source === "silhouette-branch"));
-  assert.deepEqual(ears.map((part) => part.side).sort(), ["left", "right"]);
+  assert.equal(ears.length, 0);
+});
+
+test("does not turn the upper corners of a wide rectangular cartoon into ears", () => {
+  const body = { id: "body", kind: "body", side: "center", parentId: null, center: { x: 0, y: 0, z: 0 }, size: { x: 1.05, y: 0.76, z: 0.46 }, rotation: 0, color: "#f5a53b", confidence: 1, source: "silhouette-branch" };
+  const corner = (side, x) => ({
+    id: `ear-${side}`, kind: "ear", side, parentId: "body",
+    center: { x, y: 0.34, z: 0 }, anchor: { x: x * 0.62, y: 0.2, z: 0 },
+    size: { x: 0.09, y: 0.1, z: 0.07 }, rotation: 0, color: "#f5a53b",
+    confidence: 0.76, source: "silhouette-branch",
+  });
+  const extraction = {
+    previewUrl: "preview", textureUrl: "texture", contour: [], skeleton: [], semanticRegions: [],
+    analysis: { shapeHint: "wide", dominantColor: "#f5a53b", secondaryColor: "#fff", coveragePercent: 24, aspectRatio: 1.43, edgeEnergy: "bold", sourceWidth: 1264, sourceHeight: 842, skeletonPoints: 12 },
+    rig: { version: "wallalive-semantic-rig-v2", bodyColor: "#f5a53b", lineColor: "#173331", joints: [], detectedKinds: ["body", "ear"], parts: [body, corner("left", -0.48), corner("right", 0.48)] },
+  };
+  const result = mergeLearnedPartHints(extraction, [
+    { kind: "eye", center: { x: 0.43, y: 0.34 }, size: { x: 0.08, y: 0.1 }, rotation: 0, confidence: 0.94 },
+    { kind: "eye", center: { x: 0.57, y: 0.34 }, size: { x: 0.08, y: 0.1 }, rotation: 0, confidence: 0.93 },
+    { kind: "mouth", center: { x: 0.5, y: 0.5 }, size: { x: 0.13, y: 0.06 }, rotation: 0, confidence: 0.88 },
+  ], 10);
+
+  assert.equal(result.rig.parts.filter((part) => part.kind === "ear").length, 0);
 });

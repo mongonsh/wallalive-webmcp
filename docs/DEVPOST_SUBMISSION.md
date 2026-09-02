@@ -30,7 +30,7 @@ Children already treat drawings as living characters. A few lines can have a nam
 1. Friends join a Cloudflare D1-backed room with guest usernames and paint one compact vector wall together; invite links contain no private session token.
 2. A child may also explicitly open the camera, tap one character, and capture it.
 3. Local Canvas processing separates the drawing from smooth lighting, page borders, text, and foreground clutter.
-4. Six local ONNX graphs recognize exact face/body pixels and decode an eight-family variable skeleton. A high-resolution private relief preview preserves artwork while semantic-outline-clipped weights prevent one limb from deforming unrelated pixels. It is not presented as full unseen-view reconstruction.
+4. Seven local ONNX graphs isolate the selected figure, recognize exact face/body pixels, estimate depth, and decode an eight-family variable skeleton. A high-resolution private relief preview preserves artwork while semantic-outline-clipped weights prevent one limb from deforming unrelated pixels. It is not presented as full unseen-view reconstruction.
 5. A second visible approval explains that only the isolated drawing—not the live camera or room frame—may go to AniGen, which jointly predicts richer full geometry, an arbitrary skeleton, and skinning weights.
 6. WallAlive loads generated GLBs as Three.js `SkinnedMesh` assets. Unsupported branch actions stay locked instead of inventing a skeleton.
 7. Four original PBR worlds contain raycastable objects and progress-bearing activities: mini movie, firefly hide-and-seek, cooperation spell, and living-gallery curation.
@@ -75,7 +75,7 @@ Each tool uses narrow JSON Schema, nested `additionalProperties: false`, bounded
 - Local target-aware drawing isolation with connected components, clutter/border rejection, morphology, and flood fill
 - AniGen `ss_flow_solo` + `slat_flow_auto` through a lazy `@gradio/client` connection
 - Three.js `GLTFLoader`, real `SkinnedMesh` assets, generated-bone actions, lighting, shadow, and 360° interaction
-- Six same-origin ONNX/WASM graphs for nine-part segmentation, high-resolution face parsing, eight-family variable topology, 17-joint pose, and distinct front/back depth
+- Seven same-origin ONNX/WASM graphs for point-prompted target isolation, nine-part segmentation, high-resolution face parsing, eight-family variable topology, 17-joint pose, and distinct front/back depth
 - An 80,486-parameter SketchDepth compact U-Net trained on 6,144 balanced analytic shapes and selected without opening its 768-example sealed test
 - Identity-preserving sketch-to-render conditioning + local TripoSR + WallAlive variable-graph skinning for the exact-drawing quota-free neural asset
 - WebXR `immersive-ar` with `hit-test`
