@@ -31,12 +31,13 @@ test("server-renders the WallAlive product shell and security headers", async ()
   assert.match(html, /Draw it/);
   assert.match(html, /Wake it/);
   assert.match(html, /START CAMERA/);
-  assert.match(html, /PLAY JUDGE DEMO/);
-  assert.match(html, /CAMERA-SAFE BY DESIGN/);
+  assert.match(html, /SEE THE MAGIC/);
+  assert.match(html, /Private by default/);
+  assert.match(html, /CREATOR SHOP/);
   assert.doesNotMatch(html, /codex-preview|react-loading-skeleton|Starter Project|CutRoom/i);
 });
 
-test("registers eight goal-level WebMCP collaboration tools with spatial direction and commerce", async () => {
+test("registers ten goal-level WebMCP collaboration tools with spatial direction and creator commerce", async () => {
   const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
   const expectedTools = [
     "inspect_creative_scene",
@@ -45,14 +46,16 @@ test("registers eight goal-level WebMCP collaboration tools with spatial directi
     "stage_magic_show",
     "direct_live_ensemble",
     "orchestrate_spatial_cinematics",
-    "generate_shopify_merch_pipeline",
+    "recommend_creator_products",
+    "stage_shopify_creator_drop",
+    "inspect_creator_drop",
     "list_collaboration_history",
   ];
 
   for (const tool of expectedTools) assert.match(page, new RegExp(`name: ["']${tool}["']`));
 
   const registeredNames = [...page.matchAll(/name: ["']([^"']+)["']/g)].map((match) => match[1]);
-  assert.equal(registeredNames.filter((name) => expectedTools.includes(name)).length, 8);
+  assert.equal(registeredNames.filter((name) => expectedTools.includes(name)).length, 10);
   assert.equal(registeredNames.some((name) => /camera|capture|upload/.test(name)), false);
   assert.match(page, /document\.modelContext/);
   assert.match(page, /registerTool\(tool, \{ signal: controller\.signal \}\)/);
@@ -79,13 +82,15 @@ test("registers eight goal-level WebMCP collaboration tools with spatial directi
   assert.match(page, /topologyRecognition/);
   assert.match(page, /variable graph decoded from learned centerline, endpoints, and junction fields/);
   assert.match(page, /world: worldRef\.current/);
-  assert.match(page, /DRAW ON WALL/);
+  assert.match(page, /DRAW SOMETHING/);
   assert.match(page, /recognizeDrawingsFromImageUrl\(dataUrl, target, 6\)/);
-  assert.match(page, /COPY PERFECT JUDGE DEMO PROMPT/);
+  assert.match(page, /Try the full human \+ agent story/);
   assert.match(page, /cyberpunk-neon/);
-  assert.match(page, /SHOPIFY <span>MERCH/);
-  assert.match(page, /OPEN SAFE MOCK CHECKOUT/);
-  assert.match(page, /No address, card, order, or Shopify account/);
+  assert.match(page, /CREATOR SHOP/);
+  assert.match(page, /I’M AN ADULT · APPROVE EXPORT/);
+  assert.match(page, /Nothing is published, purchased, or sent to Shopify/);
+  assert.match(page, /buildShopifyProductsCsv/);
+  assert.match(page, /buildShopifyStoreBlueprint/);
   assert.match(page, /practices sequencing and cooperation/);
   assert.match(page, /learningGoal/);
   assert.match(page, /stagedBy/);
@@ -94,7 +99,7 @@ test("registers eight goal-level WebMCP collaboration tools with spatial directi
   assert.match(page, /LEARNING LOOP/);
 });
 
-test("keeps submission claims aligned with the shipped eight-tool educational loop", async () => {
+test("keeps submission claims aligned with the shipped ten-tool educational and creator-commerce loops", async () => {
   const files = await Promise.all([
     readFile(new URL("../README.md", import.meta.url), "utf8"),
     readFile(new URL("../docs/DEVPOST_SUBMISSION.md", import.meta.url), "utf8"),
@@ -104,7 +109,7 @@ test("keeps submission claims aligned with the shipped eight-tool educational lo
   ]);
   const claims = files.join("\n");
   assert.doesNotMatch(claims, /(?:Six|six) (?:goal-level WebMCP|imperative) tools/);
-  assert.match(claims, /Eight goal-level WebMCP tools/);
+  assert.match(claims, /Ten goal-level WebMCP tools/);
   assert.match(claims, /Imagine.*Sequence.*Perform.*Reflect/);
   assert.match(claims, /not measured learning (?:gains|claims|outcomes)/i);
   assert.doesNotMatch(claims, /art therapy/i);

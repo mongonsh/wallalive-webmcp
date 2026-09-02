@@ -2,6 +2,7 @@
 "use client";
 
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { CSSProperties } from "react";
 import type { ARStageHandle, ARWorld, CameraPreset, CharacterAction, LightingMood } from "./components/ARStage";
 import { DrawingWall } from "./components/DrawingWall";
 import { createAniGenDemoDrawing, createDemoDoodle, POSE_SKELETON_EDGES, selectAnimatableRigParts, type CaptureTarget, type DrawingExtraction, type SemanticPart, type SemanticPartKind, type SemanticSide } from "./lib/drawing";
@@ -10,6 +11,21 @@ import { recognizeDrawingParts, recognizeDrawingsFromImageUrl, recognizeDrawings
 import { createBundledAniGenAsset, disposeNeuralAsset, generateAniGenAsset, isAniGenUnavailableError, type NeuralAsset, type NeuralProgress } from "./lib/anigen";
 import { assessReconstructionReadiness } from "./lib/character-quality";
 import type { RiggedAssetInfo } from "./lib/rigged-model";
+import {
+  CREATOR_PRODUCT_IDS,
+  buildCreatorHandoff,
+  buildShopifyProductsCsv,
+  buildShopifyStoreBlueprint,
+  recommendCreatorProducts,
+  stageCreatorDrop as buildCreatorDrop,
+  type ArtworkCommerceProfile,
+  type CreatorAudience,
+  type CreatorDrop,
+  type CreatorGoal,
+  type CreatorProductId,
+  type CreatorRecommendation,
+  type CreatorVibe,
+} from "./lib/creator-commerce";
 
 const ARStage = lazy(() => import("./components/ARStage").then((module) => ({ default: module.ARStage })));
 
@@ -41,8 +57,6 @@ type Activity = {
 };
 
 type PendingUpload = { url: string; fileName: string };
-type MerchProduct = "t-shirt" | "ceramic-mug";
-type MerchPipeline = { product: MerchProduct; title: string; status: "mockup-ready"; createdAt: string };
 
 type ShowMove = { characterIndex: number; action: CharacterAction };
 type ShowBeat = { caption: string; durationMs: number; world?: WorldId; moves: ShowMove[] };
@@ -96,7 +110,9 @@ const toolNames = [
   ["stage_magic_show", "STAGE"],
   ["direct_live_ensemble", "LIVE"],
   ["orchestrate_spatial_cinematics", "LIVE"],
-  ["generate_shopify_merch_pipeline", "COMMERCE"],
+  ["recommend_creator_products", "ADVISE"],
+  ["stage_shopify_creator_drop", "STAGE"],
+  ["inspect_creator_drop", "READ"],
   ["list_collaboration_history", "READ"],
 ] as const;
 
@@ -210,8 +226,12 @@ export default function Home() {
   const [showPlaying, setShowPlaying] = useState(false);
   const [lightingMood, setLightingMood] = useState<LightingMood>("sunset-warm");
   const [cameraPreset, setCameraPreset] = useState<CameraPreset>("cinematic-orbit");
-  const [merchPipeline, setMerchPipeline] = useState<MerchPipeline | null>(null);
-  const [mockCheckoutOpen, setMockCheckoutOpen] = useState(false);
+  const [creatorAudience, setCreatorAudience] = useState<CreatorAudience>("family");
+  const [creatorGoal, setCreatorGoal] = useState<CreatorGoal>("keepsake");
+  const [creatorVibe, setCreatorVibe] = useState<CreatorVibe>("sunny");
+  const [creatorRecommendations, setCreatorRecommendations] = useState<CreatorRecommendation[]>([]);
+  const [creatorDrop, setCreatorDrop] = useState<CreatorDrop | null>(null);
+  const [adultExportApproved, setAdultExportApproved] = useState(false);
 
   const record = useCallback((actor: Actor, action: string, detail: string, toolName?: string) => {
     const item: Activity = { id: makeId(), time: timeLabel(), actor, action, detail, toolName };
@@ -592,42 +612,131 @@ export default function Home() {
     };
   }, [animateCharacter]);
 
-  const generateShopifyMerchPipeline = useCallback((input: Record<string, unknown>, actor: Actor = "BROWSER AGENT") => {
-    if (!captureRef.current) throw new Error("Approve a drawing before generating merchandise.");
-    const product = stringValue(input.productType, "t-shirt", 24) as MerchProduct;
-    if (product !== "t-shirt" && product !== "ceramic-mug") throw new Error("productType must be t-shirt or ceramic-mug.");
-    const pipeline: MerchPipeline = {
-      product,
-      title: stringValue(input.productTitle, `${characterRef.current.name || "My Living Art"} Studio Edition`, 64),
-      status: "mockup-ready",
-      createdAt: new Date().toISOString(),
+  const getArtworkCommerceProfile = useCallback((): ArtworkCommerceProfile => {
+    const current = captureRef.current;
+    if (!current) throw new Error("Approve a drawing before building a creator collection.");
+    const figures = captureEnsembleRef.current.length ? captureEnsembleRef.current : [current];
+    const movableParts = figures.reduce((sum, figure) => sum + selectAnimatableRigParts(figure.rig, {
+      poseApplicable: Boolean(figure.poseRecognition?.applicable),
+      topologyApplicable: Boolean(figure.topologyRecognition?.applicable),
+    }).length, 0);
+    return {
+      characterName: characterRef.current.name || "My Drawing",
+      figureCount: figures.length,
+      aspectRatio: current.analysis.aspectRatio,
+      coveragePercent: current.analysis.coveragePercent,
+      edgeEnergy: current.analysis.edgeEnergy,
+      dominantColor: current.analysis.dominantColor,
+      secondaryColor: current.analysis.secondaryColor,
+      movableParts,
+      semanticParts: [...new Set(figures.flatMap((figure) => figure.rig.detectedKinds))],
+      hasRigged3D: characterRef.current.created,
+      activeWorld: worldRef.current,
+      storyTitle: characterRef.current.storyTitle,
     };
-    setMerchPipeline(pipeline);
-    setMockCheckoutOpen(false);
+  }, []);
+
+  const recommendProductsForArtwork = useCallback((input: Record<string, unknown> = {}, actor: Actor = "BROWSER AGENT") => {
+    const audience = stringValue(input.audience, creatorAudience, 20) as CreatorAudience;
+    const goal = stringValue(input.goal, creatorGoal, 20) as CreatorGoal;
+    if (!["family", "classroom", "community"].includes(audience)) throw new Error("Unknown audience.");
+    if (!["keepsake", "fundraiser", "portfolio"].includes(goal)) throw new Error("Unknown creator goal.");
+    const profile = getArtworkCommerceProfile();
+    const recommendations = recommendCreatorProducts(profile, goal, audience);
+    setCreatorAudience(audience);
+    setCreatorGoal(goal);
+    setCreatorRecommendations(recommendations);
+    setCreatorDrop(null);
+    setAdultExportApproved(false);
     setInspectorOpen(true);
     setPanelTab("commerce");
-    setAgentLine("The agent prepared a print-safe product concept from the approved artwork.");
-    setNotice("Agent Commerce Pipeline Connected · Shopify merchandise mockup ready.");
-    record(actor, "Generated Shopify merchandise pipeline", `${product} · ${pipeline.title} · mock checkout only.`, actor === "BROWSER AGENT" ? "generate_shopify_merch_pipeline" : undefined);
+    setAgentLine(`I matched ${profile.characterName} to products that preserve its silhouette and detail.`);
+    setNotice("Creator Shop is ready. Review the product reasoning, then ask the agent to stage a drop.");
+    record(actor, "Recommended a creator collection", `${recommendations.slice(0, 3).map((item) => item.label).join(" · ")} · based on approved artwork evidence.`, actor === "BROWSER AGENT" ? "recommend_creator_products" : undefined);
     return {
-      pipeline,
-      storefront: "Shopify mock storefront handoff",
-      source: "human-approved isolated artwork",
-      printLayout: { background: "transparent", fit: "centered", safeAreaPercent: 82 },
-      checkout: "visible mock checkout; no purchase was made",
-      visibleSidebarUpdated: true,
+      artwork: { ...profile, dominantColor: profile.dominantColor, secondaryColor: profile.secondaryColor },
+      recommendations,
+      visibleCreatorShopUpdated: true,
+      nextAgentSteps: ["Ask the human which products and story feel right", "Stage a Shopify creator drop for review"],
+      cameraDataIncluded: false,
+      imagePixelsIncluded: false,
     };
-  }, [record]);
+  }, [creatorAudience, creatorGoal, getArtworkCommerceProfile, record]);
 
-  const openMerchStudio = useCallback((product: MerchProduct = merchPipeline?.product ?? "t-shirt") => {
+  const stageShopifyCreatorDrop = useCallback((input: Record<string, unknown> = {}, actor: Actor = "BROWSER AGENT") => {
+    const audience = stringValue(input.audience, creatorAudience, 20) as CreatorAudience;
+    const goal = stringValue(input.goal, creatorGoal, 20) as CreatorGoal;
+    const vibe = stringValue(input.vibe, creatorVibe, 20) as CreatorVibe;
+    const rawProducts = Array.isArray(input.productIds) ? input.productIds : [];
+    const productIds = rawProducts.filter((item): item is CreatorProductId => typeof item === "string" && CREATOR_PRODUCT_IDS.includes(item as CreatorProductId));
+    const drop = buildCreatorDrop({
+      profile: getArtworkCommerceProfile(),
+      dropName: stringValue(input.dropName, "", 72),
+      story: stringValue(input.story, "", 240),
+      audience,
+      goal,
+      vibe,
+      productIds,
+    });
+    setCreatorAudience(audience);
+    setCreatorGoal(goal);
+    setCreatorVibe(vibe);
+    setCreatorRecommendations(recommendCreatorProducts(getArtworkCommerceProfile(), goal, audience));
+    setCreatorDrop(drop);
+    setAdultExportApproved(false);
+    setInspectorOpen(true);
+    setPanelTab("commerce");
+    setAgentLine(`The Creator Drop “${drop.name}” is staged—not published. An adult decides whether to export it.`);
+    setNotice("Creator Drop staged for review. Nothing was published to Shopify.");
+    record(actor, "Staged a Shopify Creator Drop", `${drop.name} · ${drop.products.length} draft products · adult approval required.`, actor === "BROWSER AGENT" ? "stage_shopify_creator_drop" : undefined);
+    return {
+      drop,
+      visibleCreatorShopUpdated: true,
+      requiresHumanApproval: true,
+      humanOnlyNextAction: "Approve and download the Shopify kit",
+      publishesToShopify: false,
+      createsOrders: false,
+      imagePixelsIncluded: false,
+    };
+  }, [creatorAudience, creatorGoal, creatorVibe, getArtworkCommerceProfile, record]);
+
+  const inspectCreatorDrop = useCallback(() => ({
+    drop: creatorDrop,
+    recommendations: creatorRecommendations,
+    approval: { required: true, granted: adultExportApproved },
+    handoff: creatorDrop ? "Draft CSV + storefront blueprint + adult checklist" : null,
+    shopifyNativeNextStep: "After adult import and review, Shopify's storefront WebMCP can search the live catalog and manage a shopper-confirmed cart.",
+    publishesToShopify: false,
+    createsOrders: false,
+    imagePixelsIncluded: false,
+  }), [adultExportApproved, creatorDrop, creatorRecommendations]);
+
+  const openCreatorStudio = useCallback(() => {
     setInspectorOpen(true);
     setPanelTab("commerce");
     if (!captureRef.current) {
-      setNotice("Add a drawing first. The Shopify studio is open and waiting for approved artwork.");
+      setNotice("Start with a drawing. The Creator Shop will unlock after the artwork is approved.");
       return;
     }
-    generateShopifyMerchPipeline({ productType: product }, "CHILD");
-  }, [generateShopifyMerchPipeline, merchPipeline?.product]);
+    if (!creatorRecommendations.length) recommendProductsForArtwork({}, "CHILD");
+  }, [creatorRecommendations.length, recommendProductsForArtwork]);
+
+  const downloadTextFile = useCallback((fileName: string, contents: string, type: string) => {
+    const url = URL.createObjectURL(new Blob([contents], { type }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = fileName;
+    link.click();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }, []);
+
+  const approveCreatorExport = useCallback(() => {
+    if (!creatorDrop) return;
+    setAdultExportApproved(true);
+    setCreatorDrop({ ...creatorDrop, status: "approved-for-export" });
+    setNotice("Adult approval recorded in this tab. The Shopify draft files are ready to download.");
+    record("CHILD", "Approved the Creator Drop export", `${creatorDrop.name} may be downloaded as draft files; nothing was published.`);
+  }, [creatorDrop, record]);
 
   const placeCharacter = useCallback((x: number, y: number, surface: CharacterState["surface"], scale: number, actor: Actor, toolName?: string) => {
     const current = characterRef.current;
@@ -1093,28 +1202,63 @@ export default function Home() {
         },
       },
       {
-        name: "generate_shopify_merch_pipeline",
-        title: "Generate a Shopify merch concept",
-        description: "Turn the approved isolated drawing into a visible Shopify-ready product mockup and print layout. Opens a mock checkout but never places an order or charges money.",
+        name: "recommend_creator_products",
+        title: "Recommend products for this artwork",
+        description: "Rank product formats using the approved artwork's figure count, silhouette, detail, colors, and goal. Opens visible recommendations but never publishes, buys, or returns image pixels.",
         inputSchema: {
           ...base,
           properties: {
-            productType: { type: "string", enum: ["t-shirt", "ceramic-mug"], description: "Product shown in the visible merchandise mockup." },
-            productTitle: { type: "string", minLength: 1, maxLength: 64, description: "Short storefront title for the merchandise concept." },
+            audience: { type: "string", enum: ["family", "classroom", "community"], description: "Who the reviewed collection is for." },
+            goal: { type: "string", enum: ["keepsake", "fundraiser", "portfolio"], description: "What the creator wants the collection to achieve." },
           },
-          required: ["productType"],
         },
         annotations: { readOnlyHint: false, untrustedContentHint: true },
         execute: async (input, options) => {
           const signal = executionSignal(options);
           try {
             guard(signal);
-            const result = generateShopifyMerchPipeline(input);
+            const result = recommendProductsForArtwork(input);
             await afterVisiblePaint();
             guard(signal);
             return ok(result);
           } catch (error) { return fail(error); }
         },
+      },
+      {
+        name: "stage_shopify_creator_drop",
+        title: "Stage a Shopify Creator Drop",
+        description: "Create a visible draft collection with product copy, print placement, palette, pricing, and storefront sections. It waits for adult export approval and cannot publish or place orders.",
+        inputSchema: {
+          ...base,
+          properties: {
+            dropName: { type: "string", minLength: 1, maxLength: 72, description: "Collection name shown in the review panel." },
+            story: { type: "string", minLength: 1, maxLength: 240, description: "Short creator story for the collection page." },
+            audience: { type: "string", enum: ["family", "classroom", "community"], description: "Who the reviewed collection is for." },
+            goal: { type: "string", enum: ["keepsake", "fundraiser", "portfolio"], description: "Collection purpose used for recommendations." },
+            vibe: { type: "string", enum: ["sunny", "storybook", "bold", "museum"], description: "Visual direction for the storefront blueprint." },
+            productIds: { type: "array", minItems: 1, maxItems: 4, items: { type: "string", enum: CREATOR_PRODUCT_IDS }, description: "Draft products to include." },
+          },
+          required: ["dropName", "story", "audience", "goal", "vibe"],
+        },
+        annotations: { readOnlyHint: false, untrustedContentHint: true },
+        execute: async (input, options) => {
+          const signal = executionSignal(options);
+          try {
+            guard(signal);
+            const result = stageShopifyCreatorDrop(input);
+            await afterVisiblePaint();
+            guard(signal);
+            return ok(result);
+          } catch (error) { return fail(error); }
+        },
+      },
+      {
+        name: "inspect_creator_drop",
+        title: "Inspect the staged Creator Drop",
+        description: "Read the visible draft collection, recommendation evidence, approval status, and Shopify handoff. Returns no camera frames, artwork pixels, payment data, or order data.",
+        inputSchema: { ...base, properties: {} },
+        annotations: { readOnlyHint: true, untrustedContentHint: true },
+        execute: async (_input, options) => { const signal = executionSignal(options); guard(signal); return ok(inspectCreatorDrop()); },
       },
       {
         name: "list_collaboration_history",
@@ -1131,7 +1275,7 @@ export default function Home() {
       setNotice(`${tools.length} WebMCP tools are ready. Camera capture remains human-only.`);
     }).catch(() => setWebMcpReady(false));
     return () => controller.abort();
-  }, [commitNeuralAsset, createCharacter, currentCharacterCapabilities, directEnsembleBeat, generateShopifyMerchPipeline, inspectCreativeScene, orchestrateSpatialCinematics, parseShowMoves, requestNeuralConsent, stageMagicShow]);
+  }, [commitNeuralAsset, createCharacter, currentCharacterCapabilities, directEnsembleBeat, inspectCreativeScene, inspectCreatorDrop, orchestrateSpatialCinematics, parseShowMoves, recommendProductsForArtwork, requestNeuralConsent, stageMagicShow, stageShopifyCreatorDrop]);
 
   const runMagicDemo = useCallback(async () => {
     if (demoRunning) return;
@@ -1145,7 +1289,7 @@ export default function Home() {
       commitNeuralAsset(bundledAsset);
       externalUploadApprovedRef.current = false;
       setNeuralProgress({ phase: "ready", progress: 1, message: "Verified neural sketch rig loaded." });
-      setAgentLine("The guided demo is loading a verified rig. A real agent can inspect and direct it through the eight WebMCP tools.");
+      setAgentLine(`The guided demo is loading a verified rig. A real agent can inspect, direct, and stage a Creator Drop through ${toolNames.length} WebMCP tools.`);
       await wait(450);
       createCharacter({ name: "Pip", personality: "brave on the outside, shy on the inside", accent: "#ce919f", inflation: 1 }, "WALLALIVE", "judge_demo");
       placeCharacter(.68, .53, "wall", 1, "WALLALIVE");
@@ -1418,28 +1562,37 @@ export default function Home() {
     <main className="alive-shell">
       <header className="alive-header">
         <a className="alive-brand" href="#play"><span>WALL</span>ALIVE<i>●</i></a>
-        <div className="mini-steps" aria-label="Three steps"><span className={stepIndex >= 1 ? "done" : "active"}>1 Scan</span><span className={stepIndex >= 2 ? "done" : ""}>2 Check</span><span className={stepIndex >= 3 ? "done" : ""}>3 Play</span></div>
+        <div className="mini-steps" aria-label="Creative journey"><span className={stepIndex >= 1 ? "done" : "active"}>Make</span><i>→</i><span className={stepIndex >= 2 ? "done" : ""}>Wake</span><i>→</i><span className={stepIndex >= 3 ? "done" : ""}>Share</span></div>
         <div className="header-actions">
-          <div className={`ready-pill ${webMcpReady ? "is-ready" : ""}`}><i /> {webMcpReady ? `${toolNames.length} WEBMCP TOOLS` : "INTERACTIVE DEMO"}</div>
-          <button className="merch-toggle" onClick={() => openMerchStudio()} aria-label="Open Shopify merchandise mockup studio">SHOPIFY <span>MERCH</span></button>
-          <button className="inspector-toggle" onClick={() => setInspectorOpen(true)}>WEBMCP</button>
-          <button className="judge-demo" onClick={runMagicDemo} disabled={demoRunning}>{demoRunning ? "PLAYING…" : "PLAY JUDGE DEMO"}</button>
+          <div className={`ready-pill ${webMcpReady ? "is-ready" : ""}`}><i /> {webMcpReady ? "AGENT READY" : "DEMO READY"}</div>
+          <button className="merch-toggle" onClick={openCreatorStudio} aria-label="Open Creator Shop">CREATOR SHOP</button>
+          <button className="inspector-toggle" onClick={() => { setInspectorOpen(true); setPanelTab("agent"); }}>HOW AGENTS HELP</button>
+          <button className="judge-demo" onClick={runMagicDemo} disabled={demoRunning}>{demoRunning ? "WAKING…" : "SEE THE MAGIC"}</button>
         </div>
       </header>
-      <button className="judge-prompt-banner" onClick={copyDemoPrompt} aria-label="Copy Perfect Judge Demo Prompt">
-        <span>JUDGE SHORTCUT</span>
-        <b>COPY PERFECT JUDGE DEMO PROMPT</b>
-        <small>{perfectJudgePrompt}</small>
-        <i>⧉</i>
+      <button className="judge-prompt-banner" onClick={copyDemoPrompt} aria-label="Copy the agent demo prompt">
+        <span>FOR JUDGES</span>
+        <b>Try the full human + agent story</b>
+        <small>Copy one prompt that stages a safe, capability-aware performance.</small>
+        <i>Copy ↗</i>
       </button>
 
       <section className="alive-layout" id="play">
         <aside className="steps-panel">
-          <p className="kicker">THE MAGIC LOOP</p>
-          <ol>
-            <li className={stepIndex >= 1 ? "done" : "active"}><span>1</span><div><strong>Scan</strong><small>Human opens camera</small></div></li>
-            <li className={stepIndex >= 3 ? "done" : stepIndex === 2 ? "active" : ""}><span>2</span><div><strong>Check</strong><small>Verify clean figures</small></div></li>
-            <li className={stepIndex === 3 ? "active" : ""}><span>3</span><div><strong>Play</strong><small>Agent directs movement</small></div></li>
+          <p className="kicker">START HERE</p>
+          <h2>Make a new friend.</h2>
+          <p className="start-copy">Draw in the studio, choose a picture, or point the camera at artwork on a wall.</p>
+          <input ref={uploadRef} hidden type="file" accept="image/*" onChange={uploadDrawing} />
+          <div className="start-choices">
+            <button onClick={() => setDrawingWallOpen(true)}><i>✦</i><span><b>Draw something</b><small>Full paint studio</small></span><em>→</em></button>
+            <button onClick={() => uploadRef.current?.click()}><i>▧</i><span><b>Use a picture</b><small>Paper or digital art</small></span><em>→</em></button>
+            <button onClick={cameraState === "active" ? captureDrawing : startCamera}><i>◉</i><span><b>{cameraState === "active" ? "Capture now" : "Find wall art"}</b><small>Camera stays private</small></span><em>→</em></button>
+          </div>
+          <button className="demo-doodle" onClick={loadDemoDrawing}>Try the friendly demo <span>＋</span></button>
+          <ol className="journey-trail">
+            <li className={stepIndex >= 1 ? "done" : "active"}><span>1</span><div><strong>Make</strong><small>Choose an artwork</small></div></li>
+            <li className={stepIndex >= 3 ? "done" : stepIndex === 2 ? "active" : ""}><span>2</span><div><strong>Wake</strong><small>Check and animate</small></div></li>
+            <li className={stepIndex === 3 ? "active" : ""}><span>3</span><div><strong>Share</strong><small>Story or Creator Drop</small></div></li>
           </ol>
 
           {capture ? (
@@ -1469,24 +1622,20 @@ export default function Home() {
           ) : null}
 
           <div className="privacy-card">
-            <div><b>CAMERA-SAFE BY DESIGN</b><span>◆</span></div>
-            <p>Drawing-aware isolation and character checks stay on-device. Real 3D sends only the reviewed cutout after a second visible approval—never live frames.</p>
+            <div><b>Private by default</b><span>✓</span></div>
+            <p>The agent never sees camera frames. You approve any AI sculpt or store export.</p>
           </div>
-          <input ref={uploadRef} hidden type="file" accept="image/*" onChange={uploadDrawing} />
-          <button className="demo-doodle wall-drawing-link" onClick={() => setDrawingWallOpen(true)}>OPEN THE DRAWING WALL <span>✦</span></button>
-          <button className="demo-doodle upload-drawing" onClick={() => uploadRef.current?.click()}>UPLOAD A DRAWING PHOTO <span>↥</span></button>
-          <button className="demo-doodle" onClick={loadDemoDrawing}>NO CAMERA? TRY A DEMO DOODLE <span>＋</span></button>
         </aside>
 
         <section className="magic-stage">
           <div className="stage-copy">
-            <div><p className="kicker">CREATIVE LEARNING · HOME + CLASSROOM</p><h1>Draw it.<br /><em>Wake it.</em></h1><p className="stage-purpose">Turn an idea into a sequenced story, a shared performance, and something the child can explain.</p></div>
+            <div><p className="kicker">A CREATIVE PLAYGROUND FOR EVERY AGE</p><h1>Your drawing has<br /><em>somewhere to go.</em></h1><p className="stage-purpose">Make a character, bring it into a real 3D world, then tell a story or build a tiny creator collection—together with an agent.</p></div>
             <div className="stage-ctas">
               {immersiveAR && character.created ? <button className="ar-button" onClick={enterAR}>ENTER REAL AR <span>◎</span></button> : null}
               {cameraState === "active" ? <button className="stop-camera" onClick={stopCamera}>STOP CAMERA</button> : null}
-              {cameraState !== "active" && step === "ready" ? <button className="upload-camera" onClick={() => uploadRef.current?.click()}>UPLOAD PHOTO</button> : null}
-              {cameraState !== "active" ? <button className="draw-wall-cta" onClick={() => setDrawingWallOpen(true)}>DRAW ON WALL <span>✦</span></button> : null}
-              {capture ? <button className="merch-cta" onClick={() => openMerchStudio()}>SHOPIFY MOCKUPS <span>↗</span></button> : null}
+              {cameraState !== "active" && step === "ready" ? <button className="upload-camera" onClick={() => uploadRef.current?.click()}>USE A PICTURE</button> : null}
+              {cameraState !== "active" && !capture ? <button className="draw-wall-cta" onClick={() => setDrawingWallOpen(true)}>DRAW SOMETHING <span>✦</span></button> : null}
+              {capture ? <button className="merch-cta" onClick={openCreatorStudio}>BUILD A CREATOR DROP <span>↗</span></button> : null}
               <button className="primary-camera" onClick={primaryButton.action} disabled={cameraState === "requesting" || neuralBusy}>{cameraState === "requesting" ? "OPENING…" : neuralBusy ? "GENERATING…" : primaryButton.label}<span>↗</span></button>
             </div>
           </div>
@@ -1544,17 +1693,17 @@ export default function Home() {
             {cameraState === "denied" || cameraState === "unavailable" ? <div className="camera-message"><b>CAMERA OPTIONAL</b><p>The demo doodle still proves the complete WebMCP and 3D workflow.</p></div> : null}
           </div>
 
-          <div className="world-switcher" aria-label="Choose a 3D world"><div><span>3D WORLDS</span><small>{worlds.find((item) => item.id === world)?.label}</small></div>{worlds.map((item) => <button key={item.id} className={world === item.id ? "active" : ""} onClick={() => changeWorld(item.id, "CHILD")}><i>{item.id === "studio" ? "⌂" : item.id === "storybook" ? "♜" : item.id === "wizard" ? "✦" : "◉"}</i>{item.short}</button>)}</div>
+          {character.created ? <div className="world-switcher" aria-label="Choose a 3D world"><div><span>CHOOSE A WORLD</span><small>{worlds.find((item) => item.id === world)?.label}</small></div>{worlds.map((item) => <button key={item.id} className={world === item.id ? "active" : ""} onClick={() => changeWorld(item.id, "CHILD")}><i>{item.id === "studio" ? "⌂" : item.id === "storybook" ? "♜" : item.id === "wizard" ? "✦" : "◉"}</i>{item.short}</button>)}</div> : null}
 
-          <div className="cinematic-switcher">
+          {character.created ? <div className="cinematic-switcher">
             <div><span>LIGHT</span>{lightingMoods.map((mood) => <button key={mood} className={lightingMood === mood ? "active" : ""} onClick={() => { lightingMoodRef.current = mood; setLightingMood(mood); record("CHILD", "Changed cinematic lighting", mood); }}>{mood.replace("-", " ")}</button>)}</div>
             <div><span>CAMERA</span>{cameraPresets.map((preset) => <button key={preset} className={cameraPreset === preset ? "active" : ""} onClick={() => { cameraPresetRef.current = preset; setCameraPreset(preset); record("CHILD", "Changed camera preset", preset); }}>{preset.replaceAll("-", " ")}</button>)}</div>
-          </div>
+          </div> : null}
 
-          <div className="action-tray">
+          {character.created ? <div className="action-tray">
             <div><span>CHARACTER ACTIONS</span><small>{character.created ? `${character.name.toUpperCase()} · ${character.personality.toUpperCase()}` : "WAKE A DRAWING TO PLAY"}</small></div>
             {actions.map((item) => <button key={item.action} disabled={!character.created || showPlaying} className={character.action === item.action ? "active" : ""} onClick={() => animateCharacter(item.action, "CHILD")}><i>{item.glyph}</i>{item.label}</button>)}
-          </div>
+          </div> : null}
           <p className="placement-tip">{character.created ? neuralAsset ? "Drag for 360° · Generated back · Move through the perspective world" : "Drag for 360° · Filled backs · Every figure moves on its own rig" : capture ? "Check the cutout, then choose instant private 3D or full AI sculpt" : "Photograph a clear figure—uncertain recognition is blocked before 3D"}</p>
           <div className="learning-loop" aria-label="WallAlive learning loop"><b>LEARNING LOOP</b><span>Imagine</span><i>→</i><span>Sequence</span><i>→</i><span>Perform</span><i>→</i><span>Reflect</span></div>
         </section>
@@ -1586,20 +1735,59 @@ export default function Home() {
 
           {panelTab === "commerce" ? (
             <div className="panel-body commerce-panel">
-              <p className="kicker">AGENT COMMERCE PIPELINE CONNECTED</p>
-              <h2>{merchPipeline ? merchPipeline.title : "Living art, ready for a shelf."}</h2>
-              <p>{merchPipeline ? "A transparent print layout made from the approved artwork—ready for a safe storefront preview." : capture ? "Choose a product to build the visible mockup." : "Add and approve a drawing, then return here for t-shirt and mug mockups."}</p>
-              <div className="merch-products" aria-label="Choose merchandise mockup">
-                <button className={merchPipeline?.product !== "ceramic-mug" ? "active" : ""} disabled={!capture} onClick={() => openMerchStudio("t-shirt")}><span>◫</span>T-SHIRT</button>
-                <button className={merchPipeline?.product === "ceramic-mug" ? "active" : ""} disabled={!capture} onClick={() => openMerchStudio("ceramic-mug")}><span>◒</span>MUG</button>
-              </div>
-              <div className={`merch-mockup ${merchPipeline?.product === "ceramic-mug" ? "is-mug" : "is-shirt"}`}>
-                <div>{capture ? <img src={capture.textureUrl} alt="Approved drawing printed on merchandise" /> : <span>YOUR ART</span>}</div>
-                <small>{merchPipeline?.product === "ceramic-mug" ? "CERAMIC MUG" : "PREMIUM WHITE T-SHIRT"}</small>
-              </div>
-              <div className="commerce-steps"><span>1 ARTWORK</span><i>→</i><span>2 PRINT LAYOUT</span><i>→</i><span>3 SHOPIFY</span></div>
-              <button className="shopify-checkout" disabled={!merchPipeline} onClick={() => { setMockCheckoutOpen(true); setNotice("Safe mock checkout opened. It contains no payment fields and cannot place an order."); record("CHILD", "Opened safe mock Shopify checkout", "Demo only · no payment fields · no purchase was made."); }}>OPEN SAFE MOCK CHECKOUT <span>↗</span></button>
-              <small className="commerce-disclaimer">DEMO CHECKOUT · NO CHARGE · HUMAN CONFIRMATION REQUIRED</small>
+              <p className="kicker">CREATOR SHOP · SHOPIFY DRAFT STUDIO</p>
+              <h2>{creatorDrop?.name ?? "Turn imagination into a tiny collection."}</h2>
+              <p>{capture ? "The agent studies the approved artwork, explains which products fit, and designs a draft storefront. An adult owns the final export." : "Approve a drawing first. Then the Creator Shop can recommend products without exposing camera frames or image pixels to the agent."}</p>
+
+              {capture ? <>
+                <div className="creator-intent" aria-label="Creator collection direction">
+                  <label><span>For</span><select value={creatorAudience} onChange={(event) => { setCreatorAudience(event.target.value as CreatorAudience); setCreatorDrop(null); }}><option value="family">Family</option><option value="classroom">Classroom</option><option value="community">Community</option></select></label>
+                  <label><span>Goal</span><select value={creatorGoal} onChange={(event) => { setCreatorGoal(event.target.value as CreatorGoal); setCreatorDrop(null); }}><option value="keepsake">Keepsake</option><option value="fundraiser">Fundraiser</option><option value="portfolio">Portfolio</option></select></label>
+                  <label><span>Vibe</span><select value={creatorVibe} onChange={(event) => { setCreatorVibe(event.target.value as CreatorVibe); setCreatorDrop(null); }}><option value="sunny">Sunny</option><option value="storybook">Storybook</option><option value="bold">Bold</option><option value="museum">Museum</option></select></label>
+                </div>
+
+                {!creatorRecommendations.length ? <button className="creator-agent-action" onClick={() => recommendProductsForArtwork({ audience: creatorAudience, goal: creatorGoal }, "CHILD")}><span>✦</span><b>Ask the agent what fits</b><i>→</i></button> : null}
+
+                {creatorRecommendations.length ? <div className="recommendation-shelf" aria-label="Agent product recommendations">
+                  {creatorRecommendations.slice(0, 4).map((product, index) => <article key={product.id} className={index === 0 ? "top-pick" : ""}>
+                    <div><i>{product.glyph}</i><span>{index === 0 ? "BEST FIT" : `${product.score}% FIT`}</span></div>
+                    <h3>{product.label}</h3>
+                    <p>{product.reason}</p>
+                    <small>${product.price} draft price · {product.placement}</small>
+                  </article>)}
+                </div> : null}
+
+                {creatorRecommendations.length && !creatorDrop ? <button className="creator-agent-action is-primary" onClick={() => stageShopifyCreatorDrop({
+                  audience: creatorAudience,
+                  goal: creatorGoal,
+                  vibe: creatorVibe,
+                  dropName: `${character.name || "My Drawing"}’s Little World`,
+                  story: `${character.name || "A new friend"} began as a drawing and learned how to move, tell a story, and step into a tiny collection.`,
+                  productIds: creatorRecommendations.slice(0, 3).map((product) => product.id),
+                }, "CHILD")}><span>✦</span><b>Build my Creator Drop</b><i>→</i></button> : null}
+
+                {creatorDrop ? <section className={`creator-store-preview vibe-${creatorDrop.vibe}`} aria-label="Staged Shopify storefront preview">
+                  <div className="store-browser"><i /><i /><i /><span>YOUR SHOPIFY DRAFT</span></div>
+                  <div className="store-hero" style={{ "--store-accent": creatorDrop.palette.accent, "--store-highlight": creatorDrop.palette.highlight } as CSSProperties}>
+                    <div><small>{creatorDrop.storefront.announcement}</small><h3>{creatorDrop.name}</h3><p>{creatorDrop.story}</p><button tabIndex={-1}>{creatorDrop.threeDExperience.enabled ? "EXPLORE THE 3D STORY" : "MEET THE COLLECTION"}</button></div>
+                    <figure>{capture ? <img src={capture.textureUrl} alt="Approved artwork in the staged collection" /> : null}<i>✦</i>{creatorDrop.threeDExperience.enabled ? <b>360° 3D · {creatorDrop.threeDExperience.activeWorld}</b> : null}</figure>
+                  </div>
+                  <div className="store-products">{creatorDrop.products.map((product) => <div key={product.id}><i>{product.glyph}</i><span><b>{product.label}</b><small>${product.price}.00</small></span></div>)}</div>
+                </section> : null}
+
+                {creatorDrop ? <div className="adult-export-boundary">
+                  <div><i>✓</i><span><b>Adult review comes first</b><small>The agent staged drafts only. Nothing is published, purchased, or sent to Shopify.</small></span></div>
+                  {!adultExportApproved ? <button onClick={approveCreatorExport}>I’M AN ADULT · APPROVE EXPORT</button> : <div className="export-files">
+                    <button onClick={() => downloadTextFile("wallalive-products.csv", buildShopifyProductsCsv(creatorDrop), "text/csv;charset=utf-8")}>Products CSV <span>↓</span></button>
+                    <button onClick={() => downloadTextFile("wallalive-store-blueprint.json", buildShopifyStoreBlueprint(creatorDrop), "application/json")}>Store blueprint <span>↓</span></button>
+                    <button onClick={() => downloadTextFile("wallalive-adult-handoff.md", buildCreatorHandoff(creatorDrop), "text/markdown;charset=utf-8")}>Adult checklist <span>↓</span></button>
+                    {capture ? <a href={capture.textureUrl} download="wallalive-print-art.png">Print artwork <span>↓</span></a> : null}
+                    {neuralAsset?.meshUrl ? <a href={neuralAsset.meshUrl} download="wallalive-rigged-character.glb">Rigged 3D model <span>↓</span></a> : null}
+                  </div>}
+                </div> : null}
+
+                <div className="shopify-handoff"><span>WALLALIVE</span><i>→</i><span>DRAFT KIT</span><i>→</i><span>ADULT REVIEW</span><i>→</i><b>SHOPIFY WEBMCP</b></div>
+              </> : <button className="creator-agent-action" onClick={() => setInspectorOpen(false)}><span>✦</span><b>Make a drawing first</b><i>→</i></button>}
             </div>
           ) : null}
 
@@ -1616,18 +1804,9 @@ export default function Home() {
               <div className="history-list">{activity.length ? activity.map((item) => <article key={item.id}><span>{item.time}</span><div><small>{item.actor}</small><b>{item.action}</b><p>{item.detail}</p></div></article>) : <p className="empty-history">The first human or agent action will appear here.</p>}</div>
             </div>
           ) : null}
-          <footer className="agent-footer"><span>CHROME WEBMCP · CHATGPT SITES · SHOPIFY</span><b>THE CHILD DECIDES</b></footer>
+          <footer className="agent-footer"><span>WEBMCP · CHATGPT SITES · SHOPIFY</span><b>HUMANS APPROVE</b></footer>
         </aside>
       </section>
-      {mockCheckoutOpen && merchPipeline ? <div className="mock-checkout-backdrop" role="dialog" aria-modal="true" aria-labelledby="mock-checkout-title">
-        <section className="mock-checkout">
-          <header><div><span>SHOPIFY · SAFE PREVIEW</span><h2 id="mock-checkout-title">No-charge checkout</h2></div><button onClick={() => setMockCheckoutOpen(false)} aria-label="Close mock checkout">×</button></header>
-          <div className="mock-order-line"><div>{capture ? <img src={capture.textureUrl} alt="Approved artwork order preview" /> : null}</div><p><b>{merchPipeline.title}</b><span>{merchPipeline.product === "ceramic-mug" ? "Ceramic mug" : "Premium t-shirt"} · Demo sample</span></p><strong>$0.00</strong></div>
-          <div className="mock-safety"><i>✓</i><p><b>Simulation only</b><span>No address, card, order, or Shopify account is requested or created.</span></p></div>
-          <dl><div><dt>PRINT</dt><dd>Approved transparent artwork · 82% safe area</dd></div><div><dt>PAYMENT</dt><dd>Disabled in this hackathon demo</dd></div><div><dt>TOTAL</dt><dd>$0.00 · no charge</dd></div></dl>
-          <button className="mock-finish" onClick={() => { setMockCheckoutOpen(false); setNotice("Mock checkout closed. Nothing was purchased."); }}>FINISH DEMO · PLACE NO ORDER</button>
-        </section>
-      </div> : null}
       <DrawingWall open={drawingWallOpen} onClose={() => setDrawingWallOpen(false)} onMake3D={processWallDrawing} />
       {pendingUpload ? <div className="paper-picker-backdrop" role="dialog" aria-modal="true" aria-labelledby="paper-picker-title">
         <section className="paper-picker">
