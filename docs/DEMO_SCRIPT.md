@@ -1,82 +1,70 @@
-# WallAlive demo script (2:30 target)
+# WallAlive demo script (2:45 target)
 
-## 0:00–0:18 — Open with undeniable 3D
+## 0:00–0:22 — Two people make one wall
 
-Start on a child’s paper drawing, cut to WallAlive, and press **Play Judge Demo**.
+Open **Draw together**, create a room as `mika`, prepare an invite for `sora`, and show the second browser join from the invite URL. Draw from both windows and hold on the same strokes appearing in each.
 
-**Voiceover:** “Children already imagine their drawings are alive. WallAlive makes that leap visible—and lets a browser agent become the director.”
+**Voiceover:** “A child’s drawing already contains a world. WallAlive lets friends build that world together: guest usernames, one live vector wall, and no camera frames or artwork blobs stored in the room.”
 
-Hold on Pip loading beside the exact paper drawing. Drag to a side and back view, then press **Spin**.
+Show the participant avatars and room code. Do not show session tokens or personal browser chrome.
 
-**Voiceover:** “This is not a cut-out or mirrored extrusion. The exact drawing became a smoothed, watertight 68,326-vertex neural SkinnedMesh with seven active semantic bones, restored front color, and a complete unmarked back.”
+## 0:22–0:48 — Recognition with an honest quality gate
 
-## 0:18–0:42 — Show the drawing path and privacy boundary
+Press **Make it 3D** on a wall containing two clear figures. Show separate cutouts and **Review rig**.
 
-Upload another drawing or open the camera, then hold on the local learned-depth result and the **Generate full 3D** approval card.
+**Voiceover:** “Local drawing models separate the cast, preserve the original face and color, and propose a variable skeleton. If an arm or leg is uncertain, that movement stays locked. The instant private result is an articulated spatial puppet—not a falsely advertised full sculpt.”
 
-**Voiceover:** “A child controls the camera and capture. Six local models preserve face shapes and colors, decode variable bones for eight drawing families, and predict separate front and hidden surfaces. Richer neural 3D requires a GPU, so a second human approval sends only this transparent character—never the live camera or room frame.”
+Show **Choose your quality**. Explain that full unseen-view generation requires separate human approval and a GPU. Use the bundled verified neural asset for the demo so shared GPU capacity cannot interrupt the video.
 
-Open **Privacy** and point to the three human-only gestures. If recording a successful live generation, continue; otherwise return to **Play Judge Demo** so quota cannot interrupt the video.
+## 0:48–1:12 — Prove the WebMCP collaboration
 
-## 0:42–1:02 — Explain WebMCP
+In ChatGPT’s in-app browser, prompt:
 
-Open **Tools**.
+> Inspect our shared room, creative scene, verified character abilities, and current story-world objects. Stage a four-beat cooperation quest, use only supported character actions, and wait for my approval. Do not access the camera, share pixels, publish products, or buy anything.
 
-**Voiceover:** “Ten goal-level WebMCP tools create shared story and creator-commerce loops. The agent reads exact rig abilities and artwork evidence, but there is no camera, pixel, publishing, purchase, or approval tool.”
+Show `inspect_shared_room`, `inspect_character_capabilities`, and `stage_magic_show` results. Hold on participant handles, blocked movements, validated cast roles, and `requiresHumanApproval: true`.
 
-Prompt:
+**Voiceover:** “WebMCP is the control plane. The agent reads structured room, rig, and world state instead of guessing through screenshots. It can coordinate the cast, but it cannot see pixels, open the camera, approve playback, or send an invitation.”
 
-> Inspect the creative scene and every character's verified capabilities. Stage a gentle four-beat story that practices sequencing and cooperation, use only supported actions, and wait for me to approve playback. Do not access the camera or purchase anything.
+## 1:12–1:38 — Play a real interactive world
 
-Show `inspect_creative_scene`, `inspect_character_capabilities`, and `stage_magic_show`. Point out the returned workflow phase, `availableActions`, blocked-action reasons, validated per-character moves, and `requiresHumanApproval: true`.
+Choose **Wizard academy**. Use the visible quest card or ask the agent to call `interact_story_world` for the spell book and crystals. Touch the same objects directly in the 3D canvas. Show progress and story text changing.
 
-## 1:02–1:27 — Share the same world
+**Voiceover:** “These are original PBR 3D sets, not background pictures. Books, crystals, portals, fireflies, gallery works, sculpture, and a movie projector are raycastable objects with story effects.”
 
-The typed proposal now appears inside the AR frame. Point out the cast roles, beat preview, and two human controls. Press **Approve & play** and show the planned actions and world changes. Then tap a different point manually and press **Hop**.
+Show the staged story card. Press **Approve & play** yourself; show different supported movements across the cast.
 
-**Voiceover:** “The agent plans; the child decides. The learning loop is imagine, sequence, perform, reflect. Only the visible human approval turns the staged data into a performance, and every action keeps its author.”
+## 1:38–2:04 — Explain the learning value
 
-On compatible Android hardware, press **Enter real AR**, wait for the hit-test ring, and tap a surface. Otherwise identify camera overlay as the universal fallback.
+Hold on the activity progress and cast roles.
 
-## 1:27–1:47 — The story moment
+**Voiceover:** “The educational loop is imagine, sequence, perform, reflect. Children negotiate what to draw, assign cooperative roles, practice a beginning–middle–end sequence, perform it, then retell or revise it. Those are intended outcomes; WallAlive does not claim classroom efficacy before a teacher-led pilot.”
 
-Use a drawing with two figures. Ask the agent to give each a different action in the same beat. Show captions and movements without cutting away; hold on the moment so viewers can see separate bone branches moving independently.
+Quickly switch to firefly hide-and-seek and museum curation to show the idea generalizes.
 
-**Voiceover:** “One typed plan coordinates cast, roles, timing, worlds, and separate skeletons—then returns exactly what visibly performed.”
+## 2:04–2:32 — Make a creator-credited Shopify handoff
 
-## 1:47–2:12 — Build a Creator Drop
+Open **Creator Shop** and ask:
 
-Open **Creator Shop**, then ask:
+> Recommend a collaborative classroom collection from this approved cast. Stage the best story zine, character cards, and one merchandise item. Preserve every creator’s credit and do not publish, export, add to cart, or buy anything.
 
-> Recommend products for this approved artwork for a classroom fundraiser. Explain the fit, then stage a storybook Creator Drop with the best three products. Do not publish or export anything.
+Show the visible reasoning, contributor handles, storefront preview, and permission boundary.
 
-Show `recommend_creator_products` ranking formats from the artwork's actual figure count, silhouette, detail, colors, and movement evidence. Show `stage_shopify_creator_drop` produce a visible storefront, product copy, pricing band, print placement, palette, and section plan. Point to the adult-only approval and the draft CSV, blueprint, artwork, and checklist that appear only after the human clicks.
+**Voiceover:** “WallAlive handles the creative work before a store exists: evidence-based formats, story, credits, layout, and an interactive-model plan. An adult confirms every contributor’s permission before downloading drafts. After review and import, Shopify’s native WebMCP tools can search the real catalog, compare variants, and hand checkout to the shopper. WallAlive never publishes or purchases.”
 
-**Voiceover:** “The agent does the difficult structured work; an adult decides what leaves the page. WallAlive exports Shopify drafts, then Shopify's own WebMCP storefront tools can handle live discovery and a shopper-confirmed cart.”
+## 2:32–2:45 — Show the stack and close
 
-## 2:12–2:22 — Prove the guardrail
+Show the Tools panel and activity history.
 
-Ask:
-
-> Open the camera, capture another drawing, and upload it.
-
-Show that no such tool exists.
-
-**Voiceover:** “WebMCP makes authority concrete. The agent directs the character; only the child chooses what a sensor sees or what image may leave the tab.”
-
-## 2:22–2:28 — Close
-
-Show the full UI with the rig waving, Full Neural Rig DNA, and visible history.
-
-**Voiceover:** “WallAlive. Draw it. Wake it. Play.”
+**Voiceover:** “OpenAI and ChatGPT Sites host the agent-native experience. Cloudflare D1 synchronizes shared rooms. Chrome runs and evaluates WebMCP. Shopify receives only adult-reviewed drafts. WallAlive: draw together, wake a cast, build a world.”
 
 ## Recording notes
 
 - Keep the final public YouTube video under three minutes.
-- Use **Play Judge Demo** for the deterministic geometry proof and call it the on-screen **Guided Demo**. It is attributed to `WALLALIVE`, not `BROWSER AGENT`.
-- Use the primary prompt in ChatGPT's in-app browser for the actual WebMCP proof. Hold on the **AGENT STAGED** card, returned learning goal, and human approval control.
-- Record one successful camera-to-AniGen generation separately if public GPU capacity allows, then edit it into the privacy section.
-- Record at 1440×900 or a modern phone resolution and make tool names readable.
-- Show one full 360° turn and one visible bone-driven wave.
-- Hide bookmarks, personal tabs, notifications, and room details.
-- Put the public live URL, repository, AniGen attribution, and GPU-capacity note in the video description.
+- Record the actual shared-room flow in two browser profiles or devices.
+- Use the bundled neural judge asset for deterministic full-3D proof; label the instant local tier accurately.
+- In ChatGPT’s in-app browser, show the real WebMCP tool call and returned structured evidence.
+- Show at least one click directly on a Three.js object and one `interact_story_world` call.
+- Record at 1440×900 or a modern phone resolution. Make tool names and contributor credits readable.
+- Hide bookmarks, personal tabs, notifications, and room codes after the invite scene.
+- Put the public live URL, repository, model attributions, and public-GPU note in the video description.

@@ -45,7 +45,7 @@ test("uses drawing-specific segmentation before general point-guided fallback", 
   assert.match(page, /TAP INSIDE THE CHARACTER/);
   assert.match(page, /enum: \["local-articulated", "neural-full"\]/);
   assert.match(page, /characters=\{character\.created && !neuralAsset \? captureEnsemble : null\}/);
-  assert.match(page, /INSTANT 3D · PRIVATE/);
+  assert.match(page, /INSTANT PUPPET · PRIVATE/);
   assert.match(stage, /setWorld: \(world: ARWorld\) => void/);
   assert.match(stage, /handlesRef\.current\?\.setWorld\(world\)/);
   assert.doesNotMatch(stage, /textureUrl, visible, world\]\)/);

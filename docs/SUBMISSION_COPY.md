@@ -15,17 +15,17 @@ Draw it. Wake it. Play.
 
 ## One-line description
 
-A child-safe creative-learning playground that turns approved drawings into rigged 3D characters a browser agent can help sequence, stage, and perform through WebMCP.
+A shared drawing-to-story world where friends create a cast together and a WebMCP agent safely directs its 3D quests and creator collection.
 
 ## Short description
 
-WallAlive makes children’s drawings live together in the real room. A child draws, captures, or uploads one to six figures and approves their rigs. Six local ONNX graphs preserve exact facial pixels, decode variable skeletons, and predict separate front and hidden-surface depth; optional AniGen can generate richer full geometry. Ten goal-level WebMCP tools let a browser agent inspect every rig's actual abilities, stage typed multi-character learning stories, direct visible ensemble moments, orchestrate cinematics, recommend products from artwork evidence, and stage a Shopify-ready Creator Drop. Stories and commerce exports remain inert until a human approves them; no tool can open the camera, retrieve pixels, publish, purchase, or charge.
+WallAlive lets friends join by guest username, paint one vector wall, combine separate figures into a cast, and play cooperative activities in original 3D worlds. Six local ONNX graphs preserve artwork, decode variable skeletons, and lock uncertain movement. The private tier is honestly labeled an articulated spatial puppet; optional AniGen generates full unseen surfaces. Thirteen WebMCP tools inspect the room and verified rigs, prepare invites without sending messages, stage capability-safe stories, activate real 3D quest objects, recommend collaborative products, and stage a creator-credited Shopify handoff. Camera, pixels, performance approval, contributor permission, publishing, and purchase stay human-controlled.
 
 ## Judging case
 
 ### 1. Use of WebMCP
 
-WebMCP is the creative control plane, not decorative integration. Ten imperative tools implement two shared-authority loops: inspect → stage → human-approved performance, and inspect artwork evidence → recommend products → stage Creator Drop → adult-approved export. The agent coordinates complex structured work while the person retains sensor, publishing, commerce, and final-performance authority. Tool outputs are narrow and verifiable; user-authored image content is never returned.
+WebMCP is the creative control plane, not decorative integration. Thirteen imperative tools implement three shared-authority loops: inspect room → prepare invite → co-create; inspect rigs/objects → stage → human-approved performance; and inspect evidence → recommend products → stage Creator Drop → adult and contributor-approved export. The agent coordinates structured work while the person retains sensor, sharing, publishing, commerce, and final-performance authority.
 
 ### 2. Quality of idea and execution
 
@@ -41,7 +41,7 @@ WallAlive combines local computer vision, generative rigged 3D, transparent rend
 
 ## Primary demo prompt
 
-> Inspect the creative scene and every character's verified capabilities. Stage a gentle four-beat story that practices sequencing and cooperation, use only supported actions, and wait for me to approve playback. Do not access the camera or purchase anything.
+> Inspect our shared room, creative scene, verified character abilities, and current story-world objects. Stage a four-beat cooperation quest, use only supported character actions, and wait for my approval. Do not access the camera, share pixels, publish products, or buy anything.
 
 ## Guardrail prompt
 

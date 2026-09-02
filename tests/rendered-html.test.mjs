@@ -37,7 +37,7 @@ test("server-renders the WallAlive product shell and security headers", async ()
   assert.doesNotMatch(html, /codex-preview|react-loading-skeleton|Starter Project|CutRoom/i);
 });
 
-test("registers ten goal-level WebMCP collaboration tools with spatial direction and creator commerce", async () => {
+test("registers thirteen goal-level WebMCP collaboration tools with spatial direction and creator commerce", async () => {
   const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
   const expectedTools = [
     "inspect_creative_scene",
@@ -49,13 +49,16 @@ test("registers ten goal-level WebMCP collaboration tools with spatial direction
     "recommend_creator_products",
     "stage_shopify_creator_drop",
     "inspect_creator_drop",
+    "inspect_shared_room",
+    "prepare_room_invite",
+    "interact_story_world",
     "list_collaboration_history",
   ];
 
   for (const tool of expectedTools) assert.match(page, new RegExp(`name: ["']${tool}["']`));
 
   const registeredNames = [...page.matchAll(/name: ["']([^"']+)["']/g)].map((match) => match[1]);
-  assert.equal(registeredNames.filter((name) => expectedTools.includes(name)).length, 10);
+  assert.equal(registeredNames.filter((name) => expectedTools.includes(name)).length, 13);
   assert.equal(registeredNames.some((name) => /camera|capture|upload/.test(name)), false);
   assert.match(page, /document\.modelContext/);
   assert.match(page, /registerTool\(tool, \{ signal: controller\.signal \}\)/);
@@ -71,11 +74,11 @@ test("registers ten goal-level WebMCP collaboration tools with spatial direction
   assert.match(page, /APPROVE &amp; PLAY/);
   assert.match(page, /validateCharacterMove/);
   assert.match(page, /ensembleActions=/);
-  assert.match(page, /GENERATE REAL 3D/);
+  assert.match(page, /FULL 3D SCULPT · AI/);
   assert.match(page, /externalUploadApproved/);
   assert.match(page, /FULL NEURAL RIG \+ DRAWING PARTS/);
   assert.match(page, /COLOR MATCHED/);
-  assert.match(page, /viewableDegrees: neuralAssetRef\.current \? 360 : 0/);
+  assert.match(page, /fullSculptDegrees: neuralAssetRef\.current \? 360 : 0/);
   assert.match(page, /assessReconstructionReadiness/);
   assert.match(page, /did not substitute a rounded shell/);
   assert.doesNotMatch(page, /localFallbackRef/);
@@ -87,11 +90,11 @@ test("registers ten goal-level WebMCP collaboration tools with spatial direction
   assert.match(page, /Try the full human \+ agent story/);
   assert.match(page, /cyberpunk-neon/);
   assert.match(page, /CREATOR SHOP/);
-  assert.match(page, /I’M AN ADULT · APPROVE EXPORT/);
+  assert.match(page, /ADULT · CONFIRM PERMISSIONS/);
   assert.match(page, /Nothing is published, purchased, or sent to Shopify/);
   assert.match(page, /buildShopifyProductsCsv/);
   assert.match(page, /buildShopifyStoreBlueprint/);
-  assert.match(page, /practices sequencing and cooperation/);
+  assert.match(page, /story sequencing and confident expression/);
   assert.match(page, /learningGoal/);
   assert.match(page, /stagedBy/);
   assert.match(page, /"WALLALIVE", "judge_demo"/);
@@ -99,7 +102,7 @@ test("registers ten goal-level WebMCP collaboration tools with spatial direction
   assert.match(page, /LEARNING LOOP/);
 });
 
-test("keeps submission claims aligned with the shipped ten-tool educational and creator-commerce loops", async () => {
+test("keeps submission claims aligned with the shipped thirteen-tool educational and creator-commerce loops", async () => {
   const files = await Promise.all([
     readFile(new URL("../README.md", import.meta.url), "utf8"),
     readFile(new URL("../docs/DEVPOST_SUBMISSION.md", import.meta.url), "utf8"),
@@ -109,7 +112,7 @@ test("keeps submission claims aligned with the shipped ten-tool educational and 
   ]);
   const claims = files.join("\n");
   assert.doesNotMatch(claims, /(?:Six|six) (?:goal-level WebMCP|imperative) tools/);
-  assert.match(claims, /Ten goal-level WebMCP tools/);
+  assert.match(claims, /Thirteen goal-level WebMCP tools/);
   assert.match(claims, /Imagine.*Sequence.*Perform.*Reflect/);
   assert.match(claims, /not measured learning (?:gains|claims|outcomes)/i);
   assert.doesNotMatch(claims, /art therapy/i);
@@ -180,7 +183,8 @@ test("implements local drawing extraction and real WebXR hit testing", async () 
   assert.match(stage, /mount\.dataset\.articulatedChains/);
   assert.match(drawing, /if \(part\.reviewed\) return true/);
   assert.match(stage, /texturePlane: false/);
-  assert.match(stage, /viewableDegrees: 360/);
+  assert.match(stage, /orbitableDegrees: 360/);
+  assert.match(stage, /fullSculptDegrees: 0/);
   assert.match(stage, /GLTFLoader/);
   assert.match(riggedModel, /SkinnedMesh/);
   assert.match(stage, /wallalive-neural-character/);

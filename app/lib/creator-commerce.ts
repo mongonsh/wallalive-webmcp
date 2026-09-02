@@ -1,4 +1,4 @@
-export const CREATOR_PRODUCT_IDS = ["art-print", "sticker-sheet", "t-shirt", "tote-bag", "ceramic-mug"] as const;
+export const CREATOR_PRODUCT_IDS = ["art-print", "sticker-sheet", "story-zine", "character-card-deck", "t-shirt", "tote-bag", "ceramic-mug", "3d-figure"] as const;
 
 export type CreatorProductId = (typeof CREATOR_PRODUCT_IDS)[number];
 export type CreatorAudience = "family" | "classroom" | "community";
@@ -18,6 +18,7 @@ export type ArtworkCommerceProfile = {
   hasRigged3D: boolean;
   activeWorld: string;
   storyTitle: string;
+  contributors?: string[];
 };
 
 export type CreatorRecommendation = {
@@ -40,6 +41,7 @@ export type CreatorDrop = {
   status: "awaiting-adult-approval" | "approved-for-export";
   createdAt: string;
   source: "human-approved-artwork";
+  contributors: Array<{ username: string; permission: "required" }>;
   palette: { ink: string; paper: string; accent: string; highlight: string };
   products: CreatorRecommendation[];
   storefront: {
@@ -60,15 +62,19 @@ export type CreatorDrop = {
     publishesToShopify: false;
     createsOrders: false;
     includesImagePixelsInToolResult: false;
+    contributorPermissionsRequired: boolean;
   };
 };
 
 const PRODUCT_META: Record<CreatorProductId, Omit<CreatorRecommendation, "score" | "reason">> = {
   "art-print": { id: "art-print", label: "Art print", glyph: "▧", price: 18, placement: "Centered, 88% of printable area" },
   "sticker-sheet": { id: "sticker-sheet", label: "Sticker sheet", glyph: "✦", price: 9, placement: "Individual figures, 4 mm safe cut line" },
+  "story-zine": { id: "story-zine", label: "Story zine", glyph: "▤", price: 14, placement: "Eight-page collaborative story with creator credits" },
+  "character-card-deck": { id: "character-card-deck", label: "Character cards", glyph: "▥", price: 16, placement: "One credited character and story prompt per card" },
   "t-shirt": { id: "t-shirt", label: "T-shirt", glyph: "♧", price: 28, placement: "Front chest, 28 cm maximum width" },
   "tote-bag": { id: "tote-bag", label: "Tote bag", glyph: "▱", price: 24, placement: "Centered front, 24 cm maximum width" },
   "ceramic-mug": { id: "ceramic-mug", label: "Mug", glyph: "◒", price: 19, placement: "Two-sided wrap, face kept away from handle" },
+  "3d-figure": { id: "3d-figure", label: "3D figure", glyph: "◆", price: 34, placement: "Adult-reviewed rig exported as a production-ready model proof" },
 };
 
 const roundScore = (score: number) => Math.max(1, Math.min(99, Math.round(score)));
@@ -86,9 +92,12 @@ export function recommendCreatorProducts(
   const score: Record<CreatorProductId, number> = {
     "art-print": 79 + (detailed ? 12 : 0) + (goal === "portfolio" ? 8 : 0),
     "sticker-sheet": 72 + (ensemble ? 18 : 0) + (audience === "classroom" ? 8 : 0),
+    "story-zine": 68 + (ensemble ? 17 : 0) + (audience === "classroom" ? 9 : 0) + (profile.storyTitle ? 5 : 0),
+    "character-card-deck": 67 + (ensemble ? 16 : 0) + (goal === "fundraiser" ? 6 : 0),
     "t-shirt": 70 + (!wide ? 10 : -5) + (profile.movableParts >= 2 ? 4 : 0),
     "tote-bag": 66 + (wide ? 9 : 0) + (goal === "fundraiser" ? 10 : 0),
     "ceramic-mug": 62 + (!ensemble && compact ? 14 : 0) + (audience === "family" ? 5 : 0),
+    "3d-figure": 44 + (profile.hasRigged3D ? 29 : -20) + (profile.movableParts >= 2 ? 8 : 0),
   };
 
   const reason: Record<CreatorProductId, string> = {
@@ -98,6 +107,12 @@ export function recommendCreatorProducts(
     "sticker-sheet": ensemble
       ? `Keeps all ${profile.figureCount} characters separate, so every figure becomes its own sticker.`
       : "Turns expressive parts into a playful, low-cost mini collection.",
+    "story-zine": ensemble
+      ? `Gives all ${profile.figureCount} characters a credited role in one cooperative story.`
+      : "Pairs the drawing with a short story sequence and reflection prompts.",
+    "character-card-deck": ensemble
+      ? "Turns each creator's character into a playable prompt for group storytelling."
+      : "Makes the character reusable for storytelling, vocabulary, and social-emotional play.",
     "t-shirt": wide
       ? "Works as a smaller chest emblem so the wide silhouette stays readable."
       : "The compact silhouette reads clearly from a distance on a front print.",
@@ -107,6 +122,9 @@ export function recommendCreatorProducts(
     "ceramic-mug": compact
       ? "The centered character fits the curved print zone without losing its face."
       : "A two-sided layout can pair the character with its name or short story.",
+    "3d-figure": profile.hasRigged3D
+      ? "Uses the approved rig as a proof for an adult-reviewed 3D production workflow."
+      : "Held back until a complete, adult-reviewed rigged 3D asset exists.",
   };
 
   return CREATOR_PRODUCT_IDS
@@ -144,6 +162,7 @@ export function stageCreatorDrop(input: {
     status: "awaiting-adult-approval",
     createdAt: input.now ?? new Date().toISOString(),
     source: "human-approved-artwork",
+    contributors: (input.profile.contributors ?? []).map((username) => ({ username, permission: "required" as const })),
     palette: {
       ink: "#173b3a",
       paper: "#fff8ea",
@@ -177,6 +196,7 @@ export function stageCreatorDrop(input: {
       publishesToShopify: false,
       createsOrders: false,
       includesImagePixelsInToolResult: false,
+      contributorPermissionsRequired: Boolean(input.profile.contributors?.length),
     },
   };
 }
@@ -197,7 +217,7 @@ export function buildShopifyProductsCsv(drop: CreatorDrop) {
       "WallAlive Creator Studio",
       "Arts & Entertainment > Artwork",
       product.label,
-      `wallalive,creator-drop,${drop.audience},${drop.goal}`,
+      `wallalive,creator-drop,${drop.audience},${drop.goal}${drop.contributors.length ? ",collaborative" : ""}`,
       false,
       "Title",
       "Default Title",
@@ -229,9 +249,11 @@ export function buildShopifyStoreBlueprint(drop: CreatorDrop) {
     },
     threeDExperience: drop.threeDExperience,
     products: drop.products,
+    contributors: drop.contributors,
     storefrontMcpHandoff: {
-      discovery: "Use the Shopify storefront's native WebMCP tools or Storefront MCP after these drafts are imported and reviewed.",
-      allowedNextActions: ["search catalog", "recommend live products", "manage cart after shopper confirmation"],
+      discovery: "After adult import and review, Shopify exposes the live collection through its native storefront WebMCP tools.",
+      nativeTools: ["search_catalog", "browse_store", "get_product", "show_variant", "get_cart", "update_cart", "proceed_to_checkout"],
+      allowedNextActions: ["search the approved catalog", "compare live variants", "update cart after shopper confirmation", "hand off checkout to the shopper"],
       wallaliveNeverDoes: ["publish products", "charge payment", "place order"],
     },
     safety: drop.safety,
@@ -247,6 +269,7 @@ export function buildCreatorHandoff(drop: CreatorDrop) {
     "## Adult review checklist",
     "",
     "- Confirm creator name/credit and permission to share the artwork.",
+    ...(drop.contributors.length ? drop.contributors.map((contributor) => `- Confirm permission for @${contributor.username}'s contribution before any export.`) : []),
     "- Check every print placement and product title in Shopify draft mode.",
     "- Add print-provider images and fulfillment details inside Shopify.",
     "- Preview the storefront on mobile before publishing.",

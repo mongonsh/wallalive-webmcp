@@ -12,7 +12,7 @@ Draw it. Wake it. Play.
 
 ## One-line pitch
 
-A child-safe creative-learning playground that turns approved drawings into rigged 3D characters a browser agent can help sequence, stage, and perform through WebMCP.
+A shared drawing-to-story world where friends create a cast together and a WebMCP agent safely directs its 3D quests and creator collection.
 
 ## Links
 
@@ -27,13 +27,15 @@ Children already treat drawings as living characters. A few lines can have a nam
 
 ## What it does
 
-1. The child explicitly opens the camera, taps one character, and captures it.
-2. Local Canvas processing separates the drawing from smooth lighting, page borders, text, and foreground clutter.
-3. Six local ONNX graphs recognize exact face/body pixels, decode an eight-family variable skeleton, and predict distinct front and hidden-surface depth. A contour-preserving artwork shell produces a private closed `SkinnedMesh` while keeping separate drawings as separate rigs.
-4. A second visible approval explains that only the isolated drawing—not the live camera or room frame—may go to AniGen, which jointly predicts richer full geometry, an arbitrary skeleton, and skinning weights.
-5. WallAlive loads generated GLBs as Three.js `SkinnedMesh` assets. Seven actions drive bone branches; drag/spin exposes true 360° geometry and the generated back.
-6. Ten goal-level WebMCP tools let the agent inspect shared state and each rig's verified abilities, request 3D, stage a typed multi-character learning story, direct live ensemble moments, orchestrate spatial cinematics, recommend products from artwork evidence, stage a Shopify Creator Drop, inspect its approval state, and read attributed history.
-7. WebXR hit testing places the same character on a real surface when supported; every other browser gets the camera-overlay experience.
+1. Friends join a Cloudflare D1-backed room with guest usernames and paint one compact vector wall together; invite links contain no private session token.
+2. A child may also explicitly open the camera, tap one character, and capture it.
+3. Local Canvas processing separates the drawing from smooth lighting, page borders, text, and foreground clutter.
+4. Six local ONNX graphs recognize exact face/body pixels and decode an eight-family variable skeleton. A high-resolution private relief preview preserves artwork while semantic-outline-clipped weights prevent one limb from deforming unrelated pixels. It is not presented as full unseen-view reconstruction.
+5. A second visible approval explains that only the isolated drawing—not the live camera or room frame—may go to AniGen, which jointly predicts richer full geometry, an arbitrary skeleton, and skinning weights.
+6. WallAlive loads generated GLBs as Three.js `SkinnedMesh` assets. Unsupported branch actions stay locked instead of inventing a skeleton.
+7. Four original PBR worlds contain raycastable objects and progress-bearing activities: mini movie, firefly hide-and-seek, cooperation spell, and living-gallery curation.
+8. Thirteen goal-level WebMCP tools inspect rooms, rigs, and quest objects; prepare username invites; stage and direct stories; touch real scene objects; recommend products; stage a creator-credited Shopify handoff; and read attributed history.
+9. WebXR hit testing places the same character on a real surface when supported; every other browser gets the camera-overlay experience.
 
 The child-facing outcome is a compact learning loop: **Imagine → Sequence → Perform → Reflect**. The learner starts with their own artifact, helps shape a beginning–middle–end story, approves the agent's plan, performs it, and then explains or revises what happened.
 
@@ -49,7 +51,7 @@ Without WebMCP, an agent would have to infer multiple rigs and coordinate dozens
 
 ## WebMCP implementation
 
-WallAlive registers ten imperative tools with `document.modelContext.registerTool()` in the top-level document:
+WallAlive registers thirteen imperative tools with `document.modelContext.registerTool()` in the top-level document:
 
 - `inspect_creative_scene`
 - `inspect_character_capabilities`
@@ -60,6 +62,9 @@ WallAlive registers ten imperative tools with `document.modelContext.registerToo
 - `recommend_creator_products`
 - `stage_shopify_creator_drop`
 - `inspect_creator_drop`
+- `inspect_shared_room`
+- `prepare_room_invite`
+- `interact_story_world`
 - `list_collaboration_history`
 
 Each tool uses narrow JSON Schema, nested `additionalProperties: false`, bounded arrays and strings, cancellation signals, `readOnlyHint` / `untrustedContentHint` annotations, shared capability validation, and verification-rich results. Story playback and Creator Drop export are separately staged for human approval. No tool publishes to Shopify, purchases, charges, or returns image pixels.
@@ -97,7 +102,9 @@ The fourth challenge was anatomy. A good silhouette still gave straight, misplac
 - A locally trained 17-joint drawing pose model whose ONNX export exactly reproduces the untouched-test result
 - Generated bone-branch animation instead of whole-object-only motion
 - Real WebXR surface hit testing plus universal camera overlay
-- Ten goal-level WebMCP tools sharing the same visible story, 3D, and Creator Shop state as the human UI
+- Thirteen goal-level WebMCP tools sharing the same live room, story, interactive 3D, and Creator Shop state as the human UI
+- Persistent username rooms and compact collaborative vector drawing through Cloudflare D1
+- Touchable quest objects with visible progress in all four original worlds
 - Artwork-aware product recommendations plus Shopify draft CSV, storefront blueprint, print artwork, and adult handoff exports
 - Visible attribution for every human, agent, and system action
 - Human-only authority for camera, capture, and isolated-image upload
@@ -110,12 +117,12 @@ The fourth challenge was anatomy. A good silhouette still gave straight, misplac
 - Run a teacher-led pilot measuring time to first story, beginning–middle–end coherence, retelling vocabulary, turn-taking, and revision behavior; no learning-gain claim is made before that evidence exists
 - Add optional SAM 2 point/box refinement for difficult backgrounds
 - Retarget richer motion clips to generated skeletons
-- Multi-character classroom stories with teacher-controlled privacy
+- Teacher-managed room roles, verified identity, and moderation beyond current guest handles
 - Persistent WebXR anchors and accessible motion descriptions
 
 ## Built with
 
-WebMCP, AniGen, TripoSR, ONNX Runtime Web, Hugging Face Gradio, WebXR, Three.js, React, TypeScript, Canvas API, WebGL, Cloudflare Workers, ChatGPT Sites
+WebMCP, Shopify native WebMCP handoff, Cloudflare D1, ChatGPT Sites, Chrome, AniGen, TripoSR, ONNX Runtime Web, WebXR, Three.js, React, TypeScript, Canvas API, WebGL
 
 ## Suggested tags
 

@@ -15,12 +15,14 @@ export type CharacterAction = "idle" | "wave" | "dance" | "hop" | "walk" | "hide
 export type ARWorld = "studio" | "storybook" | "wizard" | "museum";
 export type LightingMood = "cyberpunk-neon" | "sunset-warm" | "moonlight";
 export type CameraPreset = "cinematic-orbit" | "low-angle-hero" | "overhead";
+export type WorldObjectInteraction = { id: string; label: string; verb: string; story: string; world: ARWorld };
 
 export type ARStageHandle = {
   enterImmersiveAR: () => Promise<{ ok: boolean; error?: string }>;
   placeNormalized: (x: number, y: number, scale?: number) => void;
   rotateBy: (yaw: number, pitch: number) => void;
   moveBy: (x: number, z: number) => void;
+  interactWorldObject: (id: string) => boolean;
 };
 
 type ARStageProps = {
@@ -42,6 +44,7 @@ type ARStageProps = {
   onCapability: (supported: boolean) => void;
   onPlaced: (surface: "screen" | "world", x: number, y: number) => void;
   onNeuralAssetInfo: (info: RiggedAssetInfo | null) => void;
+  onWorldInteraction?: (interaction: WorldObjectInteraction) => void;
 };
 
 type SceneHandles = {
@@ -53,6 +56,7 @@ type SceneHandles = {
   setWorld: (world: ARWorld) => void;
   setLightingMood: (mood: LightingMood) => void;
   setCameraPreset: (preset: CameraPreset) => void;
+  interactWorldObject: (id: string) => boolean;
   controls: OrbitControls;
   dispose: () => void;
 };
@@ -91,7 +95,7 @@ const moodPalettes: Record<LightingMood, {
 type SurfaceFinish = "plaster" | "stone" | "wood" | "brass" | "velvet" | "glass" | "glow";
 
 function makeSurfaceTexture(color: number, finish: SurfaceFinish) {
-  const size = 64;
+  const size = 192;
   const data = new Uint8Array(size * size * 4);
   const base = new THREE.Color(color);
   const variation = finish === "stone" ? 0.13 : finish === "wood" ? 0.11 : finish === "plaster" ? 0.045 : 0.03;
@@ -133,9 +137,12 @@ export function buildWorldEnvironment(world: ARWorld): WorldEnvironment {
     if (cached) return cached;
     const isGlass = finish === "glass";
     const isGlow = finish === "glow";
+    const surfaceTexture = isGlass || isGlow ? null : makeSurfaceTexture(color, finish);
     const created = new THREE.MeshPhysicalMaterial({
       color: isGlass || isGlow ? color : 0xffffff,
-      map: isGlass || isGlow ? null : makeSurfaceTexture(color, finish),
+      map: surfaceTexture,
+      bumpMap: finish === "stone" || finish === "wood" || finish === "plaster" ? surfaceTexture : null,
+      bumpScale: finish === "stone" ? 0.035 : finish === "wood" ? 0.02 : 0.012,
       roughness: finish === "brass" ? 0.25 : finish === "wood" ? 0.66 : finish === "velvet" ? 0.94 : isGlass ? 0.12 : isGlow ? 0.2 : 0.86,
       metalness: finish === "brass" ? 0.82 : isGlow ? 0.16 : 0.01,
       clearcoat: finish === "brass" ? 0.7 : finish === "wood" ? 0.16 : isGlass ? 1 : 0.06,
@@ -172,6 +179,11 @@ export function buildWorldEnvironment(world: ARWorld): WorldEnvironment {
   const rounded = (name: string, size: [number, number, number], color: number, position: [number, number, number], finish: SurfaceFinish = "plaster", radius = 0.08, rotation: [number, number, number] = [0, 0, 0]) => (
     add(name, new RoundedBoxGeometry(size[0], size[1], size[2], 4, Math.min(radius, Math.min(...size) * 0.45)), material(color, finish), position, rotation)
   );
+  const interactive = (mesh: THREE.Object3D, id: string, label: string, verb: string, story: string) => {
+    mesh.userData.wallaliveInteraction = { id, label, verb, story, world } satisfies WorldObjectInteraction;
+    mesh.traverse((child) => { child.userData.wallaliveInteraction = mesh.userData.wallaliveInteraction; });
+    return mesh;
+  };
   const column = (name: string, height: number, radius: number, color: number, position: [number, number, number], finish: SurfaceFinish = "stone") => {
     const profile = [
       new THREE.Vector2(radius * 1.52, 0), new THREE.Vector2(radius * 1.62, height * 0.055),
@@ -246,6 +258,10 @@ export function buildWorldEnvironment(world: ARWorld): WorldEnvironment {
       leafCluster(`studio-plant-leaf-${index}`, [0x426c4a, 0x557f50, 0x365f43][index], [-3.75 + offset * 1.7, 0.5 - index * 0.08, -5.1], [0.42, 0.72, 0.38]);
     });
     rounded("studio-rug", [3.9, 0.035, 2.55], 0xc97863, [-0.15, -1.17, -2.55], "velvet", 0.28);
+    const projector = rounded("studio-story-projector", [0.78, 0.46, 0.62], 0x3a4144, [-2.55, -0.82, -3.5], "brass", 0.09);
+    add("studio-projector-lens", new THREE.CylinderGeometry(0.15, 0.18, 0.2, 32), material(0x8bcfe6, "glass", 0x54b9d7), [-2.55, -0.75, -3.16], [Math.PI / 2, 0, 0]);
+    interactive(projector, "studio-projector", "Story projector", "play", "The projector turns the cast's drawings into a tiny shadow-movie scene.");
+    interactive(tableTop, "studio-maker-table", "Maker table", "build", "The maker table opens a prop-building challenge for the whole cast.");
     pointGlow("studio-window-light", 0xffd49a, 5.2, [-2.5, 2.2, -4.9], 7);
   }
 
@@ -256,7 +272,8 @@ export function buildWorldEnvironment(world: ARWorld): WorldEnvironment {
     ]);
     add("storybook-path", new THREE.TubeGeometry(pathCurve, 42, 0.62, 10, false), material(0xcaa76a, "stone"), [0, 0, 0]);
     rounded("storybook-castle", [3.55, 2.25, 0.78], 0xc8a17e, [0, -0.02, -6.08], "stone", 0.12);
-    arch("storybook-gate", 1.14, 1.62, 0.18, 0x714937, [0, -1.1, -5.58], "wood");
+    const gate = arch("storybook-gate", 1.14, 1.62, 0.18, 0x714937, [0, -1.1, -5.58], "wood");
+    interactive(gate, "storybook-gate", "Castle gate", "unlock", "The gate opens only when two characters cooperate.");
     [-1.92, 1.92].forEach((x, index) => {
       add(`storybook-tower-${index}`, new THREE.CylinderGeometry(0.62, 0.7, 3.15, 28), material(0xb89070, "stone"), [x, 0.08, -5.8]);
       add(`storybook-roof-${index}`, new THREE.ConeGeometry(0.9, 1.52, 28), material(0x5e557e, "velvet"), [x, 2.36, -5.8]);
@@ -273,6 +290,7 @@ export function buildWorldEnvironment(world: ARWorld): WorldEnvironment {
     [-2.8, -1.65, 1.55, 2.85].forEach((x, index) => {
       const firefly = gem(`storybook-firefly-${index}`, 0xffe37b, [x, 0.2 + (index % 2) * 0.8, -3.5 - index * 0.42], 0.34, index * 0.8);
       firefly.material = material(0xffe37b, "glow", 0xffd84e);
+      interactive(firefly, `storybook-firefly-${index}`, `Firefly ${index + 1}`, "find", "A hidden firefly joins the cast's lantern trail.");
     });
     pointGlow("storybook-sun-glow", 0xffd28c, 5.8, [-2.2, 3.2, -4.4], 8);
   }
@@ -308,6 +326,7 @@ export function buildWorldEnvironment(world: ARWorld): WorldEnvironment {
       blending: THREE.AdditiveBlending,
     });
     const portal = add("wizard-living-portal", new THREE.CircleGeometry(0.91, 72), portalMaterial, [0, 0.66, -5.55]);
+    interactive(portal, "wizard-portal", "Living portal", "enter", "The portal reveals the next chapter after the spell ingredients are found.");
     portal.userData.wallalivePortalShader = true;
     portal.userData.worldMotion = { baseY: 0.66, phase: 0.4, amplitude: 0.035, speed: 1.6, spin: 0.045, spinAxis: "z" };
     add("wizard-floor-rune-outer", new THREE.RingGeometry(1.55, 1.68, 72), material(0x9e7cff, "glow", 0x7b62ff), [0, -1.14, -3.55], [-Math.PI / 2, 0, 0.18]);
@@ -323,9 +342,11 @@ export function buildWorldEnvironment(world: ARWorld): WorldEnvironment {
     });
     add("wizard-astrolabe-a", new THREE.TorusGeometry(0.68, 0.055, 12, 64), material(0xc89745, "brass"), [-2.5, 1.98, -4.95], [0.25, 0.52, 0.2]);
     add("wizard-astrolabe-b", new THREE.TorusGeometry(0.48, 0.045, 12, 64), material(0xc89745, "brass"), [-2.5, 1.98, -4.95], [1.05, 0.15, 0.7]);
-    gem("wizard-crystal-a", 0x57e2df, [2.35, -0.37, -4.65], 1.2, 0.2);
-    gem("wizard-crystal-b", 0xa476ff, [2.72, -0.2, -4.72], 0.92, 1.3);
-    gem("wizard-crystal-c", 0xffd27a, [2.08, -0.48, -4.52], 0.72, 2.1);
+    interactive(gem("wizard-crystal-a", 0x57e2df, [2.35, -0.37, -4.65], 1.2, 0.2), "wizard-crystal-a", "Tide crystal", "cast", "The tide crystal teaches the cast to match color, sound, and motion.");
+    interactive(gem("wizard-crystal-b", 0xa476ff, [2.72, -0.2, -4.72], 0.92, 1.3), "wizard-crystal-b", "Moon crystal", "cast", "The moon crystal asks one character to float while another spins.");
+    interactive(gem("wizard-crystal-c", 0xffd27a, [2.08, -0.48, -4.52], 0.72, 2.1), "wizard-crystal-c", "Sun crystal", "cast", "The sun crystal completes the cooperative spell sequence.");
+    const spellBook = rounded("wizard-spell-book", [0.76, 0.14, 0.56], 0x6f3453, [-1.72, -0.35, -4.62], "velvet", 0.04, [0, -0.3, 0.04]);
+    interactive(spellBook, "wizard-spell-book", "Spell book", "read", "The spell book gives every character a role based on its verified movements.");
     pointGlow("wizard-portal-light", 0x6c72ff, 8.5, [0, 0.7, -4.7], 7);
     pointGlow("wizard-lantern-light", 0xffb960, 4.8, [-2.7, 1.6, -4.7], 5);
   }
@@ -334,11 +355,13 @@ export function buildWorldEnvironment(world: ARWorld): WorldEnvironment {
     [-4.05, 4.05].forEach((x, index) => column(`museum-column-${index}`, 4.85, 0.38, 0xd6c5a8, [x, -1.2, -5.85], "stone"));
     [-2.28, 0, 2.28].forEach((x, index) => {
       rounded(`museum-frame-${index}`, [1.72, 2.05, 0.22], 0x95662d, [x, 1.02, -6.47], "brass", 0.055);
-      rounded(`museum-art-${index}`, [1.38, 1.7, 0.23], [0x4f7779, 0x8a544c, 0xa17c35][index], [x, 1.02, -6.32], "velvet", 0.035);
+      const artwork = rounded(`museum-art-${index}`, [1.38, 1.7, 0.23], [0x4f7779, 0x8a544c, 0xa17c35][index], [x, 1.02, -6.32], "velvet", 0.035);
+      interactive(artwork, `museum-art-${index}`, ["River of Shapes", "The Brave Mark", "Golden Echo"][index], "curate", "This artwork asks the cast to compare color, shape, and feeling.");
       add(`museum-picture-light-${index}`, new THREE.CylinderGeometry(0.035, 0.035, 0.9, 12), material(0xb68942, "brass"), [x, 2.38, -6.04], [0, 0, Math.PI / 2]);
     });
     rounded("museum-plinth", [1.5, 1.12, 1.22], 0xd5c8b2, [0, -0.62, -4.72], "stone", 0.08);
-    add("museum-sculpture", new THREE.TorusKnotGeometry(0.48, 0.14, 128, 18, 2, 3), material(0x799398, "brass"), [0, 0.34, -4.72], [0.42, 0.22, 0.12]);
+    const sculpture = add("museum-sculpture", new THREE.TorusKnotGeometry(0.48, 0.14, 192, 24, 2, 3), material(0x799398, "brass"), [0, 0.34, -4.72], [0.42, 0.22, 0.12]);
+    interactive(sculpture, "museum-sculpture", "Motion sculpture", "inspect", "The sculpture turns as the cast tells a new interpretation together.");
     add("museum-inlay", new THREE.RingGeometry(2.2, 2.3, 72), material(0xc39a58, "brass"), [0, -1.15, -3.5], [-Math.PI / 2, 0, 0]);
     pointGlow("museum-gallery-light", 0xffe5bd, 5.6, [0, 3.25, -3.6], 8);
   }
@@ -375,6 +398,16 @@ function samplePolyline(path: ContourPoint[], amount: number) {
   return path[path.length - 1];
 }
 
+function pointInsidePolygon(x: number, y: number, polygon: ContourPoint[]) {
+  let inside = false;
+  for (let current = 0, previous = polygon.length - 1; current < polygon.length; previous = current, current += 1) {
+    const a = polygon[current];
+    const b = polygon[previous];
+    if ((a.y > y) !== (b.y > y) && x < ((b.x - a.x) * (y - a.y)) / (b.y - a.y) + a.x) inside = !inside;
+  }
+  return inside;
+}
+
 export function buildCharacter(
   contour: ContourPoint[],
   skeleton: SkeletonPoint[],
@@ -405,7 +438,7 @@ export function buildCharacter(
     map: artworkTexture,
     transparent: true,
     alphaTest: 0.035,
-    roughness: 0.82,
+    roughness: 0.68,
     metalness: 0,
     side: THREE.FrontSide,
   }) : sideMaterial;
@@ -423,7 +456,7 @@ export function buildCharacter(
   // This replaces the old voxel bounds (`localFront - fieldZ` and
   // `localBack + fieldZ`) while retaining independent learned front/back depth.
   const requestedHalfDepth = Math.min(0.16, Math.max(0.075, (bodyPart?.size.z ?? 0.28) * 0.42));
-  const shell = buildArtworkShellGeometry(contour, depth, requestedHalfDepth, inflation, 2);
+  const shell = buildArtworkShellGeometry(contour, depth, requestedHalfDepth, inflation, 3);
   const compactGeometry = shell.geometry;
   const texturedFrontTriangles = shell.frontTriangleCount;
   const neutralBackTriangles = shell.backTriangleCount;
@@ -479,8 +512,9 @@ export function buildCharacter(
           progress = (segment + projection.amount) / (path.length - 1);
         }
       }
-      const radius = Math.max(0.035, part.size.x * 0.72);
-      const radial = Math.max(0, 1 - minimumDistance / (radius * 1.8));
+      const radius = Math.max(0.028, Math.min(part.size.x, part.size.y) * 0.52);
+      const insideSemanticOutline = !part.outline?.length || pointInsidePolygon(x, y, part.outline);
+      const radial = Math.max(0, 1 - minimumDistance / (radius * 1.32)) * (insideSemanticOutline ? 1 : 0.08);
       const alongBranch = Math.min(1, Math.max(0, (progress - 0.02) / 0.34));
       const influence = radial * radial * alongBranch;
       if (influence > bestWeight) {
@@ -489,7 +523,7 @@ export function buildCharacter(
         bestProgress = progress;
       }
     });
-    const branchWeight = Math.min(0.96, bestWeight);
+    const branchWeight = bestWeight < 0.12 ? 0 : Math.min(0.94, THREE.MathUtils.smoothstep(bestWeight, 0.08, 0.78));
     const distalBlend = bestChain >= 0 ? THREE.MathUtils.smoothstep(bestProgress, 0.38, 0.66) : 0;
     const offset = vertex * 4;
     skinIndices[offset] = 0;
@@ -513,14 +547,14 @@ export function buildCharacter(
   skinnedVolume.castShadow = true;
   skinnedVolume.receiveShadow = true;
   skinnedVolume.userData.reconstruction = {
-    method: "contour-preserving rounded 3D puppet",
+    method: "high-resolution contour-preserving articulated relief preview",
     polygonizer: "deterministic triangulated artwork shell",
-    subdivisions: 2,
+    subdivisions: 3,
     topology: "closed",
     contourPoints: contour.length,
     skeletonPoints: skeleton.length,
     semanticRig: rig.version,
-    skinning: `${branchChains.length} verified two-joint chains (${articulationBones.length} branch bones) over one continuous surface; unreviewed anatomy cannot deform geometry`,
+    skinning: `${branchChains.length} verified two-joint chains (${articulationBones.length} branch bones) with semantic-outline-clipped weights; unreviewed anatomy cannot deform geometry`,
     maximumHalfDepth: shell.maximumHalfDepth,
     texturedFrontTriangles,
     neutralBackTriangles,
@@ -538,11 +572,12 @@ export function buildCharacter(
   character.add(skinnedVolume);
 
   character.userData.reconstruction = {
-    method: "contour-preserving rounded 3D puppet",
+    method: "high-resolution articulated relief preview",
     texturePlane: false,
-    viewableDegrees: 360,
+    orbitableDegrees: 360,
+    fullSculptDegrees: 0,
     bodyTopology: "closed",
-    backPrior: "bounded hidden-surface relief; the original artwork appears only on the front",
+    backPrior: "bounded neutral relief; full unseen-view reconstruction requires the neural sculpt path",
     maximumHalfDepth: shell.maximumHalfDepth,
     texturedFrontTriangles,
     neutralBackTriangles,
@@ -566,7 +601,7 @@ export function buildCharacter(
 }
 
 export const ARStage = forwardRef<ARStageHandle, ARStageProps>(function ARStage(
-  { characters, contour, skeleton, textureUrl, rig, depth, action, ensembleActions = null, world, lightingMood, cameraPreset, accent, inflation, neuralAssetUrl, visible, onCapability, onPlaced, onNeuralAssetInfo },
+  { characters, contour, skeleton, textureUrl, rig, depth, action, ensembleActions = null, world, lightingMood, cameraPreset, accent, inflation, neuralAssetUrl, visible, onCapability, onPlaced, onNeuralAssetInfo, onWorldInteraction },
   ref,
 ) {
   const mountRef = useRef<HTMLDivElement>(null);
@@ -662,6 +697,46 @@ export const ARStage = forwardRef<ARStageHandle, ARStageProps>(function ARStage(
     controls.maxPolarAngle = Math.PI * 0.91;
     controls.zoomToCursor = true;
     controls.update();
+
+    const activateWorldObject = (id: string) => {
+      let target: THREE.Object3D | null = null;
+      environment.group.traverse((object) => {
+        const interaction = object.userData.wallaliveInteraction as WorldObjectInteraction | undefined;
+        if (!target && interaction?.id === id) target = object;
+      });
+      if (!target) return false;
+      const object = target as THREE.Object3D;
+      const interaction = object.userData.wallaliveInteraction as WorldObjectInteraction;
+      object.userData.wallaliveActivatedAt = performance.now();
+      object.traverse((child) => {
+        if (!(child instanceof THREE.Mesh)) return;
+        const materials = Array.isArray(child.material) ? child.material : [child.material];
+        materials.forEach((surface) => {
+          if ("emissiveIntensity" in surface && typeof surface.emissiveIntensity === "number") surface.emissiveIntensity = Math.max(surface.emissiveIntensity, 1.25);
+        });
+      });
+      onWorldInteraction?.(interaction);
+      return true;
+    };
+
+    const raycaster = new THREE.Raycaster();
+    const pointer = new THREE.Vector2();
+    const interactiveAt = (event: PointerEvent) => {
+      const bounds = renderer.domElement.getBoundingClientRect();
+      pointer.set((event.clientX - bounds.left) / Math.max(1, bounds.width) * 2 - 1, -((event.clientY - bounds.top) / Math.max(1, bounds.height)) * 2 + 1);
+      raycaster.setFromCamera(pointer, camera);
+      return raycaster.intersectObjects(environment.group.children, true).find((hit) => Boolean(hit.object.userData.wallaliveInteraction))?.object ?? null;
+    };
+    const onWorldPointerMove = (event: PointerEvent) => {
+      renderer.domElement.style.cursor = interactiveAt(event) ? "pointer" : "grab";
+    };
+    const onWorldPointerUp = (event: PointerEvent) => {
+      const target = interactiveAt(event);
+      const interaction = target?.userData.wallaliveInteraction as WorldObjectInteraction | undefined;
+      if (interaction) activateWorldObject(interaction.id);
+    };
+    renderer.domElement.addEventListener("pointermove", onWorldPointerMove);
+    renderer.domElement.addEventListener("pointerup", onWorldPointerUp);
 
     const pmrem = new THREE.PMREMGenerator(renderer);
     const roomEnvironment = new RoomEnvironment();
@@ -853,6 +928,14 @@ export const ARStage = forwardRef<ARStageHandle, ARStageProps>(function ARStage(
         if (!motion) return;
         object.position.y = motion.baseY + Math.sin(elapsed * motion.speed + motion.phase) * motion.amplitude;
         object.rotation[motion.spinAxis ?? "y"] += delta * motion.spin;
+      });
+      environment.group.traverse((object) => {
+        const activatedAt = Number(object.userData.wallaliveActivatedAt ?? 0);
+        if (!activatedAt) return;
+        const age = (performance.now() - activatedAt) / 1000;
+        const pulse = age < 1.4 ? 1 + Math.sin(age * Math.PI * 5) * Math.max(0, 0.12 * (1 - age / 1.4)) : 1;
+        object.scale.setScalar(pulse);
+        if (age >= 1.4) object.userData.wallaliveActivatedAt = 0;
       });
       if (cameraTransition && syntheticWorldVisible) {
         const amount = Math.min(1, (performance.now() - cameraTransition.start) / 820);
@@ -1059,6 +1142,8 @@ export const ARStage = forwardRef<ARStageHandle, ARStageProps>(function ARStage(
       observer.disconnect();
       renderer.domElement.removeEventListener("keydown", onKeyDown);
       renderer.domElement.removeEventListener("keyup", onKeyUp);
+      renderer.domElement.removeEventListener("pointermove", onWorldPointerMove);
+      renderer.domElement.removeEventListener("pointerup", onWorldPointerUp);
       controls.dispose();
       environmentMap.dispose();
       renderer.setAnimationLoop(null);
@@ -1068,7 +1153,7 @@ export const ARStage = forwardRef<ARStageHandle, ARStageProps>(function ARStage(
       if (renderer.domElement.parentNode === mount) mount.removeChild(renderer.domElement);
     };
 
-    handlesRef.current = { renderer, scene, camera, character: characterRoot, reticle, setWorld: setStageWorld, setLightingMood: applyLightingMood, setCameraPreset: applyCameraPreset, controls, dispose };
+    handlesRef.current = { renderer, scene, camera, character: characterRoot, reticle, setWorld: setStageWorld, setLightingMood: applyLightingMood, setCameraPreset: applyCameraPreset, interactWorldObject: activateWorldObject, controls, dispose };
     if (navigator.xr) navigator.xr.isSessionSupported("immersive-ar").then(onCapability).catch(() => onCapability(false));
     else onCapability(false);
 
@@ -1076,7 +1161,7 @@ export const ARStage = forwardRef<ARStageHandle, ARStageProps>(function ARStage(
       handlesRef.current = null;
       dispose();
     };
-  }, [accent, characters, contour, depth, inflation, neuralAssetUrl, onCapability, onNeuralAssetInfo, rig, skeleton, textureUrl, visible]);
+  }, [accent, characters, contour, depth, inflation, neuralAssetUrl, onCapability, onNeuralAssetInfo, onWorldInteraction, rig, skeleton, textureUrl, visible]);
 
   useEffect(() => {
     worldStateRef.current = world;
@@ -1110,6 +1195,9 @@ export const ARStage = forwardRef<ARStageHandle, ARStageProps>(function ARStage(
     moveBy(x: number, z: number) {
       placementRef.current.x = THREE.MathUtils.clamp(placementRef.current.x + x, -3.8, 3.8);
       placementRef.current.z = THREE.MathUtils.clamp(placementRef.current.z + z, -4.9, 1.25);
+    },
+    interactWorldObject(id: string) {
+      return handlesRef.current?.interactWorldObject(id) ?? false;
     },
     async enterImmersiveAR() {
       const handles = handlesRef.current;

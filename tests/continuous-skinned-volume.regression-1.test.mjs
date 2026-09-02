@@ -62,7 +62,7 @@ test("builds a watertight rounded shell while preserving the exact drawing silho
 
 test("skins one continuous reconstructed surface instead of attaching generic capsules", () => {
   assert.match(source, /new THREE\.SkinnedMesh\(compactGeometry, \[sideMaterial, frontMaterial, backMaterial\]\)/);
-  assert.match(source, /buildArtworkShellGeometry\(contour, depth, requestedHalfDepth, inflation, 2\)/);
+  assert.match(source, /buildArtworkShellGeometry\(contour, depth, requestedHalfDepth, inflation, 3\)/);
   assert.match(source, /contour-preserving rounded 3D puppet/);
   assert.match(source, /setAttribute\("skinIndex"/);
   assert.match(source, /setAttribute\("skinWeight"/);

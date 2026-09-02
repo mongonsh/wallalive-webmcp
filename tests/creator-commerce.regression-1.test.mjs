@@ -22,12 +22,13 @@ const profile = {
   hasRigged3D: true,
   activeWorld: "storybook",
   storyTitle: "Pip Finds a Brave Hello",
+  contributors: ["mika", "sora"],
 };
 
 test("product recommendations use artwork evidence and creator intent", () => {
   const recommendations = recommendCreatorProducts(profile, "fundraiser", "classroom");
-  assert.equal(recommendations.length, 5);
-  assert.equal(recommendations[0].id, "sticker-sheet");
+  assert.equal(recommendations.length, 8);
+  assert.equal(recommendations[0].id, "story-zine");
   assert.match(recommendations[0].reason, /3 characters/);
   assert.ok(recommendations.every((item) => item.score >= 1 && item.score <= 99));
 });
@@ -47,6 +48,8 @@ test("creator drop remains a draft until a visible adult approval", () => {
   assert.equal(drop.safety.publishesToShopify, false);
   assert.equal(drop.safety.createsOrders, false);
   assert.equal(drop.safety.includesImagePixelsInToolResult, false);
+  assert.equal(drop.safety.contributorPermissionsRequired, true);
+  assert.deepEqual(drop.contributors.map((item) => item.username), ["mika", "sora"]);
   assert.equal(drop.threeDExperience.heroMode, "interactive-model");
   assert.deepEqual(new Set(drop.products.map((item) => item.id)), new Set(["sticker-sheet", "art-print", "tote-bag"]));
 });
@@ -61,6 +64,8 @@ test("Shopify handoff exports importable draft data and explicit safety guidance
   assert.match(csv, /"draft"/);
   assert.equal(blueprint.importMode, "draft-only");
   assert.equal(blueprint.storefrontMcpHandoff.wallaliveNeverDoes.includes("place order"), true);
+  assert.equal(blueprint.storefrontMcpHandoff.nativeTools.includes("search_catalog"), true);
+  assert.match(handoff, /@mika/);
   assert.match(handoff, /Adult review checklist/);
   assert.match(handoff, /native WebMCP storefront tools/);
 });

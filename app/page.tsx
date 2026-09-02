@@ -1,10 +1,11 @@
 /* eslint-disable @next/next/no-img-element */
 "use client";
 
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { CSSProperties } from "react";
-import type { ARStageHandle, ARWorld, CameraPreset, CharacterAction, LightingMood } from "./components/ARStage";
+import type { ARStageHandle, ARWorld, CameraPreset, CharacterAction, LightingMood, WorldObjectInteraction } from "./components/ARStage";
 import { DrawingWall } from "./components/DrawingWall";
+import { SharedRoomPanel } from "./components/SharedRoomPanel";
 import { createAniGenDemoDrawing, createDemoDoodle, POSE_SKELETON_EDGES, selectAnimatableRigParts, type CaptureTarget, type DrawingExtraction, type SemanticPart, type SemanticPartKind, type SemanticSide } from "./lib/drawing";
 import { inspectCharacterCapabilities as buildCharacterCapabilities, SAFE_SHOW_ACTIONS, validateCharacterMove, type CharacterCapability } from "./lib/creative-show";
 import { recognizeDrawingParts, recognizeDrawingsFromImageUrl, recognizeDrawingsFromVideo } from "./lib/learned-parts";
@@ -26,6 +27,7 @@ import {
   type CreatorRecommendation,
   type CreatorVibe,
 } from "./lib/creator-commerce";
+import { useSharedRoom } from "./lib/use-shared-room";
 
 const ARStage = lazy(() => import("./components/ARStage").then((module) => ({ default: module.ARStage })));
 
@@ -73,6 +75,7 @@ type MagicShowPlan = {
   stagedBy: Actor;
   status: "awaiting-human-approval" | "playing" | "complete" | "dismissed";
 };
+type WorldActivity = { title: string; prompt: string; objectIds: string[]; reward: string };
 
 type WebMCPTool = {
   name: string;
@@ -113,10 +116,13 @@ const toolNames = [
   ["recommend_creator_products", "ADVISE"],
   ["stage_shopify_creator_drop", "STAGE"],
   ["inspect_creator_drop", "READ"],
+  ["inspect_shared_room", "READ"],
+  ["prepare_room_invite", "STAGE"],
+  ["interact_story_world", "LIVE"],
   ["list_collaboration_history", "READ"],
 ] as const;
 
-const perfectJudgePrompt = "Inspect the creative scene and every character's verified capabilities. Stage a gentle four-beat story that practices sequencing and cooperation, use only supported actions, and wait for me to approve playback. Do not access the camera or purchase anything.";
+const perfectJudgePrompt = "Inspect our shared room, creative scene, verified character abilities, and current story-world objects. Stage a four-beat cooperation quest, use only supported character actions, and wait for my approval. Do not access the camera, share pixels, publish products, or buy anything.";
 
 const worlds: Array<{ id: WorldId; label: string; short: string }> = [
   { id: "studio", label: "My room", short: "ROOM" },
@@ -124,6 +130,13 @@ const worlds: Array<{ id: WorldId; label: string; short: string }> = [
   { id: "wizard", label: "Wizard academy", short: "WIZARD" },
   { id: "museum", label: "Grand museum", short: "MUSEUM" },
 ];
+
+const worldActivities: Record<WorldId, WorldActivity> = {
+  studio: { title: "Make a tiny movie", prompt: "Touch the projector and maker table. Give every character one job in the scene.", objectIds: ["studio-projector", "studio-maker-table"], reward: "Your cast made its first mini movie together." },
+  storybook: { title: "Firefly hide & seek", prompt: "Find three glowing fireflies, then unlock the castle gate as a team.", objectIds: ["storybook-firefly-0", "storybook-firefly-1", "storybook-firefly-2", "storybook-gate"], reward: "The lantern trail is complete—the castle opens." },
+  wizard: { title: "The cooperation spell", prompt: "Read the spell book, gather three crystals, then enter the living portal.", objectIds: ["wizard-spell-book", "wizard-crystal-a", "wizard-crystal-b", "wizard-crystal-c", "wizard-portal"], reward: "The spell worked because every character had a role." },
+  museum: { title: "Curate a living gallery", prompt: "Touch each artwork and the motion sculpture. Tell what you notice together.", objectIds: ["museum-art-0", "museum-art-1", "museum-art-2", "museum-sculpture"], reward: "Your cast curated a new exhibition story." },
+};
 
 const actions: Array<{ action: CharacterAction; label: string; glyph: string }> = [
   { action: "wave", label: "Wave", glyph: "◒" },
@@ -195,6 +208,7 @@ export default function Home() {
   const showPlayingRef = useRef(false);
   const lightingMoodRef = useRef<LightingMood>("sunset-warm");
   const cameraPresetRef = useRef<CameraPreset>("cinematic-orbit");
+  const worldInteractionActorRef = useRef<{ actor: Actor; toolName?: string }>({ actor: "CHILD" });
 
   const [step, setStep] = useState<AppStep>("ready");
   const [cameraState, setCameraState] = useState<CameraState>("idle");
@@ -220,6 +234,8 @@ export default function Home() {
   const [pendingPartKind, setPendingPartKind] = useState<(typeof anatomyKinds)[number] | null>(null);
   const [pendingUpload, setPendingUpload] = useState<PendingUpload | null>(null);
   const [drawingWallOpen, setDrawingWallOpen] = useState(false);
+  const [sharedRoomOpen, setSharedRoomOpen] = useState(false);
+  const [dismissedInvite, setDismissedInvite] = useState("");
   const [world, setWorld] = useState<WorldId>("studio");
   const [magicShowPlan, setMagicShowPlan] = useState<MagicShowPlan | null>(null);
   const [ensembleActions, setEnsembleActions] = useState<CharacterAction[] | null>(null);
@@ -232,6 +248,24 @@ export default function Home() {
   const [creatorRecommendations, setCreatorRecommendations] = useState<CreatorRecommendation[]>([]);
   const [creatorDrop, setCreatorDrop] = useState<CreatorDrop | null>(null);
   const [adultExportApproved, setAdultExportApproved] = useState(false);
+  const [worldInteractions, setWorldInteractions] = useState<Record<WorldId, string[]>>({ studio: [], storybook: [], wizard: [], museum: [] });
+  const [lastWorldMoment, setLastWorldMoment] = useState<WorldObjectInteraction | null>(null);
+  const sharedRoom = useSharedRoom();
+  const prepareRoomInvite = sharedRoom.prepareInvite;
+  const search = useSyncExternalStore(
+    () => () => undefined,
+    () => window.location.search,
+    () => "",
+  );
+  const inviteParams = useMemo(() => new URLSearchParams(search), [search]);
+  const invitedRoom = inviteParams.get("room")?.trim().toUpperCase().slice(0, 16) ?? "";
+  const invitedUsername = inviteParams.get("invite")?.trim().slice(0, 24) ?? "";
+  const sharedRoomVisible = sharedRoomOpen || Boolean(invitedRoom && dismissedInvite !== search);
+  const sharedRoomStateRef = useRef({ session: sharedRoom.session, participants: sharedRoom.participants, operations: sharedRoom.operations, status: sharedRoom.status });
+
+  useEffect(() => {
+    sharedRoomStateRef.current = { session: sharedRoom.session, participants: sharedRoom.participants, operations: sharedRoom.operations, status: sharedRoom.status };
+  }, [sharedRoom.operations, sharedRoom.participants, sharedRoom.session, sharedRoom.status]);
 
   const record = useCallback((actor: Actor, action: string, detail: string, toolName?: string) => {
     const item: Activity = { id: makeId(), time: timeLabel(), actor, action, detail, toolName };
@@ -482,7 +516,7 @@ export default function Home() {
     setStoryCaption(`${next.name} lifts away from the wall for the first time.`);
     record(actor, neural ? "Loaded a rigged neural 3D character" : "Built an articulated local 3D cast", neural
       ? `${next.name} · ${neural.provider} · glTF SkinnedMesh · generated mesh, skeleton, and skin weights · ${graphNodes} semantic nodes · ${graphEdges} branches.`
-      : `${ensemble.length} independent closed meshes · exact textured fronts · neutral filled backs · ${graphNodes} rig nodes · ${graphEdges} branches · no upload.`, toolName);
+      : `${ensemble.length} high-resolution articulated relief previews · exact artwork fronts · ${graphNodes} rig nodes · ${graphEdges} verified branches · no upload.`, toolName);
     return next;
   }, [commitCharacter, record]);
 
@@ -575,9 +609,41 @@ export default function Home() {
     return { id: selected.id, label: selected.label };
   }, [record]);
 
+  const handleWorldInteraction = useCallback((interaction: WorldObjectInteraction, actor: Actor = "CHILD", toolName?: string) => {
+    setWorldInteractions((current) => ({
+      ...current,
+      [interaction.world]: current[interaction.world].includes(interaction.id)
+        ? current[interaction.world]
+        : [...current[interaction.world], interaction.id],
+    }));
+    setLastWorldMoment(interaction);
+    setStoryCaption(interaction.story);
+    setNotice(`${interaction.label}: ${interaction.story}`);
+    record(actor, `${interaction.verb} ${interaction.label}`, interaction.story, toolName);
+    return { objectId: interaction.id, label: interaction.label, verb: interaction.verb, story: interaction.story, visibleWorldUpdated: true };
+  }, [record]);
+
+  const handleStageWorldInteraction = useCallback((interaction: WorldObjectInteraction) => {
+    const source = worldInteractionActorRef.current;
+    handleWorldInteraction(interaction, source.actor, source.toolName);
+  }, [handleWorldInteraction]);
+
+  const interactWithWorldObject = useCallback((objectId: string, actor: Actor = "BROWSER AGENT") => {
+    const activity = worldActivities[worldRef.current];
+    if (!activity.objectIds.includes(objectId)) throw new Error(`That object is not part of ${worldRef.current}. Inspect the scene for current object ids.`);
+    worldInteractionActorRef.current = { actor, toolName: actor === "BROWSER AGENT" ? "interact_story_world" : undefined };
+    const activated = stageRef.current?.interactWorldObject(objectId) ?? false;
+    worldInteractionActorRef.current = { actor: "CHILD" };
+    if (!activated) throw new Error("The 3D object is not ready yet.");
+    return { objectId, world: worldRef.current, activated, visibleWorldUpdated: true };
+  }, []);
+
   const animateCharacter = useCallback((action: CharacterAction, actor: Actor, toolName?: string, caption?: string) => {
     const current = characterRef.current;
     if (!current.created) throw new Error("Create the character before animating it.");
+    const figures = captureEnsembleRef.current.length ? captureEnsembleRef.current : captureRef.current ? [captureRef.current] : [];
+    const unsupported = buildCharacterCapabilities(figures, Boolean(neuralAssetRef.current)).filter((capability) => !capability.availableActions.includes(action));
+    if (unsupported.length) throw new Error(`${action} is locked for figure ${unsupported.map((capability) => capability.characterIndex + 1).join(", ")} because the needed skeleton branch was not verified.`);
     const next = { ...current, action };
     commitCharacter(next, `${next.name} is ${actionProgressive[action]}.`);
     setStoryCaption(caption ?? `${next.name} tries a ${action}.`);
@@ -630,9 +696,10 @@ export default function Home() {
       secondaryColor: current.analysis.secondaryColor,
       movableParts,
       semanticParts: [...new Set(figures.flatMap((figure) => figure.rig.detectedKinds))],
-      hasRigged3D: characterRef.current.created,
+      hasRigged3D: Boolean(neuralAssetRef.current),
       activeWorld: worldRef.current,
       storyTitle: characterRef.current.storyTitle,
+      contributors: sharedRoomStateRef.current.participants.map((participant) => participant.username),
     };
   }, []);
 
@@ -734,8 +801,8 @@ export default function Home() {
     if (!creatorDrop) return;
     setAdultExportApproved(true);
     setCreatorDrop({ ...creatorDrop, status: "approved-for-export" });
-    setNotice("Adult approval recorded in this tab. The Shopify draft files are ready to download.");
-    record("CHILD", "Approved the Creator Drop export", `${creatorDrop.name} may be downloaded as draft files; nothing was published.`);
+    setNotice("Adult approval and contributor-permission check recorded in this tab. The Shopify draft files are ready.");
+    record("CHILD", "Approved the Creator Drop export", `${creatorDrop.name} may be downloaded as draft files; ${creatorDrop.contributors.length} contributor permission checks recorded; nothing was published.`);
   }, [creatorDrop, record]);
 
   const placeCharacter = useCallback((x: number, y: number, surface: CharacterState["surface"], scale: number, actor: Actor, toolName?: string) => {
@@ -753,7 +820,13 @@ export default function Home() {
 
   const inspectScene = useCallback(() => ({
     world: worldRef.current,
-    worldRendering: "Procedural Three.js geometry with perspective camera, lights, occlusion, fog, and cast/receive shadows; no CSS world image",
+    worldRendering: "Original high-resolution procedural PBR Three.js set with perspective, textured surfaces, lights, occlusion, fog, shadows, and raycast interactions; no flat backdrop or third-party franchise art",
+    interactiveStory: {
+      title: worldActivities[worldRef.current].title,
+      prompt: worldActivities[worldRef.current].prompt,
+      objectIds: worldActivities[worldRef.current].objectIds,
+      completedObjectIds: worldInteractions[worldRef.current],
+    },
     spatialCinematics: {
       lightingMood: lightingMoodRef.current,
       cameraPreset: cameraPresetRef.current,
@@ -764,20 +837,21 @@ export default function Home() {
     drawingAnalysis: captureRef.current?.analysis ?? null,
     reconstruction: captureRef.current ? {
       localIsolation: "Authored alpha or prompt-mask-first segmentation; low-confidence heuristic fallback remains below the 3D readiness gate",
-      localPreview: characterRef.current.created ? "artwork-preserving closed 3D puppet cast" : "verified transparent character cutout awaiting human review",
+      localPreview: characterRef.current.created ? "instant artwork-preserving articulated spatial puppet; not presented as a full neural sculpt" : "verified transparent character cutout awaiting human review",
       method: neuralAssetRef.current
         ? `${neuralAssetRef.current.provider} full-volume neural mesh + skeleton skinning`
         : characterRef.current.created
-          ? "local contour-preserving closed mesh + textured front + neutral filled back + per-figure branch rig"
+          ? "local contour-preserving relief mesh + full-resolution artwork front + neutral filled back + only confidence-gated branch bones"
           : "local drawing segmentation + reconstruction-readiness gate + human review",
       provider: neuralAssetRef.current?.provider ?? "WallAlive local recognition",
       model: neuralAssetRef.current?.model ?? captureRef.current.cutoutRecognition?.model ?? "authored-alpha-cutout",
-      assetType: neuralAssetRef.current ? "glTF SkinnedMesh" : characterRef.current.created ? "Three.js SkinnedMesh cast" : "reviewed transparent 2D cutout",
-      topology: neuralAssetRef.current ? "generated full 3D surface including unseen views" : characterRef.current.created ? "closed contour volume with independently rigged figures" : "semantic evidence awaiting 3D choice",
+      assetType: neuralAssetRef.current ? "glTF SkinnedMesh" : characterRef.current.created ? "Three.js articulated relief preview" : "reviewed transparent 2D cutout",
+      topology: neuralAssetRef.current ? "generated full 3D surface including unseen views" : characterRef.current.created ? "closed relief volume; a preview, not unseen-view reconstruction" : "semantic evidence awaiting 3D choice",
       topologyConfidence: captureRef.current.rig.topologyConfidence ?? null,
       backInference: neuralAssetRef.current ? "full neural generative prior" : characterRef.current.created ? "bounded neutral relief; no invented rear artwork" : "not built yet",
-      neuralEvidence: { viewableDegrees: neuralAssetRef.current ? 360 : 0 },
-      viewableDegrees: characterRef.current.created ? 360 : 0,
+      neuralEvidence: { fullSculptDegrees: neuralAssetRef.current ? 360 : 0 },
+      orbitableDegrees: characterRef.current.created ? 360 : 0,
+      fullSculptDegrees: neuralAssetRef.current ? 360 : 0,
       contourPoints: captureRef.current.contour.length,
       skeletonPoints: captureRef.current.skeleton.length,
       rigVersion: captureRef.current.rig.version,
@@ -813,7 +887,7 @@ export default function Home() {
     privacyBoundary: "Camera capture is human-only. WebMCP can request reconstruction but cannot approve or upload; only a visible human action may send the isolated drawing to AniGen.",
     availableAnimations: actions.map((item) => item.action),
     placementModes: immersiveAR ? ["world-hit-test", "camera-overlay"] : ["camera-overlay"],
-  }), [immersiveAR]);
+  }), [immersiveAR, worldInteractions]);
 
   const currentCharacterCapabilities = useCallback((): CharacterCapability[] => {
     const drawings = captureEnsembleRef.current.length
@@ -835,6 +909,11 @@ export default function Home() {
       characterCreated: characterRef.current.created,
       character: characterRef.current.created ? { name: characterRef.current.name, personality: characterRef.current.personality, surface: characterRef.current.surface } : null,
       availableWorlds: worlds.map(({ id, label }) => ({ id, label })),
+      sharedRoom: sharedRoomStateRef.current.session ? {
+        roomId: sharedRoomStateRef.current.session.roomId,
+        participantCount: sharedRoomStateRef.current.participants.length,
+        vectorOperationCount: sharedRoomStateRef.current.operations.length,
+      } : null,
       pendingShow: pending ? { id: pending.id, title: pending.title, learningGoal: pending.learningGoal, status: pending.status, beats: pending.beats.length, cast: pending.cast.length, stagedBy: pending.stagedBy } : null,
       humanOnlyControls: ["open_camera", "capture_frame", "approve_cutout", "approve_external_3d", "approve_and_play_staged_show"],
       agentWorkflow: characterRef.current.created
@@ -1053,7 +1132,7 @@ export default function Home() {
                 reconstructionMode: "local-articulated",
                 localRig: {
                   figures: captureEnsembleRef.current.length || 1,
-                  rendering: "closed Three.js SkinnedMesh with exact artwork front and neutral filled back",
+                  rendering: "high-resolution articulated relief preview with exact artwork front; not a full unseen-view sculpt",
                   private: true,
                 },
                 generatedAsset: null,
@@ -1261,6 +1340,67 @@ export default function Home() {
         execute: async (_input, options) => { const signal = executionSignal(options); guard(signal); return ok(inspectCreatorDrop()); },
       },
       {
+        name: "inspect_shared_room",
+        title: "Inspect the collaborative room",
+        description: "Read guest creators, room code, vector-operation count, and the current interactive quest. Returns handles and structured state only—never artwork pixels, camera frames, or private tokens.",
+        inputSchema: { ...base, properties: {} },
+        annotations: { readOnlyHint: true, untrustedContentHint: true },
+        execute: async (_input, options) => {
+          const signal = executionSignal(options);
+          guard(signal);
+          const room = sharedRoomStateRef.current;
+          return ok({
+            active: Boolean(room.session),
+            roomId: room.session?.roomId ?? null,
+            creators: room.participants.map((person) => ({ username: person.username, accent: person.accent })),
+            sharedVectorOperations: room.operations.length,
+            sync: room.status,
+            quest: { world: worldRef.current, ...worldActivities[worldRef.current], completedObjectIds: worldInteractions[worldRef.current] },
+            pixelsIncluded: false,
+            sessionTokenIncluded: false,
+          });
+        },
+      },
+      {
+        name: "prepare_room_invite",
+        title: "Prepare a creator room invite",
+        description: "Prepare a visible invite link for a guest username in the current drawing room. It does not contact the person or send a message; the human chooses how to share the link.",
+        inputSchema: { ...base, properties: { username: { type: "string", minLength: 2, maxLength: 24, description: "Guest creator handle to place on the invite." } }, required: ["username"] },
+        annotations: { readOnlyHint: false, untrustedContentHint: true },
+        execute: async (input, options) => {
+          const signal = executionSignal(options);
+          try {
+            guard(signal);
+            if (!sharedRoomStateRef.current.session) {
+              setSharedRoomOpen(true);
+              return ok({ requiresHumanAction: true, action: "Create or join a room in the visible collaboration panel.", messageSent: false });
+            }
+            const result = await prepareRoomInvite(stringValue(input.username, "", 24));
+            setSharedRoomOpen(true);
+            setAgentLine(`Invite prepared for @${result.friend}. You decide where to share it.`);
+            record("BROWSER AGENT", "Prepared a room invite", `@${result.friend} · no message sent`, "prepare_room_invite");
+            return ok({ username: result.friend, inviteUrl: result.inviteUrl, visibleReviewOpen: true, messageSent: false, pixelsIncluded: false });
+          } catch (error) { return fail(error); }
+        },
+      },
+      {
+        name: "interact_story_world",
+        title: "Touch an object in the story world",
+        description: "Activate one listed 3D story object in the visible world and return its narrative effect. Use inspect_shared_room first. It cannot invent hidden objects or bypass character capability checks.",
+        inputSchema: { ...base, properties: { objectId: { type: "string", minLength: 1, maxLength: 64, description: "Exact object id from the current quest." } }, required: ["objectId"] },
+        annotations: { readOnlyHint: false, untrustedContentHint: true },
+        execute: async (input, options) => {
+          const signal = executionSignal(options);
+          try {
+            guard(signal);
+            const result = interactWithWorldObject(stringValue(input.objectId, "", 64));
+            await afterVisiblePaint();
+            guard(signal);
+            return ok(result);
+          } catch (error) { return fail(error); }
+        },
+      },
+      {
         name: "list_collaboration_history",
         title: "List attributed human-agent history",
         description: "Read recent staged plans, human approvals, performances, and system actions. Camera pixels and drawing image data are excluded.",
@@ -1275,7 +1415,7 @@ export default function Home() {
       setNotice(`${tools.length} WebMCP tools are ready. Camera capture remains human-only.`);
     }).catch(() => setWebMcpReady(false));
     return () => controller.abort();
-  }, [commitNeuralAsset, createCharacter, currentCharacterCapabilities, directEnsembleBeat, inspectCreativeScene, inspectCreatorDrop, orchestrateSpatialCinematics, parseShowMoves, recommendProductsForArtwork, requestNeuralConsent, stageMagicShow, stageShopifyCreatorDrop]);
+  }, [commitNeuralAsset, createCharacter, currentCharacterCapabilities, directEnsembleBeat, inspectCreativeScene, inspectCreatorDrop, interactWithWorldObject, orchestrateSpatialCinematics, parseShowMoves, prepareRoomInvite, recommendProductsForArtwork, record, requestNeuralConsent, stageMagicShow, stageShopifyCreatorDrop, worldInteractions]);
 
   const runMagicDemo = useCallback(async () => {
     if (demoRunning) return;
@@ -1361,7 +1501,7 @@ export default function Home() {
     rotateGestureRef.current = null;
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
     if (gesture?.moved) {
-      setNotice("360° model rotated. Drag again to inspect its bounded filled back.");
+      setNotice(neuralAssetRef.current ? "Full 3D sculpt rotated." : "Instant spatial preview rotated. Full unseen-view sculpt is a separate neural quality tier.");
       return;
     }
     activateStagePoint(event);
@@ -1549,11 +1689,15 @@ export default function Home() {
     poseApplicable: Boolean(figure.poseRecognition?.applicable),
     topologyApplicable: Boolean(figure.topologyRecognition?.applicable),
   }).length, 0), [captureEnsemble]);
+  const sharedSupportedActions = useMemo(() => {
+    const capabilities = buildCharacterCapabilities(captureEnsemble, Boolean(neuralAsset));
+    return new Set(SAFE_SHOW_ACTIONS.filter((action) => capabilities.length > 0 && capabilities.every((capability) => capability.availableActions.includes(action))));
+  }, [captureEnsemble, neuralAsset]);
   const neuralBusy = ["connecting", "preparing", "queued", "generating", "downloading"].includes(neuralProgress.phase);
   const primaryButton = cameraState === "active"
     ? { label: "CAPTURE DRAWING", action: captureDrawing }
     : capture && !character.created
-      ? { label: "CREATE RIGGED 3D", action: requestNeuralConsent }
+      ? { label: "CHOOSE 3D QUALITY", action: requestNeuralConsent }
       : { label: "START CAMERA", action: startCamera };
   if (capture && captureEnsemble.length > 1 && !character.created) primaryButton.label = `WAKE ${captureEnsemble.length} FIGURES`;
   const stepIndex = step === "ready" ? 0 : step === "camera" ? 1 : character.created ? 3 : 2;
@@ -1565,6 +1709,7 @@ export default function Home() {
         <div className="mini-steps" aria-label="Creative journey"><span className={stepIndex >= 1 ? "done" : "active"}>Make</span><i>→</i><span className={stepIndex >= 2 ? "done" : ""}>Wake</span><i>→</i><span className={stepIndex >= 3 ? "done" : ""}>Share</span></div>
         <div className="header-actions">
           <div className={`ready-pill ${webMcpReady ? "is-ready" : ""}`}><i /> {webMcpReady ? "AGENT READY" : "DEMO READY"}</div>
+          <button className={`room-toggle ${sharedRoom.session ? "is-live" : ""}`} onClick={() => setSharedRoomOpen(true)} aria-label="Open collaborative drawing room">{sharedRoom.session ? `${sharedRoom.participants.length} LIVE` : "DRAW TOGETHER"}</button>
           <button className="merch-toggle" onClick={openCreatorStudio} aria-label="Open Creator Shop">CREATOR SHOP</button>
           <button className="inspector-toggle" onClick={() => { setInspectorOpen(true); setPanelTab("agent"); }}>HOW AGENTS HELP</button>
           <button className="judge-demo" onClick={runMagicDemo} disabled={demoRunning}>{demoRunning ? "WAKING…" : "SEE THE MAGIC"}</button>
@@ -1585,6 +1730,7 @@ export default function Home() {
           <input ref={uploadRef} hidden type="file" accept="image/*" onChange={uploadDrawing} />
           <div className="start-choices">
             <button onClick={() => setDrawingWallOpen(true)}><i>✦</i><span><b>Draw something</b><small>Full paint studio</small></span><em>→</em></button>
+            <button onClick={() => setSharedRoomOpen(true)}><i>∞</i><span><b>Draw together</b><small>{sharedRoom.session ? `${sharedRoom.participants.length} creator${sharedRoom.participants.length === 1 ? "" : "s"} live` : "Invite a friend"}</small></span><em>→</em></button>
             <button onClick={() => uploadRef.current?.click()}><i>▧</i><span><b>Use a picture</b><small>Paper or digital art</small></span><em>→</em></button>
             <button onClick={cameraState === "active" ? captureDrawing : startCamera}><i>◉</i><span><b>{cameraState === "active" ? "Capture now" : "Find wall art"}</b><small>Camera stays private</small></span><em>→</em></button>
           </div>
@@ -1664,10 +1810,10 @@ export default function Home() {
             {capture && cameraState !== "active" && !character.created ? <div className="cutout-review" onPointerDown={(event) => event.stopPropagation()}><img src={capture.textureUrl} alt="Isolated character cutout to review" /><span>{captureEnsemble.length > 1 ? `${captureEnsemble.length} SEPARATE FIGURES FOUND` : "IS THE WHOLE CHARACTER VISIBLE?"}</span><div><button onClick={requestNeuralConsent}>YES · CONTINUE</button><button onClick={() => capture.sourceScope === "camera" ? startCamera() : uploadRef.current?.click()}>NO · TRY AGAIN</button></div></div> : null}
             {step === "camera" ? <><div className="capture-guide"><span /><b>TAP CHARACTER · THEN CAPTURE</b></div><div className="capture-target" style={{ left: `${captureTarget.x * 100}%`, top: `${captureTarget.y * 100}%` }}><i /></div></> : null}
             {character.created ? <Suspense fallback={<div className="three-layer" aria-hidden="true" />}>
-              <ARStage ref={stageRef} characters={character.created && !neuralAsset ? captureEnsemble : null} contour={capture?.contour ?? null} skeleton={capture?.skeleton ?? null} textureUrl={capture?.textureUrl ?? null} rig={capture?.rig ?? null} depth={capture?.depthRecognition ?? null} action={character.action} ensembleActions={ensembleActions} world={world} lightingMood={lightingMood} cameraPreset={cameraPreset} accent={character.accent} inflation={character.inflation} neuralAssetUrl={neuralAsset?.meshUrl ?? null} visible onCapability={handleARCapability} onPlaced={handleARPlaced} onNeuralAssetInfo={handleRiggedAssetInfo} />
+              <ARStage ref={stageRef} characters={character.created && !neuralAsset ? captureEnsemble : null} contour={capture?.contour ?? null} skeleton={capture?.skeleton ?? null} textureUrl={capture?.textureUrl ?? null} rig={capture?.rig ?? null} depth={capture?.depthRecognition ?? null} action={character.action} ensembleActions={ensembleActions} world={world} lightingMood={lightingMood} cameraPreset={cameraPreset} accent={character.accent} inflation={character.inflation} neuralAssetUrl={neuralAsset?.meshUrl ?? null} visible onCapability={handleARCapability} onPlaced={handleARPlaced} onNeuralAssetInfo={handleRiggedAssetInfo} onWorldInteraction={handleStageWorldInteraction} />
             </Suspense> : null}
             {neuralConsentVisible ? <div className="neural-consent" role="dialog" aria-modal="true" aria-labelledby="neural-consent-title" onPointerDown={(event) => event.stopPropagation()}>
-              <span>CHOOSE YOUR 3D</span><h2 id="neural-consent-title">Wake {captureEnsemble.length > 1 ? "the whole cast" : "this drawing"}</h2><p>{captureEnsemble.length > 1 ? "Separate closed 3D puppets, separate rigs, one shared world." : "Instant private puppet now—or send only the cutout for a full AI sculpt."}</p><div><button onClick={startLocalReconstruction}>INSTANT 3D · PRIVATE</button>{captureEnsemble.length === 1 ? <button onClick={startNeuralReconstruction}>GENERATE REAL 3D · AI</button> : null}<button onClick={() => { setNeuralConsentVisible(false); setPartEditorOpen(true); }}>CHECK PARTS</button></div>
+              <span>CHOOSE YOUR QUALITY</span><h2 id="neural-consent-title">Wake {captureEnsemble.length > 1 ? "the whole cast" : "this drawing"}</h2><p>{captureEnsemble.length > 1 ? "Preview the cast now with separate confidence-gated rigs. Full sculpt currently handles one figure at a time." : "Use an instant private spatial puppet—or approve a full AI sculpt with generated unseen views."}</p><div><button onClick={startLocalReconstruction}>INSTANT PUPPET · PRIVATE</button>{captureEnsemble.length === 1 ? <button onClick={startNeuralReconstruction}>FULL 3D SCULPT · AI</button> : null}<button onClick={() => { setNeuralConsentVisible(false); setPartEditorOpen(true); }}>CHECK SKELETON</button></div>
             </div> : null}
             {neuralBusy ? <div className="neural-progress" role="status" onPointerDown={(event) => event.stopPropagation()}><span>ANIGEN · RIGGED 3D</span><b>{neuralProgress.message}</b><div><i style={{ width: `${Math.round(neuralProgress.progress * 100)}%` }} /></div><small>{Math.round(neuralProgress.progress * 100)}% · PUBLIC GPU</small></div> : null}
             {magicShowPlan?.status === "awaiting-human-approval" ? <div className="magic-show-approval" role="dialog" aria-modal="false" aria-labelledby="magic-show-title" onPointerDown={(event) => event.stopPropagation()}>
@@ -1688,12 +1834,19 @@ export default function Home() {
               </div>
               <span>DRAG ORBIT · PINCH ZOOM · PAN</span>
             </div> : null}
-            <div className="camera-hud"><span><i /> {cameraState === "active" ? "LIVE CAMERA · LOCAL" : neuralAsset && character.created ? `FULL NEURAL RIG · ${riggedAssetInfo?.bones ?? "…"} BONES` : character.created ? `${captureEnsemble.length} LOCAL 3D PUPPET${captureEnsemble.length === 1 ? "" : "S"}` : capture ? "CUTOUT REVIEW · LOCAL" : "SAFE DEMO ROOM"}</span><strong>{immersiveAR ? "WEBXR READY" : `${world.toUpperCase()} · REAL 3D SCENE`}</strong></div>
+            <div className="camera-hud"><span><i /> {cameraState === "active" ? "LIVE CAMERA · LOCAL" : neuralAsset && character.created ? `FULL NEURAL RIG · ${riggedAssetInfo?.bones ?? "…"} BONES` : character.created ? `${captureEnsemble.length} INSTANT SPATIAL PUPPET${captureEnsemble.length === 1 ? "" : "S"}` : capture ? "CUTOUT REVIEW · LOCAL" : "SAFE DEMO ROOM"}</span><strong>{immersiveAR ? "WEBXR READY" : `${world.toUpperCase()} · INTERACTIVE 3D`}</strong></div>
             {character.created && storyCaption ? <div className="story-caption"><span>{character.storyTitle || "LIVE MOMENT"}</span><p>{storyCaption}</p></div> : null}
             {cameraState === "denied" || cameraState === "unavailable" ? <div className="camera-message"><b>CAMERA OPTIONAL</b><p>The demo doodle still proves the complete WebMCP and 3D workflow.</p></div> : null}
           </div>
 
           {character.created ? <div className="world-switcher" aria-label="Choose a 3D world"><div><span>CHOOSE A WORLD</span><small>{worlds.find((item) => item.id === world)?.label}</small></div>{worlds.map((item) => <button key={item.id} className={world === item.id ? "active" : ""} onClick={() => changeWorld(item.id, "CHILD")}><i>{item.id === "studio" ? "⌂" : item.id === "storybook" ? "♜" : item.id === "wizard" ? "✦" : "◉"}</i>{item.short}</button>)}</div> : null}
+
+          {character.created ? <section className={`world-quest ${worldInteractions[world].length >= worldActivities[world].objectIds.length ? "is-complete" : ""}`} aria-label={`${worldActivities[world].title} interactive activity`}>
+            <div className="quest-copy"><span>PLAY THIS WORLD</span><h3>{worldActivities[world].title}</h3><p>{worldInteractions[world].length >= worldActivities[world].objectIds.length ? worldActivities[world].reward : worldActivities[world].prompt}</p></div>
+            <div className="quest-objects">{worldActivities[world].objectIds.map((id, index) => <button key={id} className={worldInteractions[world].includes(id) ? "found" : ""} onClick={() => interactWithWorldObject(id, "CHILD")}><i>{worldInteractions[world].includes(id) ? "✓" : index + 1}</i><span>{id.split("-").slice(1).join(" ").replace(/[0-9]/g, "").trim()}</span></button>)}</div>
+            <div className="quest-progress"><i style={{ width: `${worldInteractions[world].length / worldActivities[world].objectIds.length * 100}%` }} /><span>{worldInteractions[world].length}/{worldActivities[world].objectIds.length}</span></div>
+            {lastWorldMoment?.world === world ? <small className="quest-moment">{lastWorldMoment.story}</small> : null}
+          </section> : null}
 
           {character.created ? <div className="cinematic-switcher">
             <div><span>LIGHT</span>{lightingMoods.map((mood) => <button key={mood} className={lightingMood === mood ? "active" : ""} onClick={() => { lightingMoodRef.current = mood; setLightingMood(mood); record("CHILD", "Changed cinematic lighting", mood); }}>{mood.replace("-", " ")}</button>)}</div>
@@ -1702,9 +1855,9 @@ export default function Home() {
 
           {character.created ? <div className="action-tray">
             <div><span>CHARACTER ACTIONS</span><small>{character.created ? `${character.name.toUpperCase()} · ${character.personality.toUpperCase()}` : "WAKE A DRAWING TO PLAY"}</small></div>
-            {actions.map((item) => <button key={item.action} disabled={!character.created || showPlaying} className={character.action === item.action ? "active" : ""} onClick={() => animateCharacter(item.action, "CHILD")}><i>{item.glyph}</i>{item.label}</button>)}
+            {actions.map((item) => <button key={item.action} disabled={!character.created || showPlaying || !sharedSupportedActions.has(item.action)} className={character.action === item.action ? "active" : ""} title={sharedSupportedActions.has(item.action) ? `${item.label} with the verified rig` : `${item.label} needs a verified skeleton branch`} onClick={() => animateCharacter(item.action, "CHILD")}><i>{item.glyph}</i>{item.label}</button>)}
           </div> : null}
-          <p className="placement-tip">{character.created ? neuralAsset ? "Drag for 360° · Generated back · Move through the perspective world" : "Drag for 360° · Filled backs · Every figure moves on its own rig" : capture ? "Check the cutout, then choose instant private 3D or full AI sculpt" : "Photograph a clear figure—uncertain recognition is blocked before 3D"}</p>
+          <p className="placement-tip">{character.created ? neuralAsset ? "Full sculpt · generated unseen views · verified rig" : "Instant puppet · artwork preserved · only verified branches move" : capture ? "Check the cutout and skeleton, then choose instant puppet or full AI sculpt" : "Photograph a clear figure—uncertain recognition is blocked before 3D"}</p>
           <div className="learning-loop" aria-label="WallAlive learning loop"><b>LEARNING LOOP</b><span>Imagine</span><i>→</i><span>Sequence</span><i>→</i><span>Perform</span><i>→</i><span>Reflect</span></div>
         </section>
 
@@ -1773,11 +1926,12 @@ export default function Home() {
                     <figure>{capture ? <img src={capture.textureUrl} alt="Approved artwork in the staged collection" /> : null}<i>✦</i>{creatorDrop.threeDExperience.enabled ? <b>360° 3D · {creatorDrop.threeDExperience.activeWorld}</b> : null}</figure>
                   </div>
                   <div className="store-products">{creatorDrop.products.map((product) => <div key={product.id}><i>{product.glyph}</i><span><b>{product.label}</b><small>${product.price}.00</small></span></div>)}</div>
+                  {creatorDrop.contributors.length ? <div className="store-contributors"><span>CREATED TOGETHER</span>{creatorDrop.contributors.map((contributor) => <i key={contributor.username}>@{contributor.username}</i>)}</div> : null}
                 </section> : null}
 
                 {creatorDrop ? <div className="adult-export-boundary">
-                  <div><i>✓</i><span><b>Adult review comes first</b><small>The agent staged drafts only. Nothing is published, purchased, or sent to Shopify.</small></span></div>
-                  {!adultExportApproved ? <button onClick={approveCreatorExport}>I’M AN ADULT · APPROVE EXPORT</button> : <div className="export-files">
+                  <div><i>✓</i><span><b>Adult + creator permissions first</b><small>{creatorDrop.contributors.length ? `Confirm permission for ${creatorDrop.contributors.length} credited creators. ` : ""}Nothing is published, purchased, or sent to Shopify.</small></span></div>
+                  {!adultExportApproved ? <button onClick={approveCreatorExport}>ADULT · CONFIRM PERMISSIONS</button> : <div className="export-files">
                     <button onClick={() => downloadTextFile("wallalive-products.csv", buildShopifyProductsCsv(creatorDrop), "text/csv;charset=utf-8")}>Products CSV <span>↓</span></button>
                     <button onClick={() => downloadTextFile("wallalive-store-blueprint.json", buildShopifyStoreBlueprint(creatorDrop), "application/json")}>Store blueprint <span>↓</span></button>
                     <button onClick={() => downloadTextFile("wallalive-adult-handoff.md", buildCreatorHandoff(creatorDrop), "text/markdown;charset=utf-8")}>Adult checklist <span>↓</span></button>
@@ -1786,7 +1940,7 @@ export default function Home() {
                   </div>}
                 </div> : null}
 
-                <div className="shopify-handoff"><span>WALLALIVE</span><i>→</i><span>DRAFT KIT</span><i>→</i><span>ADULT REVIEW</span><i>→</i><b>SHOPIFY WEBMCP</b></div>
+                <div className="shopify-handoff"><span>WALLALIVE</span><i>→</i><span>CREATOR-CREDITED DRAFTS</span><i>→</i><span>ADULT REVIEW</span><i>→</i><b>SHOPIFY NATIVE WEBMCP</b></div>
               </> : <button className="creator-agent-action" onClick={() => setInspectorOpen(false)}><span>✦</span><b>Make a drawing first</b><i>→</i></button>}
             </div>
           ) : null}
@@ -1804,10 +1958,34 @@ export default function Home() {
               <div className="history-list">{activity.length ? activity.map((item) => <article key={item.id}><span>{item.time}</span><div><small>{item.actor}</small><b>{item.action}</b><p>{item.detail}</p></div></article>) : <p className="empty-history">The first human or agent action will appear here.</p>}</div>
             </div>
           ) : null}
-          <footer className="agent-footer"><span>WEBMCP · CHATGPT SITES · SHOPIFY</span><b>HUMANS APPROVE</b></footer>
+          <footer className="agent-footer"><span>OPENAI SITES · CLOUDFLARE D1 · CHROME WEBMCP · SHOPIFY</span><b>HUMANS APPROVE</b></footer>
         </aside>
       </section>
-      <DrawingWall open={drawingWallOpen} onClose={() => setDrawingWallOpen(false)} onMake3D={processWallDrawing} />
+      <DrawingWall
+        open={drawingWallOpen}
+        onClose={() => setDrawingWallOpen(false)}
+        onMake3D={processWallDrawing}
+        sharedSession={sharedRoom.session}
+        sharedParticipants={sharedRoom.participants}
+        sharedOperations={sharedRoom.operations}
+        onSharedOperation={sharedRoom.appendOperation}
+      />
+          <SharedRoomPanel
+            key={`${invitedRoom}:${invitedUsername}`}
+            open={sharedRoomVisible}
+        session={sharedRoom.session}
+        participants={sharedRoom.participants}
+        status={sharedRoom.status}
+        message={sharedRoom.message}
+        invitedRoom={invitedRoom}
+        invitedUsername={invitedUsername}
+            onClose={() => { setSharedRoomOpen(false); setDismissedInvite(search); }}
+        onCreate={async (username) => { const result = await sharedRoom.createRoom(username); record("CHILD", "Opened a shared drawing room", `Room ${result.roomId} is ready for invited creators.`); }}
+        onJoin={async (roomId, username) => { const result = await sharedRoom.joinRoom(roomId, username); record("CHILD", "Joined a shared drawing room", `@${result.username} joined room ${result.roomId}.`); }}
+        onInvite={async (username) => { const result = await sharedRoom.prepareInvite(username); record("CHILD", "Prepared a private room invite", `Invite prepared for @${result.friend}; WallAlive did not send a message.`); return result; }}
+        onLeave={() => { sharedRoom.leaveRoom(); record("CHILD", "Left the shared room", "The local artwork stayed in this browser tab."); }}
+        onOpenWall={() => { setSharedRoomOpen(false); setDrawingWallOpen(true); }}
+      />
       {pendingUpload ? <div className="paper-picker-backdrop" role="dialog" aria-modal="true" aria-labelledby="paper-picker-title">
         <section className="paper-picker">
           <header><div><span>ONE QUICK TAP</span><h2 id="paper-picker-title">Which drawing?</h2></div><button onClick={cancelPendingUpload} aria-label="Close photo">×</button></header>

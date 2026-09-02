@@ -6,9 +6,9 @@
 
 **Public source:** https://github.com/mongonsh/wallalive-webmcp
 
-WallAlive turns one or more human-approved drawings into colored, 360° **rigged 3D characters** in a navigable Three.js world. Drawing-specific point extraction runs before the compact drawing mask; general MediaPipe MagicTouch is only a gated last resort. Six local ONNX graphs then look for facial, pose, articulated-part, or variable-topology evidence. A rectangular paper/screen patch or unverified mask is rejected, and every accepted transparent cutout stops for a visible human review. [AniGen](https://github.com/VAST-AI-Research/AniGen) is the optional live path for jointly generated unseen surfaces, skeleton, and skinning weights. Ten WebMCP tools turn the browser agent into a spatial creative director and creator-commerce collaborator: it can inspect real rigs, stage capability-safe stories, recommend products from artwork evidence, and prepare a visible Shopify Creator Drop while playback, sensors, export, publishing, and purchase remain human-controlled.
+WallAlive is a collaborative drawing-to-story world for children, families, and classrooms. Friends join a shared room by guest username, paint one vector wall together, turn separate figures into a combined cast, and play cooperative activities in original interactive 3D sets. Drawing-specific segmentation and six local ONNX graphs look for faces, pose, articulated parts, and variable topology. Uncertain masks and skeleton branches are blocked instead of displayed as finished characters. The instant private tier is honestly labeled an articulated spatial puppet; [AniGen](https://github.com/VAST-AI-Research/AniGen) is the optional full-sculpt tier for generated unseen surfaces and skinning. Thirteen WebMCP tools let a browser agent inspect the shared room, respect each figure's verified movement, stage stories, activate real world objects, recommend collaborative products, and prepare an adult-reviewed Shopify handoff.
 
-**Perfect judge prompt:** `Inspect the creative scene and every character's verified capabilities. Stage a gentle four-beat story that practices sequencing and cooperation, use only supported actions, and wait for me to approve playback. Do not access the camera or purchase anything.`
+**Perfect judge prompt:** `Inspect our shared room, creative scene, verified character abilities, and current story-world objects. Stage a four-beat cooperation quest, use only supported character actions, and wait for my approval. Do not access the camera, share pixels, publish products, or buy anything.`
 
 ## Educational end result
 
@@ -19,22 +19,24 @@ Those are intended learning benefits, not measured outcomes. WallAlive has not y
 ## Why this needs WebMCP
 
 - Human and agent actions update the same visible cast, worlds, and AR scene.
+- A structured agent can inspect guest creators and shared vector progress without receiving artwork pixels or room tokens, prepare an invite without messaging anyone, and turn contributors into attributed story roles.
 - The agent reads exact per-character abilities before assigning movement; unsupported actions are rejected with a machine-readable reason.
-- One `stage_magic_show` call can coordinate roles, worlds, captions, timing, and different actions across up to six characters—work that would require many brittle UI operations.
+- `stage_magic_show` coordinates roles, worlds, captions, timing, and different actions across up to six characters, while `interact_story_world` touches only object ids exposed by the current quest.
 - A staged show is inert until the human presses **Approve & play**. Planning authority and performance authority are deliberately separate.
 - The camera is deliberately absent from the tool surface.
 - A WebMCP tool may request reconstruction, but only a visible human action can approve the isolated-image upload.
 - Every action is attributed to `CHILD`, `BROWSER AGENT`, or `WALLALIVE`.
 - Tool results report the validated plan or exact performed actions, final idle state, and `cameraDataIncluded: false` so the agent can verify outcomes.
-- Commerce is a proposal workflow: the agent explains product fit and stages a draft collection; an adult alone can approve the local Shopify export.
+- Commerce is a proposal workflow: the agent explains product fit, preserves creator attribution, and stages a draft collection; an adult must confirm every contributor's permission before export.
 
 ## The real 3D loop
 
 1. **Scan or upload and isolate locally:** the child can capture with the camera or choose an existing drawing photo. Point-local closed-line extraction and the compact drawing-specific cutout model run first. MagicTouch uses the child’s tap only as a final proposal if both drawing paths fail.
 2. **Prove that the mask is a character:** local models require evidence from a face, articulated parts, a plausible pose, or a variable topology graph. Rectangularity, axis-aligned edges, oversized coverage, and weak semantic evidence can reject a high-confidence generic mask.
 3. **Review the transparent cutout:** the child sees the exact isolated pixels with **Yes · Continue** and **No · Try Again** controls. No 3D renderer or animation starts in this state.
-4. **Generate jointly after approval:** AniGen’s `ss_flow_solo` + `slat_flow_auto` path predicts full geometry, a skeleton of arbitrary complexity, and smooth skinning weights together. Three.js loads the returned GLB into a tab-local Blob URL. A capacity or inference failure leaves the safe cutout review in place instead of substituting a slab.
-5. **Enter AR:** Android/WebXR devices can place the rigged GLB with surface hit testing; iPhone and other browsers use the camera-overlay experience.
+4. **Choose a truthful quality tier:** the private instant tier builds a high-resolution contour-preserving relief with only confidence-gated semantic bone weights. It is orbitable and playable but is not called an unseen-view reconstruction. AniGen’s approved external path predicts full geometry, a skeleton, and skinning weights. A provider failure leaves the safe cutout in place instead of substituting a fake sculpt.
+5. **Play a real world:** each original PBR set contains raycastable objects and a progress-bearing activity: make a mini movie, play firefly hide-and-seek, complete a cooperation spell, or curate a living gallery.
+6. **Enter AR:** Android/WebXR devices can place the rigged GLB with surface hit testing; iPhone and other browsers use the camera-overlay experience.
 
 **Play Judge Demo** loads the supplied drawing and its precomputed full neural reconstruction immediately, without spending public GPU quota. An identity-preserving orthographic sketch-to-render pass supplied a 3D-aware condition, TripoSR reconstructed a watertight surface at 256³ extraction resolution, and WallAlive smoothed it, restored approved front colors without copying marks onto the rear, and transferred the learned variable drawing graph into semantic skin weights. The exact fixture is a 68,326-vertex, 136,648-triangle `SkinnedMesh` with seven active bones, 70.8% depth-to-height, normalized weights, and zero boundary or non-manifold edges. The older official AniGen fixture remains as a separate reference test.
 
@@ -51,6 +53,9 @@ Those are intended learning benefits, not measured outcomes. WallAlive has not y
 | `recommend_creator_products` | Advise | Ranks five product formats from figure count, silhouette, detail, color, audience, and creator goal, with visible reasoning and no image pixels in the result. |
 | `stage_shopify_creator_drop` | Stage | Builds a visible draft collection, product copy, print placement, pricing, palette, and storefront section plan. Adult approval is required before export. |
 | `inspect_creator_drop` | Read | Returns the staged draft, recommendation evidence, approval state, and Shopify handoff without pixels, payment data, or order data. |
+| `inspect_shared_room` | Read | Returns guest handles, vector-operation count, sync status, and the current interactive quest without pixels or tokens. |
+| `prepare_room_invite` | Stage | Creates a visible username-addressed invite link but never sends it; the human chooses how to share. |
+| `interact_story_world` | Live | Raycasts/activates one listed 3D quest object and reports the narrative effect after the visible update. |
 | `list_collaboration_history` | Read | Returns attributed plan, approval, performance, and system activity without image data. |
 
 All tools are registered imperatively on `document.modelContext`. They use strict schemas, nested `additionalProperties: false`, short bounded inputs, cancellation signals, read-only annotations, capability validation, and explicit result evidence. Human UI and WebMCP executors share the same state and action functions. Mutating tools wait for a visible browser paint before returning. There is no camera, capture, upload, purchase, or approval tool.
@@ -60,9 +65,12 @@ All tools are registered imperatively on `document.modelContext`. They use stric
 - `OrbitControls` provides true 360° orbit, wheel/pinch zoom, and pan. WASD, arrow keys, and the visible movement pad translate the character through world space; the walk action advances continuously instead of looping in place.
 - Three cinematic light rigs—`cyberpunk-neon`, `sunset-warm`, and `moonlight`—control real Hemisphere/Directional lights, exposure, grid color, particles, shadows, fog, and the PBR environment map.
 - Three camera presets transition the same live perspective camera: `cinematic-orbit`, `low-angle-hero`, and `overhead`.
+- **OpenAI / ChatGPT Sites:** the public HTTPS deployment is packaged and versioned from the exact pushed source commit, and ChatGPT's in-app browser can use the WebMCP surface directly.
+- **Cloudflare:** a Sites-provisioned D1 database persists rooms, guest participants, invites, and compact vector operations across devices. Camera frames, image blobs, and session secrets never appear in tool results.
 - **Chrome/WebMCP:** strict imperative tools, cancellation, runtime validation, annotations, and visible-before-return execution follow the current Chrome guidance.
-- **Shopify:** WallAlive owns the upstream creator workflow—recommendation, collection story, print layout, interactive-3D hero plan, store palette, section plan, and draft exports. When a rigged GLB exists, adult approval also unlocks its download for Shopify 3D product media. After an adult imports and reviews the drafts, Shopify's native storefront WebMCP tools can handle live catalog discovery and shopper-confirmed cart actions. WallAlive never publishes, charges, or places an order.
-- **ChatGPT Sites:** the public HTTPS deployment is packaged and versioned from the exact pushed source commit.
+- **Shopify:** WallAlive owns the upstream creator workflow—story zines, character cards, merchandise, 3D-asset eligibility, contributor credits, print layout, palette, and draft exports. After adult review/import, Shopify's native `search_catalog`, `browse_store`, `get_product`, variant, cart, and checkout-handoff WebMCP tools can operate on the live storefront. WallAlive never publishes, charges, or places an order.
+
+Vercel, Render, and Netlify are intentionally not claimed as active integrations. Sponsor logos are not product value; each named integration above performs a verifiable job in the shipped experience.
 
 ## Privacy boundary
 
@@ -79,7 +87,9 @@ All tools are registered imperatively on `document.modelContext`. They use stric
 | Capability | Support |
 | --- | --- |
 | Camera capture + 3D overlay | Modern mobile/desktop browsers over HTTPS with WebGL |
+| Shared drawing room | Cloudflare D1 metadata + compact vector operations; guest invite link, no artwork blobs |
 | Private verified cutout review | In-browser MediaPipe/ONNX/WASM, no image upload and no 3D claim |
+| Instant spatial puppet | High-resolution artwork-preserving relief; orbitable, confidence-gated rig, not a full sculpt |
 | Generative unseen geometry | Optional AniGen public Space; dedicated AniGen GPU recommended for production |
 | Immersive room placement | WebXR `immersive-ar` + `hit-test`, usually compatible Android Chrome devices |
 | iPhone/iPad and non-WebXR browsers | Camera overlay; immersive hit testing is not claimed |
@@ -122,14 +132,17 @@ rigged GLB → local Blob URL → Three.js GLTFLoader / SkinnedMesh
         │                              ▲
         ├── 360° camera overlay / AR   └── WebMCP inspect → stage → human approve → ensemble show
         └── WebXR hit-test placement
+
+guest usernames → D1 room + vector operation log → shared drawing wall
+        └── WebMCP inspect/invite → attributed combined cast → cooperative quest objects
 ```
 
 - React 19 + TypeScript, built with vinext for Cloudflare/Sites
 - Three.js `GLTFLoader`, `SkinnedMesh`, procedural bone actions, and WebXR hit testing
 - WallAlive local stack: a 288,109-parameter whole-character network, 109,832-parameter 96² and 435,624-parameter 128² face networks, a 402,052-parameter spatial variable-topology network, a 161,133-parameter optional 17-joint pose network, and an 80,486-parameter compact U-Net front/back depth prior, loaded through `onnxruntime-web`
 - Instance-aware decoding preserves multiple same-side arms/legs and separate facial features; a 22-feature standardized logistic gate judges individual cheek/ear masks from model agreement, probability, size, shape, fill, and position before every accepted region snaps back to high-resolution pixel geometry
-- Original eyes, cheeks, mouth, color, and line quality remain in the reviewed transparent cutout. The old local relief code is retained only for offline regression research and is not displayed as a finished character.
-- Semantic and topology outputs remain inspectable and manually editable. The private local path creates an artwork-preserving closed puppet only after the cutout review; the optional neural path upgrades one figure to a fully generated rigged asset.
+- Original eyes, cheeks, mouth, color, and line quality remain in the reviewed transparent cutout. The displayed private tier is an explicitly labeled articulated relief preview, using subdivision level 3 and semantic-outline-clipped skin weights to prevent a limb from dragging unrelated face/body pixels.
+- Semantic and topology outputs remain inspectable and manually editable. Unsupported wave/walk/dance controls are disabled until the relevant branch is verified; the optional neural path upgrades one figure to a fully generated rigged asset.
 - Lazy-loaded `@gradio/client` connection to AniGen
 - `document.modelContext.registerTool()` imperative WebMCP integration
 - One canonical action layer shared by UI and tool executors

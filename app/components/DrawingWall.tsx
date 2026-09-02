@@ -3,13 +3,18 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { CaptureTarget } from "../lib/drawing";
 import { makeTransparentArtworkPixels } from "../lib/target-cutout";
+import type { SharedDrawingOperation, SharedDrawingPoint, SharedDrawingTool, SharedParticipant, SharedRoomSession } from "../lib/collaboration";
 
-type Tool = "pencil" | "brush" | "marker" | "spray" | "eraser" | "fill" | "line" | "rectangle" | "circle" | "triangle" | "star";
+type Tool = SharedDrawingTool;
 
 type DrawingWallProps = {
   open: boolean;
   onClose: () => void;
   onMake3D: (drawing: { dataUrl: string; target: CaptureTarget }) => void;
+  sharedSession?: SharedRoomSession | null;
+  sharedParticipants?: SharedParticipant[];
+  sharedOperations?: SharedDrawingOperation[];
+  onSharedOperation?: (operation: SharedDrawingOperation) => void;
 };
 
 const tools: Array<{ id: Tool; label: string; glyph: string }> = [
@@ -32,7 +37,24 @@ const palette = [
 ];
 
 type Point = { x: number; y: number; pressure: number };
-type Gesture = { pointerId: number; start: Point; last: Point; base: ImageData | null; moved: boolean };
+type Gesture = { pointerId: number; start: Point; last: Point; base: ImageData | null; moved: boolean; id: string; points: Point[]; seed: number };
+
+const normalizePoint = (point: Point, canvas: HTMLCanvasElement): SharedDrawingPoint => ({
+  x: point.x / canvas.width,
+  y: point.y / canvas.height,
+  pressure: point.pressure,
+});
+
+const denormalizePoint = (point: SharedDrawingPoint, canvas: HTMLCanvasElement): Point => ({
+  x: point.x * canvas.width,
+  y: point.y * canvas.height,
+  pressure: point.pressure,
+});
+
+function pseudoRandom(seed: number, index: number) {
+  const value = Math.sin(seed * 0.0001 + index * 12.9898) * 43758.5453;
+  return value - Math.floor(value);
+}
 
 function canvasPoint(canvas: HTMLCanvasElement, event: PointerEvent | React.PointerEvent<HTMLCanvasElement>): Point {
   const bounds = canvas.getBoundingClientRect();
@@ -144,11 +166,58 @@ function drawShape(context: CanvasRenderingContext2D, tool: Tool, start: Point, 
   context.globalAlpha = 1;
 }
 
-export function DrawingWall({ open, onClose, onMake3D }: DrawingWallProps) {
+function drawSpray(context: CanvasRenderingContext2D, point: Point, color: string, size: number, seed: number, offset = 0) {
+  strokeStyle(context, "spray", color, size, point.pressure);
+  const radius = size * 1.5;
+  const density = Math.max(12, Math.round(size * 1.2));
+  for (let index = 0; index < density; index += 1) {
+    const angle = pseudoRandom(seed, offset + index * 2) * Math.PI * 2;
+    const distance = Math.sqrt(pseudoRandom(seed, offset + index * 2 + 1)) * radius;
+    context.fillRect(point.x + Math.cos(angle) * distance, point.y + Math.sin(angle) * distance, Math.max(1.2, size * 0.09), Math.max(1.2, size * 0.09));
+  }
+  context.globalAlpha = 1;
+}
+
+function renderSharedOperation(canvas: HTMLCanvasElement, operation: SharedDrawingOperation) {
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  if (!context) return;
+  if (operation.kind === "clear") {
+    context.globalAlpha = 1;
+    context.globalCompositeOperation = "source-over";
+    context.fillStyle = "#ffffff";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    return;
+  }
+  const points = operation.points.map((point) => denormalizePoint(point, canvas));
+  if (operation.kind === "fill") {
+    floodFill(canvas, points[0], operation.color);
+    return;
+  }
+  if (["line", "rectangle", "circle", "triangle", "star"].includes(operation.tool)) {
+    drawShape(context, operation.tool, points[0], points.at(-1) ?? points[0], operation.color, operation.size);
+    return;
+  }
+  if (operation.tool === "spray") {
+    points.forEach((point, index) => drawSpray(context, point, operation.color, operation.size, operation.seed, index * 200));
+    return;
+  }
+  const list = points.length === 1 ? [points[0], { ...points[0], x: points[0].x + 0.2, y: points[0].y + 0.2 }] : points;
+  for (let index = 1; index < list.length; index += 1) {
+    strokeStyle(context, operation.tool, operation.color, operation.size, list[index].pressure);
+    context.beginPath();
+    context.moveTo(list[index - 1].x, list[index - 1].y);
+    context.lineTo(list[index].x, list[index].y);
+    context.stroke();
+  }
+  context.globalAlpha = 1;
+}
+
+export function DrawingWall({ open, onClose, onMake3D, sharedSession = null, sharedParticipants = [], sharedOperations = [], onSharedOperation }: DrawingWallProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const gestureRef = useRef<Gesture | null>(null);
   const historyRef = useRef<string[]>([]);
   const historyIndexRef = useRef(-1);
+  const appliedSharedOperationsRef = useRef(new Set<string>());
   const [tool, setTool] = useState<Tool>("brush");
   const [color, setColor] = useState("#18312e");
   const [size, setSize] = useState(18);
@@ -185,6 +254,8 @@ export function DrawingWall({ open, onClose, onMake3D }: DrawingWallProps) {
     setHistoryIndex(index);
   }, []);
 
+  const sharedRoomId = sharedSession?.roomId ?? "";
+
   useEffect(() => {
     if (!open) return;
     const canvas = canvasRef.current;
@@ -192,26 +263,36 @@ export function DrawingWall({ open, onClose, onMake3D }: DrawingWallProps) {
     if (!canvas || !context) return;
     context.fillStyle = "#ffffff";
     context.fillRect(0, 0, canvas.width, canvas.height);
+    appliedSharedOperationsRef.current = new Set();
     historyRef.current = [canvas.toDataURL("image/png")];
     historyIndexRef.current = 0;
     setHistoryIndex(0);
     setHistoryLength(1);
-    setStatus("Draw one character—or a whole cast.");
-  }, [open]);
+    setStatus(sharedRoomId ? `Room ${sharedRoomId} is live. Draw together.` : "Draw one character—or a whole cast.");
+  }, [open, sharedRoomId]);
 
-  const drawSegment = useCallback((from: Point, to: Point, selectedTool = tool) => {
+  useEffect(() => {
+    if (!open || !sharedSession) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    let applied = 0;
+    sharedOperations.forEach((operation) => {
+      if (appliedSharedOperationsRef.current.has(operation.id)) return;
+      renderSharedOperation(canvas, operation);
+      appliedSharedOperationsRef.current.add(operation.id);
+      applied += 1;
+    });
+    if (applied) {
+      saveSnapshot();
+    }
+  }, [open, saveSnapshot, sharedOperations, sharedSession]);
+
+  const drawSegment = useCallback((from: Point, to: Point, selectedTool = tool, seed = 1, offset = 0) => {
     const canvas = canvasRef.current;
     const context = canvas?.getContext("2d");
     if (!canvas || !context) return;
     if (selectedTool === "spray") {
-      strokeStyle(context, selectedTool, color, size, to.pressure);
-      const radius = size * 1.5;
-      const density = Math.max(12, Math.round(size * 1.2));
-      for (let index = 0; index < density; index += 1) {
-        const angle = Math.random() * Math.PI * 2;
-        const distance = Math.sqrt(Math.random()) * radius;
-        context.fillRect(to.x + Math.cos(angle) * distance, to.y + Math.sin(angle) * distance, Math.max(1.2, size * 0.09), Math.max(1.2, size * 0.09));
-      }
+      drawSpray(context, to, color, size, seed, offset);
       return;
     }
     strokeStyle(context, selectedTool, color, size, to.pressure);
@@ -230,16 +311,26 @@ export function DrawingWall({ open, onClose, onMake3D }: DrawingWallProps) {
     canvas.setPointerCapture(event.pointerId);
     if (tool === "fill") {
       floodFill(canvas, point, color);
+      if (sharedSession && onSharedOperation) {
+        const operation: SharedDrawingOperation = {
+          id: crypto.randomUUID(), participantId: sharedSession.participantId, author: sharedSession.username,
+          kind: "fill", tool, color, size, points: [normalizePoint(point, canvas)], seed: 0, createdAt: new Date().toISOString(),
+        };
+        appliedSharedOperationsRef.current.add(operation.id);
+        onSharedOperation(operation);
+      }
       saveSnapshot();
       setStatus("Area filled. Add details or make it 3D.");
       return;
     }
     const shape = ["line", "rectangle", "circle", "triangle", "star"].includes(tool);
-    gestureRef.current = { pointerId: event.pointerId, start: point, last: point, base: shape ? context.getImageData(0, 0, canvas.width, canvas.height) : null, moved: false };
+    const id = crypto.randomUUID();
+    const seed = Math.floor(Math.random() * 2147483646) + 1;
+    gestureRef.current = { pointerId: event.pointerId, start: point, last: point, base: shape ? context.getImageData(0, 0, canvas.width, canvas.height) : null, moved: false, id, points: [point], seed };
     if (!shape) {
-      drawSegment(point, { ...point, x: point.x + 0.2, y: point.y + 0.2 });
+      drawSegment(point, { ...point, x: point.x + 0.2, y: point.y + 0.2 }, tool, seed, 0);
     }
-  }, [color, drawSegment, saveSnapshot, tool]);
+  }, [color, drawSegment, onSharedOperation, saveSnapshot, sharedSession, size, tool]);
 
   const pointerMove = useCallback((event: React.PointerEvent<HTMLCanvasElement>) => {
     const canvas = event.currentTarget;
@@ -254,11 +345,13 @@ export function DrawingWall({ open, onClose, onMake3D }: DrawingWallProps) {
       if (gesture.base) context.putImageData(gesture.base, 0, 0);
       drawShape(context, tool, gesture.start, point, color, size);
       gesture.last = point;
+      gesture.points = [gesture.start, point];
     } else {
       for (const sample of samples) {
         const point = canvasPoint(canvas, sample);
-        drawSegment(gesture.last, point);
+        drawSegment(gesture.last, point, tool, gesture.seed, gesture.points.length * 200);
         gesture.last = point;
+        if (gesture.points.length < 256) gesture.points.push(point);
       }
     }
     gesture.moved = true;
@@ -269,9 +362,25 @@ export function DrawingWall({ open, onClose, onMake3D }: DrawingWallProps) {
     if (!gesture || gesture.pointerId !== event.pointerId) return;
     gestureRef.current = null;
     event.currentTarget.releasePointerCapture(event.pointerId);
+    if (sharedSession && onSharedOperation) {
+      const operation: SharedDrawingOperation = {
+        id: gesture.id,
+        participantId: sharedSession.participantId,
+        author: sharedSession.username,
+        kind: "gesture",
+        tool,
+        color,
+        size,
+        points: gesture.points.map((point) => normalizePoint(point, event.currentTarget)),
+        seed: gesture.seed,
+        createdAt: new Date().toISOString(),
+      };
+      appliedSharedOperationsRef.current.add(operation.id);
+      onSharedOperation(operation);
+    }
     saveSnapshot();
     setStatus("Saved. Undo anytime—or make the wall alive.");
-  }, [saveSnapshot]);
+  }, [color, onSharedOperation, saveSnapshot, sharedSession, size, tool]);
 
   const clearCanvas = useCallback(() => {
     const canvas = canvasRef.current;
@@ -280,9 +389,17 @@ export function DrawingWall({ open, onClose, onMake3D }: DrawingWallProps) {
     context.globalAlpha = 1;
     context.fillStyle = "#ffffff";
     context.fillRect(0, 0, canvas.width, canvas.height);
+    if (sharedSession && onSharedOperation) {
+      const operation: SharedDrawingOperation = {
+        id: crypto.randomUUID(), participantId: sharedSession.participantId, author: sharedSession.username,
+        kind: "clear", tool, color, size, points: [], seed: 0, createdAt: new Date().toISOString(),
+      };
+      appliedSharedOperationsRef.current.add(operation.id);
+      onSharedOperation(operation);
+    }
     saveSnapshot();
     setStatus("Clean wall. Make something new.");
-  }, [saveSnapshot]);
+  }, [color, onSharedOperation, saveSnapshot, sharedSession, size, tool]);
 
   const make3D = useCallback(() => {
     const canvas = canvasRef.current;
@@ -332,10 +449,11 @@ export function DrawingWall({ open, onClose, onMake3D }: DrawingWallProps) {
     <div className="drawing-wall-backdrop" role="dialog" aria-modal="true" aria-labelledby="drawing-wall-title">
       <section className="drawing-wall">
         <header>
-          <div><span>WALL STUDIO</span><h2 id="drawing-wall-title">Draw a world. Wake a friend.</h2></div>
+          <div><span>{sharedSession ? `LIVE ROOM · ${sharedSession.roomId}` : "WALL STUDIO"}</span><h2 id="drawing-wall-title">{sharedSession ? "Draw together. Wake the whole cast." : "Draw a world. Wake a friend."}</h2></div>
           <div className="wall-history">
-            <button disabled={historyIndex <= 0} onClick={() => restore(historyIndex - 1)} aria-label="Undo">↶</button>
-            <button disabled={historyIndex < 0 || historyIndex >= historyLength - 1} onClick={() => restore(historyIndex + 1)} aria-label="Redo">↷</button>
+            {sharedSession ? <div className="wall-collaborators" aria-label="Creators in this room">{sharedParticipants.slice(0, 5).map((participant) => <i key={participant.id} style={{ background: participant.accent }} title={`@${participant.username}`}>{participant.username.slice(0, 1).toUpperCase()}</i>)}</div> : null}
+            <button disabled={Boolean(sharedSession) || historyIndex <= 0} onClick={() => restore(historyIndex - 1)} aria-label={sharedSession ? "Undo is disabled in a live shared room" : "Undo"}>↶</button>
+            <button disabled={Boolean(sharedSession) || historyIndex < 0 || historyIndex >= historyLength - 1} onClick={() => restore(historyIndex + 1)} aria-label={sharedSession ? "Redo is disabled in a live shared room" : "Redo"}>↷</button>
             <button onClick={clearCanvas}>CLEAR</button>
             <button onClick={onClose} aria-label="Close drawing wall">×</button>
           </div>
