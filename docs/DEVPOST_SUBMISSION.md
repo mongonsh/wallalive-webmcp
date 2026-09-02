@@ -32,7 +32,7 @@ Children already treat drawings as living characters. A few lines can have a nam
 3. Six local ONNX graphs recognize exact face/body pixels, decode an eight-family variable skeleton, and predict distinct front and hidden-surface depth. A contour-preserving artwork shell produces a private closed `SkinnedMesh` while keeping separate drawings as separate rigs.
 4. A second visible approval explains that only the isolated drawing—not the live camera or room frame—may go to AniGen, which jointly predicts richer full geometry, an arbitrary skeleton, and skinning weights.
 5. WallAlive loads generated GLBs as Three.js `SkinnedMesh` assets. Seven actions drive bone branches; drag/spin exposes true 360° geometry and the generated back.
-6. Eight goal-level WebMCP tools let the agent inspect shared state and each rig's verified abilities, request 3D, stage a typed multi-character learning story, direct one live ensemble moment, orchestrate spatial cinematics, prepare a safe merchandise concept, and inspect attributed history.
+6. Ten goal-level WebMCP tools let the agent inspect shared state and each rig's verified abilities, request 3D, stage a typed multi-character learning story, direct live ensemble moments, orchestrate spatial cinematics, recommend products from artwork evidence, stage a Shopify Creator Drop, inspect its approval state, and read attributed history.
 7. WebXR hit testing places the same character on a real surface when supported; every other browser gets the camera-overlay experience.
 
 The child-facing outcome is a compact learning loop: **Imagine → Sequence → Perform → Reflect**. The learner starts with their own artifact, helps shape a beginning–middle–end story, approves the agent's plan, performs it, and then explains or revises what happened.
@@ -49,7 +49,7 @@ Without WebMCP, an agent would have to infer multiple rigs and coordinate dozens
 
 ## WebMCP implementation
 
-WallAlive registers eight imperative tools with `document.modelContext.registerTool()` in the top-level document:
+WallAlive registers ten imperative tools with `document.modelContext.registerTool()` in the top-level document:
 
 - `inspect_creative_scene`
 - `inspect_character_capabilities`
@@ -57,10 +57,12 @@ WallAlive registers eight imperative tools with `document.modelContext.registerT
 - `stage_magic_show`
 - `direct_live_ensemble`
 - `orchestrate_spatial_cinematics`
-- `generate_shopify_merch_pipeline`
+- `recommend_creator_products`
+- `stage_shopify_creator_drop`
+- `inspect_creator_drop`
 - `list_collaboration_history`
 
-Each tool uses narrow JSON Schema, nested `additionalProperties: false`, bounded arrays and strings, cancellation signals, read-only annotations, shared capability validation, and verification-rich results. The stage tool returns `requiresHumanApproval: true` and `approvalControlVisible: true`; the live tool returns the exact per-character actions, world, duration, visible-result flag, final idle state, and `cameraDataIncluded: false`.
+Each tool uses narrow JSON Schema, nested `additionalProperties: false`, bounded arrays and strings, cancellation signals, `readOnlyHint` / `untrustedContentHint` annotations, shared capability validation, and verification-rich results. Story playback and Creator Drop export are separately staged for human approval. No tool publishes to Shopify, purchases, charges, or returns image pixels.
 
 ## How we built it
 
@@ -95,7 +97,8 @@ The fourth challenge was anatomy. A good silhouette still gave straight, misplac
 - A locally trained 17-joint drawing pose model whose ONNX export exactly reproduces the untouched-test result
 - Generated bone-branch animation instead of whole-object-only motion
 - Real WebXR surface hit testing plus universal camera overlay
-- Eight goal-level WebMCP tools sharing one capability and performance layer with the human UI
+- Ten goal-level WebMCP tools sharing the same visible story, 3D, and Creator Shop state as the human UI
+- Artwork-aware product recommendations plus Shopify draft CSV, storefront blueprint, print artwork, and adult handoff exports
 - Visible attribution for every human, agent, and system action
 - Human-only authority for camera, capture, and isolated-image upload
 - A quota-free one-click judge demo

@@ -101,7 +101,7 @@ The current free ZeroGPU quota prevented repeated end-to-end generations across 
 
 WallAlive follows the [WebMCP Community Group draft](https://webmachinelearning.github.io/webmcp/) and the official [imperative API explainer](https://github.com/webmachinelearning/webmcp#imperative-tool-registration-documentmodelcontext):
 
-- Register eight goal-level tools with `document.modelContext.registerTool()` in the top-level page, including spatial cinematics and a non-transactional merchandise pipeline.
+- Register ten goal-level tools with `document.modelContext.registerTool()` in the top-level page, including spatial cinematics plus evidence-based Creator Drop recommendation, staging, and inspection. Shopify publishing and purchase remain outside WallAlive's tool surface.
 - Expose shared workflow state and separate per-character action capabilities before mutation.
 - Use narrow descriptions, strict nested JSON Schema, bounded cast/beat arrays, and cancellation.
 - Validate every proposed move against verified pose/topology branches rather than silently animating the wrong geometry.

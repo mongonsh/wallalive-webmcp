@@ -1,4 +1,4 @@
-# WallAlive demo script (2:25 target)
+# WallAlive demo script (2:30 target)
 
 ## 0:00–0:18 — Open with undeniable 3D
 
@@ -18,11 +18,11 @@ Upload another drawing or open the camera, then hold on the local learned-depth 
 
 Open **Privacy** and point to the three human-only gestures. If recording a successful live generation, continue; otherwise return to **Play Judge Demo** so quota cannot interrupt the video.
 
-## 0:42–1:05 — Explain WebMCP
+## 0:42–1:02 — Explain WebMCP
 
 Open **Tools**.
 
-**Voiceover:** “Eight goal-level WebMCP tools create a shared creative loop. The agent can read the exact abilities of every rig, but there is no camera, capture, upload, purchase, or approval tool.”
+**Voiceover:** “Ten goal-level WebMCP tools create shared story and creator-commerce loops. The agent reads exact rig abilities and artwork evidence, but there is no camera, pixel, publishing, purchase, or approval tool.”
 
 Prompt:
 
@@ -30,7 +30,7 @@ Prompt:
 
 Show `inspect_creative_scene`, `inspect_character_capabilities`, and `stage_magic_show`. Point out the returned workflow phase, `availableActions`, blocked-action reasons, validated per-character moves, and `requiresHumanApproval: true`.
 
-## 1:05–1:30 — Share the same world
+## 1:02–1:27 — Share the same world
 
 The typed proposal now appears inside the AR frame. Point out the cast roles, beat preview, and two human controls. Press **Approve & play** and show the planned actions and world changes. Then tap a different point manually and press **Hop**.
 
@@ -38,13 +38,23 @@ The typed proposal now appears inside the AR frame. Point out the cast roles, be
 
 On compatible Android hardware, press **Enter real AR**, wait for the hit-test ring, and tap a surface. Otherwise identify camera overlay as the universal fallback.
 
-## 1:30–2:00 — The story moment
+## 1:27–1:47 — The story moment
 
 Use a drawing with two figures. Ask the agent to give each a different action in the same beat. Show captions and movements without cutting away; hold on the moment so viewers can see separate bone branches moving independently.
 
 **Voiceover:** “One typed plan coordinates cast, roles, timing, worlds, and separate skeletons—then returns exactly what visibly performed.”
 
-## 2:00–2:15 — Prove the guardrail
+## 1:47–2:12 — Build a Creator Drop
+
+Open **Creator Shop**, then ask:
+
+> Recommend products for this approved artwork for a classroom fundraiser. Explain the fit, then stage a storybook Creator Drop with the best three products. Do not publish or export anything.
+
+Show `recommend_creator_products` ranking formats from the artwork's actual figure count, silhouette, detail, colors, and movement evidence. Show `stage_shopify_creator_drop` produce a visible storefront, product copy, pricing band, print placement, palette, and section plan. Point to the adult-only approval and the draft CSV, blueprint, artwork, and checklist that appear only after the human clicks.
+
+**Voiceover:** “The agent does the difficult structured work; an adult decides what leaves the page. WallAlive exports Shopify drafts, then Shopify's own WebMCP storefront tools can handle live discovery and a shopper-confirmed cart.”
+
+## 2:12–2:22 — Prove the guardrail
 
 Ask:
 
@@ -54,7 +64,7 @@ Show that no such tool exists.
 
 **Voiceover:** “WebMCP makes authority concrete. The agent directs the character; only the child chooses what a sensor sees or what image may leave the tab.”
 
-## 2:15–2:25 — Close
+## 2:22–2:28 — Close
 
 Show the full UI with the rig waving, Full Neural Rig DNA, and visible history.
 

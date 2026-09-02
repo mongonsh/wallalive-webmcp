@@ -19,13 +19,13 @@ A child-safe creative-learning playground that turns approved drawings into rigg
 
 ## Short description
 
-WallAlive makes children’s drawings live together in the real room. A child draws, captures, or uploads one to six figures and approves their rigs. Six local ONNX graphs preserve exact facial pixels, decode variable skeletons, and predict separate front and hidden-surface depth; optional AniGen can generate richer full geometry. Eight goal-level WebMCP tools let a browser agent inspect every rig's actual abilities, stage typed multi-character learning stories across fantasy worlds, direct visible ensemble moments, orchestrate cinematics, and prepare a safe merchandise concept. A staged story cannot play until the human presses **Approve & play**, and no tool can open the camera, capture a frame, approve external processing, retrieve pixels, purchase, or charge.
+WallAlive makes children’s drawings live together in the real room. A child draws, captures, or uploads one to six figures and approves their rigs. Six local ONNX graphs preserve exact facial pixels, decode variable skeletons, and predict separate front and hidden-surface depth; optional AniGen can generate richer full geometry. Ten goal-level WebMCP tools let a browser agent inspect every rig's actual abilities, stage typed multi-character learning stories, direct visible ensemble moments, orchestrate cinematics, recommend products from artwork evidence, and stage a Shopify-ready Creator Drop. Stories and commerce exports remain inert until a human approves them; no tool can open the camera, retrieve pixels, publish, purchase, or charge.
 
 ## Judging case
 
 ### 1. Use of WebMCP
 
-WebMCP is the creative control plane, not decorative integration. Eight imperative tools implement a shared-authority loop: inspect page state, inspect per-character capabilities, request a rigged cast, stage a validated story, wait for visible human approval, perform and verify, direct the spatial scene, or prepare a non-transactional merchandise concept. The agent can solve multi-character coordination in one structured plan while the person retains sensor, purchase, and final-performance authority. Tool outputs are narrow and verifiable; user-authored image content is never returned.
+WebMCP is the creative control plane, not decorative integration. Ten imperative tools implement two shared-authority loops: inspect → stage → human-approved performance, and inspect artwork evidence → recommend products → stage Creator Drop → adult-approved export. The agent coordinates complex structured work while the person retains sensor, publishing, commerce, and final-performance authority. Tool outputs are narrow and verifiable; user-authored image content is never returned.
 
 ### 2. Quality of idea and execution
 

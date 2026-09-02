@@ -6,7 +6,7 @@
 
 **Public source:** https://github.com/mongonsh/wallalive-webmcp
 
-WallAlive turns one or more human-approved drawings into colored, 360° **rigged 3D characters** in a navigable Three.js world. Drawing-specific point extraction runs before the compact drawing mask; general MediaPipe MagicTouch is only a gated last resort. Six local ONNX graphs then look for facial, pose, articulated-part, or variable-topology evidence. A rectangular paper/screen patch or unverified mask is rejected, and every accepted transparent cutout stops for a visible human review. [AniGen](https://github.com/VAST-AI-Research/AniGen) is the optional live path for jointly generated unseen surfaces, skeleton, and skinning weights. WebMCP turns the browser agent into a spatial creative director and commerce collaborator: it can inspect rigs, direct camera and lighting, stage typed choreography, and prepare a visible Shopify merchandise concept while human-only boundaries remain explicit.
+WallAlive turns one or more human-approved drawings into colored, 360° **rigged 3D characters** in a navigable Three.js world. Drawing-specific point extraction runs before the compact drawing mask; general MediaPipe MagicTouch is only a gated last resort. Six local ONNX graphs then look for facial, pose, articulated-part, or variable-topology evidence. A rectangular paper/screen patch or unverified mask is rejected, and every accepted transparent cutout stops for a visible human review. [AniGen](https://github.com/VAST-AI-Research/AniGen) is the optional live path for jointly generated unseen surfaces, skeleton, and skinning weights. Ten WebMCP tools turn the browser agent into a spatial creative director and creator-commerce collaborator: it can inspect real rigs, stage capability-safe stories, recommend products from artwork evidence, and prepare a visible Shopify Creator Drop while playback, sensors, export, publishing, and purchase remain human-controlled.
 
 **Perfect judge prompt:** `Inspect the creative scene and every character's verified capabilities. Stage a gentle four-beat story that practices sequencing and cooperation, use only supported actions, and wait for me to approve playback. Do not access the camera or purchase anything.`
 
@@ -26,6 +26,7 @@ Those are intended learning benefits, not measured outcomes. WallAlive has not y
 - A WebMCP tool may request reconstruction, but only a visible human action can approve the isolated-image upload.
 - Every action is attributed to `CHILD`, `BROWSER AGENT`, or `WALLALIVE`.
 - Tool results report the validated plan or exact performed actions, final idle state, and `cameraDataIncluded: false` so the agent can verify outcomes.
+- Commerce is a proposal workflow: the agent explains product fit and stages a draft collection; an adult alone can approve the local Shopify export.
 
 ## The real 3D loop
 
@@ -47,7 +48,9 @@ Those are intended learning benefits, not measured outcomes. WallAlive has not y
 | `stage_magic_show` | Stage | Validates a typed cast and one-to-five-beat ensemble plan, then displays it without playing it. Human approval is required. |
 | `direct_live_ensemble` | Live | Performs one short capability-checked moment with distinct per-character actions and returns a verifiable final state. |
 | `orchestrate_spatial_cinematics` | Live | Maps typed movement, PBR lighting mood, and camera composition directly onto the visible Three.js scene before returning. |
-| `generate_shopify_merch_pipeline` | Commerce | Opens a visible t-shirt or ceramic-mug print mockup and mock Shopify checkout from the approved cutout; it never orders or charges. |
+| `recommend_creator_products` | Advise | Ranks five product formats from figure count, silhouette, detail, color, audience, and creator goal, with visible reasoning and no image pixels in the result. |
+| `stage_shopify_creator_drop` | Stage | Builds a visible draft collection, product copy, print placement, pricing, palette, and storefront section plan. Adult approval is required before export. |
+| `inspect_creator_drop` | Read | Returns the staged draft, recommendation evidence, approval state, and Shopify handoff without pixels, payment data, or order data. |
 | `list_collaboration_history` | Read | Returns attributed plan, approval, performance, and system activity without image data. |
 
 All tools are registered imperatively on `document.modelContext`. They use strict schemas, nested `additionalProperties: false`, short bounded inputs, cancellation signals, read-only annotations, capability validation, and explicit result evidence. Human UI and WebMCP executors share the same state and action functions. Mutating tools wait for a visible browser paint before returning. There is no camera, capture, upload, purchase, or approval tool.
@@ -58,7 +61,7 @@ All tools are registered imperatively on `document.modelContext`. They use stric
 - Three cinematic light rigs—`cyberpunk-neon`, `sunset-warm`, and `moonlight`—control real Hemisphere/Directional lights, exposure, grid color, particles, shadows, fog, and the PBR environment map.
 - Three camera presets transition the same live perspective camera: `cinematic-orbit`, `low-angle-hero`, and `overhead`.
 - **Chrome/WebMCP:** strict imperative tools, cancellation, runtime validation, annotations, and visible-before-return execution follow the current Chrome guidance.
-- **Shopify:** the commerce tool demonstrates an agent-to-human product pipeline using only the reviewed transparent drawing; checkout is intentionally a non-transactional mock.
+- **Shopify:** WallAlive owns the upstream creator workflow—recommendation, collection story, print layout, interactive-3D hero plan, store palette, section plan, and draft exports. When a rigged GLB exists, adult approval also unlocks its download for Shopify 3D product media. After an adult imports and reviews the drafts, Shopify's native storefront WebMCP tools can handle live catalog discovery and shopper-confirmed cart actions. WallAlive never publishes, charges, or places an order.
 - **ChatGPT Sites:** the public HTTPS deployment is packaged and versioned from the exact pushed source commit.
 
 ## Privacy boundary
