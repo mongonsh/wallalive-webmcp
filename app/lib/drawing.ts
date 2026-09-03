@@ -2745,5 +2745,5 @@ export async function extractDrawingFromImageUrl(imageUrl: string, target: Captu
 }
 
 export async function createAniGenDemoDrawing(): Promise<DrawingExtraction> {
-  return extractDrawingFromImageUrl("/pip-demo-input.png", { x: 0.5, y: 0.5 });
+  return extractDrawingFromImageUrl("/anigen-demo-input.png", { x: 0.5, y: 0.5 });
 }

@@ -377,7 +377,7 @@ export default function Home() {
       if (videoRef.current) videoRef.current.srcObject = null;
       setCameraState("idle");
     }
-    commitCharacter({ ...initialCharacter, created: isJudgeDemo, name: isJudgeDemo ? "Pip" : "", accent: next.analysis.secondaryColor });
+    commitCharacter({ ...initialCharacter, created: isJudgeDemo, name: isJudgeDemo ? "Sunny" : "", accent: next.analysis.secondaryColor });
     captureRef.current = next;
     captureEnsembleRef.current = ensemble;
     setCapture(next);
@@ -1565,20 +1565,20 @@ export default function Home() {
       setNeuralProgress({ phase: "ready", progress: 1, message: "Verified neural sketch rig loaded." });
       setAgentLine(`The guided demo is loading a verified rig. A real agent can inspect, direct, and stage a Creator Drop through ${toolNames.length} WebMCP tools.`);
       await wait(450);
-      createCharacter({ name: "Pip", personality: "brave on the outside, shy on the inside", accent: "#ce919f", inflation: 1 }, "WALLALIVE", "judge_demo");
+      createCharacter({ name: "Sunny", personality: "brave on the outside, silly at heart", accent: "#f6c958", inflation: 1 }, "WALLALIVE", "judge_demo");
       placeCharacter(.68, .53, "wall", 1, "WALLALIVE");
       await wait(500);
       stageMagicShow({
-        title: "Pip Finds a Brave Hello",
+        title: "Sunny Finds a Brave Hello",
         theme: "finding courage with a new friend",
         learningGoal: "sequence a beginning, middle, and ending; name an emotion; retell the story",
         tone: "gentle",
         world: "storybook",
-        cast: [{ characterIndex: 0, name: "Pip", role: "the shy explorer", personality: "shy, curious, and secretly brave" }],
+        cast: [{ characterIndex: 0, name: "Sunny", role: "the playful explorer", personality: "silly, curious, and secretly brave" }],
         beats: [
-          { caption: "Pip peeks from the edge of the kingdom.", durationMs: 900, moves: [{ characterIndex: 0, action: "hide" }] },
-          { caption: "One brave hop brings Pip into the story.", durationMs: 900, moves: [{ characterIndex: 0, action: "hop" }] },
-          { caption: "Pip waves hello with a verified arm branch.", durationMs: 1100, moves: [{ characterIndex: 0, action: "wave" }] },
+          { caption: "Sunny peeks from the edge of the kingdom.", durationMs: 900, moves: [{ characterIndex: 0, action: "hide" }] },
+          { caption: "One brave hop brings Sunny into the story.", durationMs: 900, moves: [{ characterIndex: 0, action: "hop" }] },
+          { caption: "Sunny waves hello with a verified arm branch.", durationMs: 1100, moves: [{ characterIndex: 0, action: "wave" }] },
           { caption: "A full turn reveals the generated back.", durationMs: 1400, world: "museum", moves: [{ characterIndex: 0, action: "spin" }] },
         ],
       }, "WALLALIVE", "judge_demo");

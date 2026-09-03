@@ -24,7 +24,7 @@ export type NeuralProgress = {
 };
 
 export type NeuralAsset = {
-  source: "anigen-live" | "wallalive-neural-demo";
+  source: "anigen-live" | "anigen-demo" | "wallalive-neural-demo";
   provider: typeof ANIGEN_PROVIDER | typeof WALLALIVE_NEURAL_PROVIDER;
   model: typeof ANIGEN_MODEL | typeof WALLALIVE_NEURAL_MODEL;
   meshUrl: string;
@@ -178,12 +178,12 @@ export async function generateAniGenAsset(
 
 export function createBundledAniGenAsset(): NeuralAsset {
   return {
-    source: "wallalive-neural-demo",
-    provider: WALLALIVE_NEURAL_PROVIDER,
-    model: WALLALIVE_NEURAL_MODEL,
-    meshUrl: "/pip-neural-demo.glb",
+    source: "anigen-demo",
+    provider: ANIGEN_PROVIDER,
+    model: ANIGEN_MODEL,
+    meshUrl: "/anigen-demo.glb",
     preview: true,
-    generatedAt: "2026-08-31T01:41:00.000Z",
+    generatedAt: "2026-08-26T13:50:00.000Z",
   };
 }
 
