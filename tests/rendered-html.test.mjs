@@ -49,8 +49,8 @@ test("registers fourteen goal-level WebMCP collaboration tools with learning evi
     "direct_live_ensemble",
     "orchestrate_spatial_cinematics",
     "recommend_creator_products",
-    "stage_shopify_creator_drop",
-    "inspect_creator_drop",
+    "stage_shopify_import_kit",
+    "inspect_shopify_import_kit",
     "inspect_shared_room",
     "prepare_room_invite",
     "interact_story_world",
@@ -104,6 +104,9 @@ test("registers fourteen goal-level WebMCP collaboration tools with learning evi
   assert.match(page, /CREATOR SHOP/);
   assert.match(page, /ADULT · CONFIRM PERMISSIONS/);
   assert.match(page, /Nothing is published, purchased, or sent to Shopify/);
+  assert.match(page, /SHOPIFY IMPORT PREVIEW · NOT CONNECTED/);
+  assert.match(page, /STORE NOT CONNECTED/);
+  assert.doesNotMatch(page, /SHOPIFY NATIVE WEBMCP/);
   assert.match(page, /buildShopifyProductsCsv/);
   assert.match(page, /buildShopifyStoreBlueprint/);
   assert.match(page, /story sequencing and confident expression/);

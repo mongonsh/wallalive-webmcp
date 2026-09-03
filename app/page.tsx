@@ -110,8 +110,8 @@ const toolNames = [
   ["direct_live_ensemble", "LIVE"],
   ["orchestrate_spatial_cinematics", "LIVE"],
   ["recommend_creator_products", "ADVISE"],
-  ["stage_shopify_creator_drop", "STAGE"],
-  ["inspect_creator_drop", "READ"],
+  ["stage_shopify_import_kit", "STAGE"],
+  ["inspect_shopify_import_kit", "READ"],
   ["inspect_shared_room", "READ"],
   ["prepare_room_invite", "STAGE"],
   ["interact_story_world", "LIVE"],
@@ -741,13 +741,13 @@ export default function Home() {
       artwork: { ...profile, dominantColor: profile.dominantColor, secondaryColor: profile.secondaryColor },
       recommendations,
       visibleCreatorShopUpdated: true,
-      nextAgentSteps: ["Ask the human which products and story feel right", "Stage a Shopify creator drop for review"],
+      nextAgentSteps: ["Ask the human which products and story feel right", "Stage a Shopify import kit for review"],
       cameraDataIncluded: false,
       imagePixelsIncluded: false,
     };
   }, [creatorAudience, creatorGoal, getArtworkCommerceProfile, record]);
 
-  const stageShopifyCreatorDrop = useCallback((input: Record<string, unknown> = {}, actor: Actor = "BROWSER AGENT") => {
+  const stageShopifyImportKit = useCallback((input: Record<string, unknown> = {}, actor: Actor = "BROWSER AGENT") => {
     const audience = stringValue(input.audience, creatorAudience, 20) as CreatorAudience;
     const goal = stringValue(input.goal, creatorGoal, 20) as CreatorGoal;
     const vibe = stringValue(input.vibe, creatorVibe, 20) as CreatorVibe;
@@ -771,13 +771,13 @@ export default function Home() {
     setInspectorOpen(true);
     setPanelTab("commerce");
     setAgentLine(`The Creator Drop “${drop.name}” is staged—not published. An adult decides whether to export it.`);
-    setNotice("Creator Drop staged for review. Nothing was published to Shopify.");
-    record(actor, "Staged a Shopify Creator Drop", `${drop.name} · ${drop.products.length} draft products · adult approval required.`, actor === "BROWSER AGENT" ? "stage_shopify_creator_drop" : undefined);
+    setNotice("Import kit staged for review. This app is not connected to a Shopify store.");
+    record(actor, "Staged a Shopify import kit", `${drop.name} · ${drop.products.length} draft products · adult approval required · store not connected.`, actor === "BROWSER AGENT" ? "stage_shopify_import_kit" : undefined);
     return {
       drop,
       visibleCreatorShopUpdated: true,
       requiresHumanApproval: true,
-      humanOnlyNextAction: "Approve and download the Shopify kit",
+      humanOnlyNextAction: "Approve and download the Shopify import kit",
       publishesToShopify: false,
       createsOrders: false,
       imagePixelsIncluded: false,
@@ -789,7 +789,8 @@ export default function Home() {
     recommendations: creatorRecommendations,
     approval: { required: true, granted: adultExportApproved },
     handoff: creatorDrop ? "Draft CSV + storefront blueprint + adult checklist" : null,
-    shopifyNativeNextStep: "After adult import and review, Shopify's storefront WebMCP can search the live catalog and manage a shopper-confirmed cart.",
+    shopifyConnection: "not-connected",
+    optionalNextStep: "An adult may import these files into a real Shopify store. That separate storefront—not WallAlive—would expose Shopify's native WebMCP tools.",
     publishesToShopify: false,
     createsOrders: false,
     imagePixelsIncluded: false,
@@ -818,7 +819,7 @@ export default function Home() {
     if (!creatorDrop) return;
     setAdultExportApproved(true);
     setCreatorDrop({ ...creatorDrop, status: "approved-for-export" });
-    setNotice("Adult approval and contributor-permission check recorded in this tab. The Shopify draft files are ready.");
+    setNotice("Adult approval recorded. The offline Shopify import files are ready; no store is connected.");
     record("CHILD", "Approved the Creator Drop export", `${creatorDrop.name} may be downloaded as draft files; ${creatorDrop.contributors.length} contributor permission checks recorded; nothing was published.`);
   }, [creatorDrop, record]);
 
@@ -1433,9 +1434,9 @@ export default function Home() {
         },
       },
       {
-        name: "stage_shopify_creator_drop",
-        title: "Stage a Shopify Creator Drop",
-        description: "Create a visible draft collection with product copy, print placement, palette, pricing, and storefront sections. It waits for adult export approval and cannot publish or place orders.",
+        name: "stage_shopify_import_kit",
+        title: "Stage a Shopify import kit",
+        description: "Create a visible offline import kit with product copy, print placement, palette, pricing, and storefront sections. WallAlive is not connected to a Shopify store; it cannot publish, manage a cart, or place orders.",
         inputSchema: {
           ...base,
           properties: {
@@ -1453,7 +1454,7 @@ export default function Home() {
           const signal = executionSignal(options);
           try {
             guard(signal);
-            const result = stageShopifyCreatorDrop(input);
+            const result = stageShopifyImportKit(input);
             await afterVisiblePaint();
             guard(signal);
             return ok(result);
@@ -1461,9 +1462,9 @@ export default function Home() {
         },
       },
       {
-        name: "inspect_creator_drop",
-        title: "Inspect the staged Creator Drop",
-        description: "Read the visible draft collection, recommendation evidence, approval status, and Shopify handoff. Returns no camera frames, artwork pixels, payment data, or order data.",
+        name: "inspect_shopify_import_kit",
+        title: "Inspect the staged Shopify import kit",
+        description: "Read the visible offline draft, recommendation evidence, approval status, and explicit not-connected state. Returns no camera frames, artwork pixels, payment data, or order data.",
         inputSchema: { ...base, properties: {} },
         annotations: { readOnlyHint: true, untrustedContentHint: true },
         execute: async (_input, options) => { const signal = executionSignal(options); guard(signal); return ok(inspectCreatorDrop()); },
@@ -1554,7 +1555,7 @@ export default function Home() {
       setWebMcpStatus("error");
     });
     return () => controller.abort();
-  }, [commitNeuralAsset, createCharacter, currentCharacterCapabilities, directEnsembleBeat, inspectCreativeScene, inspectCreatorDrop, inspectLearningProgress, interactWithWorldObject, orchestrateSpatialCinematics, parseShowMoves, prepareRoomInvite, recommendProductsForArtwork, record, requestNeuralConsent, stageMagicShow, stageShopifyCreatorDrop, worldInteractions]);
+  }, [commitNeuralAsset, createCharacter, currentCharacterCapabilities, directEnsembleBeat, inspectCreativeScene, inspectCreatorDrop, inspectLearningProgress, interactWithWorldObject, orchestrateSpatialCinematics, parseShowMoves, prepareRoomInvite, recommendProductsForArtwork, record, requestNeuralConsent, stageMagicShow, stageShopifyImportKit, worldInteractions]);
 
   const runMagicDemo = useCallback(async () => {
     if (demoRunning) return;
@@ -2105,7 +2106,7 @@ export default function Home() {
                   </article>)}
                 </div> : null}
 
-                {creatorRecommendations.length && !creatorDrop ? <button className="creator-agent-action is-primary" onClick={() => stageShopifyCreatorDrop({
+                {creatorRecommendations.length && !creatorDrop ? <button className="creator-agent-action is-primary" onClick={() => stageShopifyImportKit({
                   audience: creatorAudience,
                   goal: creatorGoal,
                   vibe: creatorVibe,
@@ -2114,8 +2115,8 @@ export default function Home() {
                   productIds: creatorRecommendations.slice(0, 3).map((product) => product.id),
                 }, "CHILD")}><span>✦</span><b>Build my Creator Drop</b><i>→</i></button> : null}
 
-                {creatorDrop ? <section className={`creator-store-preview vibe-${creatorDrop.vibe}`} aria-label="Staged Shopify storefront preview">
-                  <div className="store-browser"><i /><i /><i /><span>YOUR SHOPIFY DRAFT</span></div>
+                {creatorDrop ? <section className={`creator-store-preview vibe-${creatorDrop.vibe}`} aria-label="Offline Shopify import preview">
+                  <div className="store-browser"><i /><i /><i /><span>SHOPIFY IMPORT PREVIEW · NOT CONNECTED</span></div>
                   <div className="store-hero" style={{ "--store-accent": creatorDrop.palette.accent, "--store-highlight": creatorDrop.palette.highlight } as CSSProperties}>
                     <div><small>{creatorDrop.storefront.announcement}</small><h3>{creatorDrop.name}</h3><p>{creatorDrop.story}</p><span className="storefront-cta" aria-hidden="true">{creatorDrop.threeDExperience.enabled ? "EXPLORE THE 3D STORY" : "MEET THE COLLECTION"}</span></div>
                     <figure>{capture ? <img src={capture.textureUrl} alt="Approved artwork in the staged collection" /> : null}<i>✦</i>{creatorDrop.threeDExperience.enabled ? <b>360° 3D · {creatorDrop.threeDExperience.activeWorld}</b> : null}</figure>
@@ -2135,7 +2136,7 @@ export default function Home() {
                   </div>}
                 </div> : null}
 
-                <div className="shopify-handoff"><span>WALLALIVE</span><i>→</i><span>CREATOR-CREDITED DRAFTS</span><i>→</i><span>ADULT REVIEW</span><i>→</i><b>SHOPIFY NATIVE WEBMCP</b></div>
+                <div className="shopify-handoff"><span>WALLALIVE</span><i>→</i><span>IMPORT FILES</span><i>→</i><span>ADULT REVIEW</span><i>→</i><b>STORE NOT CONNECTED</b></div>
               </> : <button className="creator-agent-action" onClick={() => setInspectorOpen(false)}><span>✦</span><b>Make a drawing first</b><i>→</i></button>}
             </div>
           ) : null}
@@ -2153,7 +2154,7 @@ export default function Home() {
               <div className="history-list">{activity.length ? activity.map((item) => <article key={item.id}><span>{item.time}</span><div><small>{item.actor}</small><b>{item.action}</b><p>{item.detail}</p></div></article>) : <p className="empty-history">The first human or agent action will appear here.</p>}</div>
             </div>
           ) : null}
-          <footer className="agent-footer"><span>OPENAI SITES · CLOUDFLARE D1 · CHROME WEBMCP · SHOPIFY</span><b>HUMANS APPROVE</b></footer>
+          <footer className="agent-footer"><span>OPENAI SITES · CLOUDFLARE D1 · CHROME WEBMCP</span><b>HUMANS APPROVE</b></footer>
         </aside>
       </section>
       <DrawingWall

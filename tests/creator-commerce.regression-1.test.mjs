@@ -67,5 +67,5 @@ test("Shopify handoff exports importable draft data and explicit safety guidance
   assert.equal(blueprint.storefrontMcpHandoff.nativeTools.includes("search_catalog"), true);
   assert.match(handoff, /@mika/);
   assert.match(handoff, /Adult review checklist/);
-  assert.match(handoff, /native WebMCP storefront tools/);
+  assert.match(handoff, /not connected to Shopify/);
 });

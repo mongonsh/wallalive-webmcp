@@ -61,8 +61,8 @@ WallAlive registers fourteen imperative tools with `document.modelContext.regist
 - `direct_live_ensemble`
 - `orchestrate_spatial_cinematics`
 - `recommend_creator_products`
-- `stage_shopify_creator_drop`
-- `inspect_creator_drop`
+- `stage_shopify_import_kit`
+- `inspect_shopify_import_kit`
 - `inspect_shared_room`
 - `prepare_room_invite`
 - `interact_story_world`
@@ -123,7 +123,7 @@ The fourth challenge was anatomy. A good silhouette still gave straight, misplac
 
 ## Built with
 
-WebMCP, Shopify native WebMCP handoff, Cloudflare D1, ChatGPT Sites, Chrome, AniGen, TripoSR, ONNX Runtime Web, WebXR, Three.js, React, TypeScript, Canvas API, WebGL
+WebMCP, Shopify-ready import kit (no connected store), Cloudflare D1, ChatGPT Sites, Chrome, AniGen, TripoSR, ONNX Runtime Web, WebXR, Three.js, React, TypeScript, Canvas API, WebGL
 
 ## Suggested tags
 

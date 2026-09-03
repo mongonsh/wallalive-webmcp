@@ -251,7 +251,7 @@ export function buildShopifyStoreBlueprint(drop: CreatorDrop) {
     products: drop.products,
     contributors: drop.contributors,
     storefrontMcpHandoff: {
-      discovery: "After adult import and review, Shopify exposes the live collection through its native storefront WebMCP tools.",
+      discovery: "WallAlive is not connected to a store. After an adult separately imports and reviews this kit, that Shopify storefront may expose its own tools.",
       nativeTools: ["search_catalog", "browse_store", "get_product", "show_variant", "get_cart", "update_cart", "proceed_to_checkout"],
       allowedNextActions: ["search the approved catalog", "compare live variants", "update cart after shopper confirmation", "hand off checkout to the shopper"],
       wallaliveNeverDoes: ["publish products", "charge payment", "place order"],
@@ -277,6 +277,6 @@ export function buildCreatorHandoff(drop: CreatorDrop) {
     "",
     "## Agent handoff",
     "",
-    "After import and human review, use Shopify's native WebMCP storefront tools for live catalog search and cart management. WallAlive does not publish, purchase, or charge.",
+    "WallAlive is not connected to Shopify. After a separate import and human review, the store owns catalog and cart behavior. WallAlive does not publish, purchase, or charge.",
   ].join("\n");
 }

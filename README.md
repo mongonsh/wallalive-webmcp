@@ -52,8 +52,8 @@ Those are intended learning benefits, not measured outcomes. WallAlive has not y
 | `direct_live_ensemble` | Live | Performs one short capability-checked moment with distinct per-character actions and returns a verifiable final state. |
 | `orchestrate_spatial_cinematics` | Live | Maps typed movement, PBR lighting mood, and camera composition directly onto the visible Three.js scene before returning. |
 | `recommend_creator_products` | Advise | Ranks eight product formats from figure count, silhouette, detail, color, audience, and creator goal, with visible reasoning and no image pixels in the result. |
-| `stage_shopify_creator_drop` | Stage | Builds a visible draft collection, product copy, print placement, pricing, palette, and storefront section plan. Adult approval is required before export. |
-| `inspect_creator_drop` | Read | Returns the staged draft, recommendation evidence, approval state, and Shopify handoff without pixels, payment data, or order data. |
+| `stage_shopify_import_kit` | Stage | Builds a visible offline import kit with product copy, print placement, pricing, palette, and storefront sections. Adult approval is required before export. |
+| `inspect_shopify_import_kit` | Read | Returns the staged draft, recommendation evidence, approval state, and explicit not-connected status without pixels, payment data, or order data. |
 | `inspect_shared_room` | Read | Returns guest handles, vector-operation count, sync status, and the current interactive quest without pixels or tokens. |
 | `prepare_room_invite` | Stage | Creates a visible username-addressed invite link but never sends it; the human chooses how to share. |
 | `interact_story_world` | Live | Raycasts/activates one listed 3D quest object and reports the narrative effect after the visible update. |
@@ -69,7 +69,7 @@ All tools are registered imperatively on `document.modelContext`. They use stric
 - **OpenAI / ChatGPT Sites:** the public HTTPS deployment is packaged and versioned from the exact pushed source commit, and ChatGPT's in-app browser can use the WebMCP surface directly.
 - **Cloudflare:** a Sites-provisioned D1 database persists rooms, guest participants, invites, and compact vector operations across devices. Camera frames, image blobs, and session secrets never appear in tool results.
 - **Chrome/WebMCP:** strict imperative tools, cancellation, runtime validation, annotations, and visible-before-return execution follow the current Chrome guidance.
-- **Shopify:** WallAlive owns the upstream creator workflow—story zines, character cards, merchandise, 3D-asset eligibility, contributor credits, print layout, palette, and draft exports. After adult review/import, Shopify's native `search_catalog`, `browse_store`, `get_product`, variant, cart, and checkout-handoff WebMCP tools can operate on the live storefront. WallAlive never publishes, charges, or places an order.
+- **Shopify-ready export, not a live connection:** WallAlive creates creator-credited recommendations, print layouts, product CSV, and a storefront blueprint for adult review. The public demo has no Shopify store credentials and cannot publish, manage a cart, charge, or order. A separately configured Shopify storefront can import the kit and expose Shopify's own tools.
 
 Vercel, Render, and Netlify are intentionally not claimed as active integrations. Sponsor logos are not product value; each named integration above performs a verifiable job in the shipped experience.
 

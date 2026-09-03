@@ -50,13 +50,13 @@ Open **Creator Shop** and ask:
 
 Show the visible reasoning, contributor handles, storefront preview, and permission boundary.
 
-**Voiceover:** “WallAlive handles the creative work before a store exists: evidence-based formats, story, credits, layout, and an interactive-model plan. An adult confirms every contributor’s permission before downloading drafts. After review and import, Shopify’s native WebMCP tools can search the real catalog, compare variants, and hand checkout to the shopper. WallAlive never publishes or purchases.”
+**Voiceover:** “WallAlive prepares evidence-based formats, story, credits, layout, and an import kit. The public demo is not connected to Shopify. An adult confirms every contributor’s permission before downloading files and choosing whether to import them into a separate store. WallAlive never publishes or purchases.”
 
 ## 2:32–2:45 — Show the stack and close
 
 Show the Tools panel and activity history.
 
-**Voiceover:** “OpenAI and ChatGPT Sites host the agent-native experience. Cloudflare D1 synchronizes shared rooms. Chrome runs and evaluates WebMCP. Shopify receives only adult-reviewed drafts. WallAlive: draw together, wake a cast, build a world.”
+**Voiceover:** “OpenAI and ChatGPT Sites host the agent-native experience. Cloudflare D1 synchronizes shared rooms. Chrome runs and evaluates WebMCP. The optional commerce output is an offline Shopify-ready import kit. WallAlive: draw together, wake a cast, build a world.”
 
 ## Recording notes
 
