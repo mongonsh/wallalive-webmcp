@@ -11,7 +11,7 @@ test("runtime verification discovers every registered WebMCP tool and executes a
 
   assert.match(runtime, /await Promise\.all\(tools\.map\(\(tool\) => context\.registerTool\(tool, \{ signal \}\)\)\)/);
   assert.match(runtime, /const visibleTools = await context\.getTools\(\)/);
-  assert.match(runtime, /context\.executeTool\(probe, \{\}, \{ signal \}\)/);
+  assert.match(runtime, /context\.executeTool\(probe, JSON\.stringify\(\{\}\), \{ signal \}\)/);
   assert.match(runtime, /verification\?\.cameraDataIncluded !== false/);
   assert.match(page, /registerAndVerifyWebMCP\(context, tools, controller\.signal\)/);
   assert.match(page, /WEBMCP ✓/);
@@ -25,9 +25,10 @@ test("runtime actually registers, discovers, and executes a privacy-safe probe",
   const context = {
     async registerTool(tool) { registered.push(tool); },
     async getTools() { return registered.map(({ name, title, description }) => ({ name, title, description })); },
-    async executeTool(tool, input) {
+    async executeTool(tool, inputArguments) {
       assert.equal(tool.name, "inspect_creative_scene");
-      assert.deepEqual(input, {});
+      assert.equal(typeof inputArguments, "string", "Chrome requires serialized JSON input arguments");
+      assert.deepEqual(JSON.parse(inputArguments), {});
       probeExecutions += 1;
       return JSON.stringify({ ok: true, verification: { cameraDataIncluded: false } });
     },

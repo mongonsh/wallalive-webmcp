@@ -17,7 +17,7 @@ export type RegisteredWebMCPTool = {
 export type WebMCPModelContext = {
   registerTool: (tool: RegisterableWebMCPTool, options?: { signal?: AbortSignal }) => Promise<void>;
   getTools?: () => Promise<RegisteredWebMCPTool[]>;
-  executeTool?: (tool: RegisteredWebMCPTool, input?: Record<string, unknown>, options?: { signal?: AbortSignal }) => Promise<string>;
+  executeTool?: (tool: RegisteredWebMCPTool, inputArguments: string, options?: { signal?: AbortSignal }) => Promise<string>;
 };
 
 export type WebMCPRuntimeCheck = {
@@ -59,7 +59,9 @@ export async function registerAndVerifyWebMCP(
 
   const probe = visibleTools.find((tool) => tool.name === "inspect_creative_scene");
   if (!probe) throw new Error("The read-only WebMCP probe is unavailable.");
-  const result = parseToolResult(await context.executeTool(probe, {}, { signal }));
+  // Chrome's current WebMCP IDL accepts serialized JSON here, even though the
+  // draft specification describes this argument as an object.
+  const result = parseToolResult(await context.executeTool(probe, JSON.stringify({}), { signal }));
   const verification = typeof result.verification === "object" && result.verification !== null
     ? result.verification as Record<string, unknown>
     : null;

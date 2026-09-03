@@ -73,7 +73,7 @@ test("registers seventeen goal-level WebMCP collaboration tools with repair, ada
   const runtime = await readFile(new URL("../app/lib/webmcp-runtime.ts", import.meta.url), "utf8");
   assert.match(runtime, /registerTool\(tool, \{ signal \}\)/);
   assert.match(runtime, /context\.getTools\(\)/);
-  assert.match(runtime, /context\.executeTool\(probe, \{\}, \{ signal \}\)/);
+  assert.match(runtime, /context\.executeTool\(probe, JSON\.stringify\(\{\}\), \{ signal \}\)/);
   assert.match(page, /error instanceof DOMException && error\.name === "AbortError"/);
   assert.match(toolSurface, /const result = stageMagicShow\(input\);\s+await afterVisiblePaint\(\);\s+guard\(signal\);/);
   assert.match(toolSurface, /const result = await prepareRoomInvite[\s\S]+?await afterVisiblePaint\(\);\s+guard\(signal\);/);
