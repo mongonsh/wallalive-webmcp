@@ -16,6 +16,14 @@ export type ARWorld = "studio" | "storybook" | "wizard" | "museum";
 export type LightingMood = "cyberpunk-neon" | "sunset-warm" | "moonlight";
 export type CameraPreset = "cinematic-orbit" | "low-angle-hero" | "overhead";
 export type WorldObjectInteraction = { id: string; label: string; verb: string; story: string; world: ARWorld };
+export type ModelPaintTool = "brush" | "spray" | "oil" | "spill";
+export type ModelPaintBrush = { tool: ModelPaintTool; color: string; size: number };
+export type ModelPaintInspection = {
+  strokeCount: number;
+  paintedSurfaceCount: number;
+  colors: string[];
+  tools: ModelPaintTool[];
+};
 
 export type ARStageHandle = {
   enterImmersiveAR: () => Promise<{ ok: boolean; error?: string }>;
@@ -23,6 +31,13 @@ export type ARStageHandle = {
   rotateBy: (yaw: number, pitch: number) => void;
   moveBy: (x: number, z: number) => void;
   interactWorldObject: (id: string) => boolean;
+  setPaintEnabled: (enabled: boolean) => void;
+  beginPaintStroke: (brush: ModelPaintBrush) => void;
+  paintAtNormalized: (x: number, y: number, pressure?: number) => { painted: boolean; target?: string };
+  endPaintStroke: () => ModelPaintInspection;
+  undoPaint: () => ModelPaintInspection;
+  resetPaint: () => ModelPaintInspection;
+  inspectPaint: () => ModelPaintInspection;
 };
 
 type ARStageProps = {
@@ -40,6 +55,7 @@ type ARStageProps = {
   accent: string;
   inflation: number;
   neuralAssetUrl: string | null;
+  paintEnabled?: boolean;
   visible: boolean;
   onCapability: (supported: boolean) => void;
   onRendererCapability: (supported: boolean) => void;
@@ -58,6 +74,13 @@ type SceneHandles = {
   setLightingMood: (mood: LightingMood) => void;
   setCameraPreset: (preset: CameraPreset) => void;
   interactWorldObject: (id: string) => boolean;
+  setPaintEnabled: (enabled: boolean) => void;
+  beginPaintStroke: (brush: ModelPaintBrush) => void;
+  paintAtNormalized: (x: number, y: number, pressure?: number) => { painted: boolean; target?: string };
+  endPaintStroke: () => ModelPaintInspection;
+  undoPaint: () => ModelPaintInspection;
+  resetPaint: () => ModelPaintInspection;
+  inspectPaint: () => ModelPaintInspection;
   controls: OrbitControls;
   dispose: () => void;
 };
@@ -611,8 +634,412 @@ export function buildCharacter(
   return character;
 }
 
+type PaintableMaterial = THREE.Material & {
+  map?: THREE.Texture | null;
+  color?: THREE.Color;
+};
+
+type TexturePaintSurface = {
+  key: string;
+  material: PaintableMaterial;
+  originalMap: THREE.Texture | null;
+  originalColor: THREE.Color | null;
+  canvas: HTMLCanvasElement;
+  context: CanvasRenderingContext2D;
+  texture: THREE.CanvasTexture;
+};
+
+type VertexPaintSurface = {
+  key: string;
+  mesh: THREE.Mesh;
+  originalColorAttribute: THREE.BufferAttribute | THREE.InterleavedBufferAttribute | null;
+  colors: THREE.BufferAttribute;
+  originalColors: Float32Array;
+  positions: THREE.BufferAttribute | THREE.InterleavedBufferAttribute;
+  normals: THREE.BufferAttribute | THREE.InterleavedBufferAttribute | null;
+  materialStates: Array<{ material: PaintableMaterial & { vertexColors?: boolean }; vertexColors: boolean }>;
+  cellSize: number;
+  grid: Map<string, number[]>;
+};
+
+type TexturePaintedPoint = { kind: "texture"; surfaceKey: string; u: number; v: number; pressure: number };
+type VertexPaintedPoint = { kind: "vertex"; surfaceKey: string; face: [number, number, number]; pressure: number };
+type PaintedPoint = TexturePaintedPoint | VertexPaintedPoint;
+type PaintedStroke = { brush: ModelPaintBrush; points: PaintedPoint[] };
+
+function normalizedPaintBrush(brush: ModelPaintBrush): ModelPaintBrush {
+  return {
+    tool: ["brush", "spray", "oil", "spill"].includes(brush.tool) ? brush.tool : "brush",
+    color: /^#[0-9a-f]{6}$/i.test(brush.color) ? brush.color.toLowerCase() : "#238fc7",
+    size: THREE.MathUtils.clamp(brush.size, 0.08, 1),
+  };
+}
+
+function createModelPainter(renderer: THREE.WebGLRenderer, camera: THREE.PerspectiveCamera, character: THREE.Group, controls: OrbitControls) {
+  const textureSize = 1024;
+  const raycaster = new THREE.Raycaster();
+  const pointer = new THREE.Vector2();
+  const surfaces = new Map<string, TexturePaintSurface>();
+  const vertexSurfaces = new Map<string, VertexPaintSurface>();
+  const strokes: PaintedStroke[] = [];
+  let activeStroke: PaintedStroke | null = null;
+  let enabled = false;
+
+  const materialForHit = (hit: THREE.Intersection<THREE.Object3D>) => {
+    if (!(hit.object instanceof THREE.Mesh) || !hit.uv) return null;
+    const materials = Array.isArray(hit.object.material) ? hit.object.material : [hit.object.material];
+    const materialIndex = hit.face?.materialIndex ?? 0;
+    const material = materials[materialIndex] as PaintableMaterial | undefined;
+    if (!material || !("color" in material || "map" in material)) return null;
+    return { material, mesh: hit.object, label: hit.object.name || "3D character" };
+  };
+
+  const drawOriginalSurface = (surface: TexturePaintSurface) => {
+    const { context, canvas, originalMap, originalColor } = surface;
+    context.save();
+    context.globalAlpha = 1;
+    context.globalCompositeOperation = "source-over";
+    context.clearRect(0, 0, canvas.width, canvas.height);
+    let imageDrawn = false;
+    const image = originalMap?.image as CanvasImageSource | undefined;
+    if (image) {
+      try {
+        context.drawImage(image, 0, 0, canvas.width, canvas.height);
+        imageDrawn = true;
+      } catch {
+        imageDrawn = false;
+      }
+    }
+    if (!imageDrawn) {
+      context.fillStyle = originalColor?.getStyle() ?? "#f4f0e7";
+      context.fillRect(0, 0, canvas.width, canvas.height);
+    }
+    context.restore();
+    surface.texture.needsUpdate = true;
+  };
+
+  const ensureSurface = (material: PaintableMaterial) => {
+    const existing = surfaces.get(material.uuid);
+    if (existing) return existing;
+    const canvas = document.createElement("canvas");
+    canvas.width = textureSize;
+    canvas.height = textureSize;
+    const context = canvas.getContext("2d", { alpha: true });
+    if (!context) return null;
+    const originalMap = material.map ?? null;
+    const originalColor = material.color?.clone() ?? null;
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.name = `wallalive-child-paint-${material.uuid}`;
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+    if (originalMap) {
+      texture.flipY = originalMap.flipY;
+      texture.wrapS = originalMap.wrapS;
+      texture.wrapT = originalMap.wrapT;
+      texture.repeat.copy(originalMap.repeat);
+      texture.offset.copy(originalMap.offset);
+      texture.center.copy(originalMap.center);
+      texture.rotation = originalMap.rotation;
+    }
+    const surface: TexturePaintSurface = { key: material.uuid, material, originalMap, originalColor, canvas, context, texture };
+    surfaces.set(surface.key, surface);
+    drawOriginalSurface(surface);
+    material.map = texture;
+    material.color?.set(0xffffff);
+    material.needsUpdate = true;
+    return surface;
+  };
+
+  const seeded = (point: PaintedPoint, index: number) => {
+    const first = point.kind === "texture" ? point.u : point.face[0] * 0.00017 + point.face[1] * 0.000031;
+    const second = point.kind === "texture" ? point.v : point.face[2] * 0.000071;
+    const value = Math.sin(first * 12871 + second * 7919 + index * 104729) * 43758.5453;
+    return value - Math.floor(value);
+  };
+
+  const paintPoint = (surface: TexturePaintSurface, point: TexturePaintedPoint, brush: ModelPaintBrush, previous?: TexturePaintedPoint) => {
+    const context = surface.context;
+    const x = point.u * textureSize;
+    const y = (1 - point.v) * textureSize;
+    const radius = (8 + brush.size * 46) * (0.72 + point.pressure * 0.32);
+    context.save();
+    context.lineCap = "round";
+    context.lineJoin = "round";
+
+    if (brush.tool === "spray") {
+      const dots = Math.round(24 + brush.size * 58);
+      context.fillStyle = brush.color;
+      for (let index = 0; index < dots; index += 1) {
+        const angle = seeded(point, index * 2) * Math.PI * 2;
+        const distance = Math.sqrt(seeded(point, index * 2 + 1)) * radius * 1.7;
+        const dot = 0.9 + seeded(point, index + 231) * (2.2 + brush.size * 2.8);
+        context.globalAlpha = 0.22 + seeded(point, index + 991) * 0.56;
+        context.beginPath();
+        context.arc(x + Math.cos(angle) * distance, y + Math.sin(angle) * distance, dot, 0, Math.PI * 2);
+        context.fill();
+      }
+    } else if (brush.tool === "spill") {
+      context.globalAlpha = 0.9;
+      context.fillStyle = brush.color;
+      context.beginPath();
+      for (let index = 0; index < 22; index += 1) {
+        const angle = index / 22 * Math.PI * 2;
+        const wobble = radius * (0.72 + seeded(point, index) * 0.7);
+        const px = x + Math.cos(angle) * wobble;
+        const py = y + Math.sin(angle) * wobble;
+        if (index === 0) context.moveTo(px, py); else context.lineTo(px, py);
+      }
+      context.closePath();
+      context.fill();
+      for (let drip = 0; drip < 4; drip += 1) {
+        const dripX = x + (seeded(point, drip + 88) - 0.5) * radius * 1.2;
+        const dripLength = radius * (0.7 + seeded(point, drip + 144) * 1.55);
+        context.lineWidth = radius * (0.13 + seeded(point, drip + 202) * 0.12);
+        context.strokeStyle = brush.color;
+        context.beginPath();
+        context.moveTo(dripX, y + radius * 0.3);
+        context.lineTo(dripX + (seeded(point, drip + 301) - 0.5) * radius * 0.25, y + dripLength);
+        context.stroke();
+      }
+    } else {
+      const startX = previous ? previous.u * textureSize : x;
+      const startY = previous ? (1 - previous.v) * textureSize : y;
+      context.globalAlpha = brush.tool === "oil" ? 0.94 : 0.88;
+      context.strokeStyle = brush.color;
+      context.lineWidth = radius * (brush.tool === "oil" ? 2.25 : 1.55);
+      context.shadowColor = brush.color;
+      context.shadowBlur = brush.tool === "oil" ? radius * 0.2 : radius * 0.08;
+      context.beginPath();
+      context.moveTo(startX, startY);
+      context.lineTo(x, y);
+      context.stroke();
+      if (brush.tool === "oil") {
+        const highlight = new THREE.Color(brush.color).lerp(new THREE.Color(0xffffff), 0.42).getStyle();
+        context.globalAlpha = 0.34;
+        context.shadowBlur = 0;
+        context.strokeStyle = highlight;
+        context.lineWidth = Math.max(2, radius * 0.28);
+        context.beginPath();
+        context.moveTo(startX - radius * 0.22, startY - radius * 0.18);
+        context.lineTo(x - radius * 0.22, y - radius * 0.18);
+        context.stroke();
+      }
+    }
+    context.restore();
+    surface.texture.needsUpdate = true;
+  };
+
+  const ensureVertexSurface = (mesh: THREE.Mesh) => {
+    const existing = vertexSurfaces.get(mesh.geometry.uuid);
+    if (existing) return existing;
+    const positions = mesh.geometry.getAttribute("position");
+    if (!positions) return null;
+    const originalColorAttribute = mesh.geometry.getAttribute("color") ?? null;
+    const originalColors = new Float32Array(positions.count * 3);
+    for (let index = 0; index < positions.count; index += 1) {
+      originalColors[index * 3] = originalColorAttribute?.getX(index) ?? 1;
+      originalColors[index * 3 + 1] = originalColorAttribute?.getY(index) ?? 1;
+      originalColors[index * 3 + 2] = originalColorAttribute?.getZ(index) ?? 1;
+    }
+    const colors = new THREE.Float32BufferAttribute(originalColors.slice(), 3);
+    colors.setUsage(THREE.DynamicDrawUsage);
+    mesh.geometry.setAttribute("color", colors);
+    mesh.geometry.computeBoundingSphere();
+    const sphereRadius = mesh.geometry.boundingSphere?.radius ?? 0.7;
+    const cellSize = Math.max(0.012, sphereRadius * 0.13);
+    const grid = new Map<string, number[]>();
+    const cellKey = (x: number, y: number, z: number) => `${Math.floor(x / cellSize)},${Math.floor(y / cellSize)},${Math.floor(z / cellSize)}`;
+    for (let index = 0; index < positions.count; index += 1) {
+      const key = cellKey(positions.getX(index), positions.getY(index), positions.getZ(index));
+      const cell = grid.get(key);
+      if (cell) cell.push(index); else grid.set(key, [index]);
+    }
+    const materials = (Array.isArray(mesh.material) ? mesh.material : [mesh.material]) as Array<PaintableMaterial & { vertexColors?: boolean }>;
+    const materialStates = materials.map((material) => ({ material, vertexColors: Boolean(material.vertexColors) }));
+    materials.forEach((material) => { material.vertexColors = true; material.needsUpdate = true; });
+    const surface: VertexPaintSurface = {
+      key: `vertex-${mesh.geometry.uuid}`,
+      mesh,
+      originalColorAttribute,
+      colors,
+      originalColors,
+      positions,
+      normals: mesh.geometry.getAttribute("normal") ?? null,
+      materialStates,
+      cellSize,
+      grid,
+    };
+    vertexSurfaces.set(mesh.geometry.uuid, surface);
+    return surface;
+  };
+
+  const resetVertexSurface = (surface: VertexPaintSurface) => {
+    const colorArray = surface.colors.array as Float32Array;
+    colorArray.set(surface.originalColors);
+    surface.colors.needsUpdate = true;
+  };
+
+  const paintVertexPoint = (surface: VertexPaintSurface, point: VertexPaintedPoint, brush: ModelPaintBrush) => {
+    const { positions, normals, colors, cellSize, grid } = surface;
+    const [a, b, c] = point.face;
+    const centerX = (positions.getX(a) + positions.getX(b) + positions.getX(c)) / 3;
+    const centerY = (positions.getY(a) + positions.getY(b) + positions.getY(c)) / 3;
+    const centerZ = (positions.getZ(a) + positions.getZ(b) + positions.getZ(c)) / 3;
+    const normalX = normals ? (normals.getX(a) + normals.getX(b) + normals.getX(c)) / 3 : 0;
+    const normalY = normals ? (normals.getY(a) + normals.getY(b) + normals.getY(c)) / 3 : 0;
+    const normalZ = normals ? (normals.getZ(a) + normals.getZ(b) + normals.getZ(c)) / 3 : 1;
+    const sphereRadius = surface.mesh.geometry.boundingSphere?.radius ?? 0.7;
+    const toolScale = brush.tool === "spill" ? 1.35 : brush.tool === "oil" ? 1.12 : brush.tool === "spray" ? 1.18 : 1;
+    const radius = sphereRadius * (0.025 + brush.size * 0.13) * toolScale * (0.76 + point.pressure * 0.28);
+    const cellReach = Math.max(1, Math.ceil(radius / cellSize));
+    const cellX = Math.floor(centerX / cellSize);
+    const cellY = Math.floor(centerY / cellSize);
+    const cellZ = Math.floor(centerZ / cellSize);
+    const paintColor = new THREE.Color(brush.color);
+    const current = new THREE.Color();
+    const white = new THREE.Color(0xffffff);
+    const candidates = new Set<number>([a, b, c]);
+    for (let x = -cellReach; x <= cellReach; x += 1) for (let y = -cellReach; y <= cellReach; y += 1) for (let z = -cellReach; z <= cellReach; z += 1) {
+      grid.get(`${cellX + x},${cellY + y},${cellZ + z}`)?.forEach((index) => candidates.add(index));
+    }
+    candidates.forEach((index) => {
+      const dx = positions.getX(index) - centerX;
+      const dy = positions.getY(index) - centerY;
+      const dz = positions.getZ(index) - centerZ;
+      const distance = Math.hypot(dx, dy, dz);
+      if (distance > radius) return;
+      if (normals) {
+        const facing = normals.getX(index) * normalX + normals.getY(index) * normalY + normals.getZ(index) * normalZ;
+        if (facing < 0.05) return;
+      }
+      let strength = Math.max(0, 1 - distance / Math.max(0.0001, radius));
+      if (brush.tool === "spray") {
+        if (seeded(point, index) > strength * 0.92) return;
+        strength *= 0.58;
+      } else if (brush.tool === "spill") {
+        const wobble = 0.7 + seeded(point, index + 317) * 0.42;
+        if (distance > radius * wobble) return;
+        strength = Math.min(0.92, 0.48 + strength * 0.52);
+      } else if (brush.tool === "oil") {
+        strength = Math.min(0.94, 0.38 + strength * 0.62);
+      } else strength *= 0.82;
+      current.setRGB(colors.getX(index), colors.getY(index), colors.getZ(index));
+      current.lerp(paintColor, strength);
+      if (brush.tool === "oil" && seeded(point, index + 701) > 0.83) current.lerp(white, 0.12);
+      colors.setXYZ(index, current.r, current.g, current.b);
+    });
+    colors.needsUpdate = true;
+  };
+
+  const replay = () => {
+    surfaces.forEach(drawOriginalSurface);
+    vertexSurfaces.forEach(resetVertexSurface);
+    strokes.forEach((stroke) => {
+      let previous: TexturePaintedPoint | undefined;
+      stroke.points.forEach((point) => {
+        if (point.kind === "texture") {
+          const surface = surfaces.get(point.surfaceKey);
+          if (!surface) return;
+          paintPoint(surface, point, stroke.brush, previous?.surfaceKey === point.surfaceKey ? previous : undefined);
+          previous = point;
+        } else {
+          const surface = [...vertexSurfaces.values()].find((candidate) => candidate.key === point.surfaceKey);
+          if (surface) paintVertexPoint(surface, point, stroke.brush);
+          previous = undefined;
+        }
+      });
+    });
+  };
+
+  const inspect = (): ModelPaintInspection => ({
+    strokeCount: strokes.length + (activeStroke?.points.length ? 1 : 0),
+    paintedSurfaceCount: new Set([...strokes, ...(activeStroke?.points.length ? [activeStroke] : [])].flatMap((stroke) => stroke.points.map((point) => point.surfaceKey))).size,
+    colors: [...new Set([...strokes, ...(activeStroke?.points.length ? [activeStroke] : [])].map((stroke) => stroke.brush.color))],
+    tools: [...new Set([...strokes, ...(activeStroke?.points.length ? [activeStroke] : [])].map((stroke) => stroke.brush.tool))],
+  });
+
+  return {
+    setEnabled(next: boolean) {
+      enabled = next;
+      controls.enabled = !next;
+      renderer.domElement.style.cursor = next ? "crosshair" : "grab";
+      renderer.domElement.dataset.paintEnabled = String(next);
+    },
+    begin(brush: ModelPaintBrush) {
+      if (activeStroke?.points.length) strokes.push(activeStroke);
+      activeStroke = { brush: normalizedPaintBrush(brush), points: [] };
+    },
+    paint(x: number, y: number, pressure = 0.5) {
+      if (!enabled || !activeStroke) return { painted: false };
+      if (activeStroke.brush.tool === "spill" && activeStroke.points.length) return { painted: true };
+      pointer.set(THREE.MathUtils.clamp(x, 0, 1) * 2 - 1, -(THREE.MathUtils.clamp(y, 0, 1) * 2 - 1));
+      character.updateWorldMatrix(true, true);
+      raycaster.setFromCamera(pointer, camera);
+      const hit = raycaster.intersectObject(character, true).find((candidate) => Boolean(candidate.uv || candidate.face));
+      if (!hit) return { painted: false };
+      const target = materialForHit(hit);
+      if (!target) return { painted: false };
+      const normalizedPressure = THREE.MathUtils.clamp(pressure || 0.5, 0.15, 1);
+      let point: PaintedPoint;
+      if (hit.uv) {
+        const surface = ensureSurface(target.material);
+        if (!surface) return { painted: false };
+        point = {
+          kind: "texture",
+          surfaceKey: surface.key,
+          u: THREE.MathUtils.clamp(hit.uv.x, 0, 1),
+          v: THREE.MathUtils.clamp(hit.uv.y, 0, 1),
+          pressure: normalizedPressure,
+        };
+        const previous = activeStroke.points.at(-1);
+        paintPoint(surface, point, activeStroke.brush, previous?.kind === "texture" && previous.surfaceKey === point.surfaceKey ? previous : undefined);
+      } else if (hit.face) {
+        const surface = ensureVertexSurface(target.mesh);
+        if (!surface) return { painted: false };
+        point = { kind: "vertex", surfaceKey: surface.key, face: [hit.face.a, hit.face.b, hit.face.c], pressure: normalizedPressure };
+        paintVertexPoint(surface, point, activeStroke.brush);
+      } else return { painted: false };
+      activeStroke.points.push(point);
+      return { painted: true, target: target.label };
+    },
+    end() {
+      if (activeStroke?.points.length) strokes.push(activeStroke);
+      activeStroke = null;
+      return inspect();
+    },
+    undo() {
+      activeStroke = null;
+      strokes.pop();
+      replay();
+      return inspect();
+    },
+    reset() {
+      activeStroke = null;
+      strokes.length = 0;
+      replay();
+      return inspect();
+    },
+    inspect,
+    dispose() {
+      surfaces.forEach((surface) => {
+        surface.material.map = surface.originalMap;
+        if (surface.originalColor && surface.material.color) surface.material.color.copy(surface.originalColor);
+        surface.material.needsUpdate = true;
+        surface.texture.dispose();
+      });
+      vertexSurfaces.forEach((surface) => {
+        if (surface.originalColorAttribute) surface.mesh.geometry.setAttribute("color", surface.originalColorAttribute);
+        else surface.mesh.geometry.deleteAttribute("color");
+        surface.materialStates.forEach(({ material, vertexColors }) => { material.vertexColors = vertexColors; material.needsUpdate = true; });
+      });
+      surfaces.clear();
+      vertexSurfaces.clear();
+    },
+  };
+}
+
 export const ARStage = forwardRef<ARStageHandle, ARStageProps>(function ARStage(
-  { characters, contour, skeleton, textureUrl, rig, depth, action, ensembleActions = null, world, lightingMood, cameraPreset, accent, inflation, neuralAssetUrl, visible, onCapability, onRendererCapability, onPlaced, onNeuralAssetInfo, onWorldInteraction },
+  { characters, contour, skeleton, textureUrl, rig, depth, action, ensembleActions = null, world, lightingMood, cameraPreset, accent, inflation, neuralAssetUrl, paintEnabled = false, visible, onCapability, onRendererCapability, onPlaced, onNeuralAssetInfo, onWorldInteraction },
   ref,
 ) {
   const mountRef = useRef<HTMLDivElement>(null);
@@ -623,6 +1050,7 @@ export const ARStage = forwardRef<ARStageHandle, ARStageProps>(function ARStage(
   const worldStateRef = useRef<ARWorld>(world);
   const moodStateRef = useRef<LightingMood>(lightingMood);
   const cameraPresetRef = useRef<CameraPreset>(cameraPreset);
+  const paintEnabledRef = useRef(paintEnabled);
   const placementRef = useRef({ x: 0, y: -0.15, z: -0.5, scale: 1 });
   const rotationRef = useRef({ yaw: 0, pitch: 0 });
   const xrHitSourceRef = useRef<XRHitTestSource | null>(null);
@@ -754,9 +1182,11 @@ export const ARStage = forwardRef<ARStageHandle, ARStageProps>(function ARStage(
       return raycaster.intersectObjects(environment.group.children, true).find((hit) => Boolean(hit.object.userData.wallaliveInteraction))?.object ?? null;
     };
     const onWorldPointerMove = (event: PointerEvent) => {
+      if (renderer.domElement.dataset.paintEnabled === "true") return;
       renderer.domElement.style.cursor = interactiveAt(event) ? "pointer" : "grab";
     };
     const onWorldPointerUp = (event: PointerEvent) => {
+      if (renderer.domElement.dataset.paintEnabled === "true") return;
       const target = interactiveAt(event);
       const interaction = target?.userData.wallaliveInteraction as WorldObjectInteraction | undefined;
       if (interaction) activateWorldObject(interaction.id);
@@ -906,6 +1336,8 @@ export const ARStage = forwardRef<ARStageHandle, ARStageProps>(function ARStage(
       syncCharacterDiagnostics();
       onNeuralAssetInfo(null);
     }
+    const modelPainter = createModelPainter(renderer, camera, characterRoot, controls);
+    modelPainter.setEnabled(Boolean(paintEnabledRef.current));
 
     const shadowMaterial = new THREE.MeshBasicMaterial({ color: 0x102927, transparent: true, opacity: 0.2, depthWrite: false });
     const shadow = new THREE.Mesh(new THREE.CircleGeometry(0.64, 64), shadowMaterial);
@@ -1171,6 +1603,7 @@ export const ARStage = forwardRef<ARStageHandle, ARStageProps>(function ARStage(
       renderer.domElement.removeEventListener("pointermove", onWorldPointerMove);
       renderer.domElement.removeEventListener("pointerup", onWorldPointerUp);
       controls.dispose();
+      modelPainter.dispose();
       environmentMap.dispose();
       renderer.setAnimationLoop(null);
       disposeObject(scene);
@@ -1179,7 +1612,26 @@ export const ARStage = forwardRef<ARStageHandle, ARStageProps>(function ARStage(
       if (renderer.domElement.parentNode === mount) mount.removeChild(renderer.domElement);
     };
 
-    handlesRef.current = { renderer, scene, camera, character: characterRoot, reticle, setWorld: setStageWorld, setLightingMood: applyLightingMood, setCameraPreset: applyCameraPreset, interactWorldObject: activateWorldObject, controls, dispose };
+    handlesRef.current = {
+      renderer,
+      scene,
+      camera,
+      character: characterRoot,
+      reticle,
+      setWorld: setStageWorld,
+      setLightingMood: applyLightingMood,
+      setCameraPreset: applyCameraPreset,
+      interactWorldObject: activateWorldObject,
+      setPaintEnabled: modelPainter.setEnabled,
+      beginPaintStroke: modelPainter.begin,
+      paintAtNormalized: modelPainter.paint,
+      endPaintStroke: modelPainter.end,
+      undoPaint: modelPainter.undo,
+      resetPaint: modelPainter.reset,
+      inspectPaint: modelPainter.inspect,
+      controls,
+      dispose,
+    };
     if (navigator.xr) navigator.xr.isSessionSupported("immersive-ar").then(onCapability).catch(() => onCapability(false));
     else onCapability(false);
 
@@ -1204,6 +1656,11 @@ export const ARStage = forwardRef<ARStageHandle, ARStageProps>(function ARStage(
     handlesRef.current?.setCameraPreset(cameraPreset);
   }, [cameraPreset]);
 
+  useEffect(() => {
+    paintEnabledRef.current = paintEnabled;
+    handlesRef.current?.setPaintEnabled(Boolean(paintEnabled));
+  }, [paintEnabled]);
+
   useImperativeHandle(ref, () => ({
     placeNormalized(x: number, y: number, scale = placementRef.current.scale) {
       placementRef.current = { x: (x - 0.5) * 2.3, y: (0.5 - y) * 1.65 - 0.1, z: placementRef.current.z, scale: Math.min(1.55, Math.max(0.55, scale)) };
@@ -1224,6 +1681,28 @@ export const ARStage = forwardRef<ARStageHandle, ARStageProps>(function ARStage(
     },
     interactWorldObject(id: string) {
       return handlesRef.current?.interactWorldObject(id) ?? false;
+    },
+    setPaintEnabled(enabled: boolean) {
+      paintEnabledRef.current = enabled;
+      handlesRef.current?.setPaintEnabled(enabled);
+    },
+    beginPaintStroke(brush: ModelPaintBrush) {
+      handlesRef.current?.beginPaintStroke(brush);
+    },
+    paintAtNormalized(x: number, y: number, pressure = 0.5) {
+      return handlesRef.current?.paintAtNormalized(x, y, pressure) ?? { painted: false };
+    },
+    endPaintStroke() {
+      return handlesRef.current?.endPaintStroke() ?? { strokeCount: 0, paintedSurfaceCount: 0, colors: [], tools: [] };
+    },
+    undoPaint() {
+      return handlesRef.current?.undoPaint() ?? { strokeCount: 0, paintedSurfaceCount: 0, colors: [], tools: [] };
+    },
+    resetPaint() {
+      return handlesRef.current?.resetPaint() ?? { strokeCount: 0, paintedSurfaceCount: 0, colors: [], tools: [] };
+    },
+    inspectPaint() {
+      return handlesRef.current?.inspectPaint() ?? { strokeCount: 0, paintedSurfaceCount: 0, colors: [], tools: [] };
     },
     async enterImmersiveAR() {
       const handles = handlesRef.current;

@@ -1777,3 +1777,81 @@ body {
 @media (max-width: 430px) {
   .invite-ready { grid-template-columns: 1fr; }
 }
+
+/* v49 — direct, reversible texture painting on the live 3D mesh. */
+.three-layer canvas[data-paint-enabled="true"] { cursor: crosshair; }
+.paint-studio-launch {
+  position: absolute;
+  z-index: 13;
+  top: 16px;
+  left: 16px;
+  min-height: 46px;
+  padding: 0 18px 0 11px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, .94);
+  color: #174e70;
+  box-shadow: 0 10px 30px rgba(22, 59, 87, .2);
+  backdrop-filter: blur(14px);
+  cursor: pointer;
+  font: 850 10px var(--font-geist-sans), sans-serif;
+  letter-spacing: .04em;
+}
+.paint-studio-launch i { width: 31px; height: 31px; display: grid; place-items: center; border-radius: 50%; background: #e4f5ff; font-size: 17px; font-style: normal; }
+.model-paint-studio {
+  position: absolute;
+  z-index: 15;
+  top: 16px;
+  left: 16px;
+  width: min(330px, calc(100% - 32px));
+  padding: 15px;
+  border: 0;
+  border-radius: 26px 26px 9px 26px;
+  background: rgba(247, 252, 255, .95);
+  color: #17324a;
+  box-shadow: 0 22px 65px rgba(17, 57, 85, .28);
+  backdrop-filter: blur(18px) saturate(1.2);
+  touch-action: manipulation;
+}
+.model-paint-studio > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.model-paint-studio > header div { display: grid; gap: 2px; }
+.model-paint-studio > header span { color: #3c83ad; font: 850 8px var(--font-geist-sans), sans-serif; letter-spacing: .11em; }
+.model-paint-studio > header b { font: 750 14px var(--font-geist-sans), sans-serif; }
+.model-paint-studio > header button { min-height: 36px; padding: 0 13px; border: 0; border-radius: 999px; background: #174e70; color: white; cursor: pointer; font: 850 8px var(--font-geist-sans), sans-serif; }
+.paint-tools { margin-top: 13px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+.paint-tools button { min-height: 53px; padding: 5px 2px; display: grid; place-items: center; gap: 2px; border: 0; border-radius: 16px; background: #eaf5fb; color: #315e79; cursor: pointer; font: 750 8px var(--font-geist-sans), sans-serif; }
+.paint-tools button i { font: 20px/1 var(--serif); font-style: normal; }
+.paint-tools button.active { background: #3b9bd0; color: white; box-shadow: 0 7px 18px rgba(59, 155, 208, .24); }
+.paint-colors { margin-top: 12px; display: flex; gap: 7px; overflow-x: auto; padding: 2px; scrollbar-width: none; }
+.paint-colors button { flex: 0 0 auto; width: 29px; height: 29px; border: 3px solid white; border-radius: 50%; background: var(--paint-color); box-shadow: 0 0 0 1px rgba(23, 50, 74, .12); cursor: pointer; }
+.paint-colors button.active { box-shadow: 0 0 0 3px #3b9bd0, 0 5px 13px rgba(23, 50, 74, .18); transform: scale(.9); }
+.paint-size { margin-top: 12px; display: grid; grid-template-columns: auto minmax(0, 1fr) 34px; align-items: center; gap: 9px; color: #5f8298; font: 800 7px var(--font-geist-sans), sans-serif; letter-spacing: .08em; }
+.paint-size input { width: 100%; accent-color: #3b9bd0; }
+.paint-size i { width: var(--brush-size); height: var(--brush-size); max-width: 30px; max-height: 30px; justify-self: center; border-radius: 50%; background: var(--paint-color); box-shadow: 0 3px 8px rgba(23, 50, 74, .18); }
+.paint-history { margin-top: 11px; display: flex; align-items: center; gap: 6px; }
+.paint-history button { min-height: 35px; padding: 0 12px; border: 0; border-radius: 999px; background: #e5f2f8; color: #174e70; cursor: pointer; font: 800 8px var(--font-geist-sans), sans-serif; }
+.paint-history button:disabled { opacity: .34; cursor: default; }
+.paint-history small { margin-left: auto; color: #7693a4; font: 650 7px var(--font-geist-sans), sans-serif; }
+.paint-adventure { margin-top: 12px; padding: 13px; border-radius: 18px 18px 6px 18px; background: linear-gradient(135deg, #e6f6ff, #fff1dc); }
+.paint-adventure > span { color: #337fa9; font: 850 7px var(--font-geist-sans), sans-serif; letter-spacing: .1em; }
+.paint-adventure h3 { margin: 4px 0 1px; font: 800 17px/1.1 var(--font-geist-sans), sans-serif; }
+.paint-adventure p { margin: 0 0 8px; color: #58778a; font: 600 10px/1.35 var(--font-geist-sans), sans-serif; }
+.paint-adventure > div { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px; }
+.paint-adventure > div i { display: flex; align-items: center; gap: 5px; color: #31576d; font: 650 8px/1.25 var(--font-geist-sans), sans-serif; font-style: normal; }
+.paint-adventure > div b { flex: 0 0 18px; height: 18px; display: grid; place-items: center; border-radius: 50%; background: white; color: #3b9bd0; font-size: 7px; }
+.paint-adventure footer { margin-top: 10px; display: flex; gap: 6px; }
+.paint-adventure footer button { min-height: 35px; padding: 0 12px; border: 0; border-radius: 999px; background: white; color: #31576d; cursor: pointer; font: 800 7px var(--font-geist-sans), sans-serif; }
+.paint-adventure footer button:first-child { flex: 1; background: #3b9bd0; color: white; }
+.camera-frame.paint-mode .story-caption { opacity: 0; pointer-events: none; }
+.camera-frame.paint-mode .spatial-controls { opacity: .28; pointer-events: none; }
+
+@media (max-width: 680px) {
+  .paint-studio-launch { top: 11px; left: 11px; min-height: 42px; }
+  .model-paint-studio { top: auto; bottom: 52px; left: 10px; width: calc(100% - 20px); padding: 12px; border-radius: 24px 24px 7px 24px; }
+  .paint-tools { margin-top: 10px; }
+  .paint-tools button { min-height: 48px; }
+  .paint-adventure { max-height: 180px; overflow: auto; }
+}

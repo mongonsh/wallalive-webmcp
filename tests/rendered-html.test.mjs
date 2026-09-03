@@ -38,7 +38,7 @@ test("server-renders the WallAlive product shell and security headers", async ()
   assert.doesNotMatch(html, /codex-preview|react-loading-skeleton|Starter Project|CutRoom/i);
 });
 
-test("registers seventeen goal-level WebMCP collaboration tools with repair, adaptive learning, spatial direction, and creator commerce", async () => {
+test("registers nineteen goal-level WebMCP collaboration tools with 3D paint, repair, learning, spatial direction, and creator commerce", async () => {
   const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
   const expectedTools = [
     "inspect_creative_scene",
@@ -57,17 +57,19 @@ test("registers seventeen goal-level WebMCP collaboration tools with repair, ada
     "inspect_shared_room",
     "prepare_room_invite",
     "interact_story_world",
+    "inspect_3d_paint_studio",
+    "stage_3d_paint_adventure",
     "list_collaboration_history",
   ];
 
   for (const tool of expectedTools) assert.match(page, new RegExp(`name: ["']${tool}["']`));
 
   const registeredNames = [...page.matchAll(/name: ["']([^"']+)["']/g)].map((match) => match[1]);
-  assert.equal(registeredNames.filter((name) => expectedTools.includes(name)).length, 17);
+  assert.equal(registeredNames.filter((name) => expectedTools.includes(name)).length, 19);
   const toolSurface = page.slice(page.indexOf("const tools: WebMCPTool[]"), page.indexOf("registerAndVerifyWebMCP(context, tools"));
-  assert.equal([...toolSurface.matchAll(/\n\s+name: ["']/g)].length, 17, "every registered tool must be represented exactly once");
-  assert.equal([...toolSurface.matchAll(/\n\s+title: ["']/g)].length, 17, "every registered tool needs a human-readable title");
-  assert.equal([...toolSurface.matchAll(/\n\s+annotations: \{ readOnlyHint: (?:true|false), untrustedContentHint: true \}/g)].length, 17, "every tool must declare trust and read/write intent");
+  assert.equal([...toolSurface.matchAll(/\n\s+name: ["']/g)].length, 19, "every registered tool must be represented exactly once");
+  assert.equal([...toolSurface.matchAll(/\n\s+title: ["']/g)].length, 19, "every registered tool needs a human-readable title");
+  assert.equal([...toolSurface.matchAll(/\n\s+annotations: \{ readOnlyHint: (?:true|false), untrustedContentHint: true \}/g)].length, 19, "every tool must declare trust and read/write intent");
   assert.equal(registeredNames.some((name) => /camera|capture|upload/.test(name)), false);
   assert.match(page, /document\.modelContext/);
   const runtime = await readFile(new URL("../app/lib/webmcp-runtime.ts", import.meta.url), "utf8");
@@ -119,9 +121,25 @@ test("registers seventeen goal-level WebMCP collaboration tools with repair, ada
   assert.match(page, /"WALLALIVE", "judge_demo"/);
   assert.match(page, /GUIDED DEMO/);
   assert.match(page, /LEARNING LOOP/);
+  assert.match(page, /PAINT 3D/);
+  assert.match(page, /paintAtNormalized/);
+  assert.match(page, /agentMayPaintPixels: false/);
+  assert.match(page, /childAppliesEveryStroke: true/);
+  assert.match(page, /pixelsChanged: false/);
+  const stage = await readFile(new URL("../app/components/ARStage.tsx", import.meta.url), "utf8");
+  assert.match(stage, /new THREE\.CanvasTexture\(canvas\)/);
+  assert.match(stage, /raycaster\.intersectObject\(character, true\)/);
+  assert.match(stage, /type VertexPaintSurface/);
+  assert.match(stage, /new THREE\.Float32BufferAttribute\(originalColors\.slice\(\), 3\)/);
+  assert.match(stage, /candidate\.uv \|\| candidate\.face/);
+  assert.match(stage, /type PaintedStroke/);
+  assert.match(stage, /strokes\.pop\(\);\s+replay\(\)/);
+  assert.match(stage, /brush\.tool === "spray"/);
+  assert.match(stage, /brush\.tool === "spill"/);
+  assert.match(stage, /brush\.tool === "oil"/);
 });
 
-test("keeps submission claims aligned with the shipped seventeen-tool educational and creator-commerce loops", async () => {
+test("keeps submission claims aligned with the shipped nineteen-tool creative, educational, and commerce loops", async () => {
   const files = await Promise.all([
     readFile(new URL("../README.md", import.meta.url), "utf8"),
     readFile(new URL("../docs/DEVPOST_SUBMISSION.md", import.meta.url), "utf8"),
@@ -133,7 +151,7 @@ test("keeps submission claims aligned with the shipped seventeen-tool educationa
   assert.doesNotMatch(claims, /(?:Six|six) (?:goal-level WebMCP|imperative) tools/);
   assert.doesNotMatch(claims, /(?:Six|six)(?:-graph| local| same-origin| ONNX)|six-model/);
   assert.match(claims, /Seven local ONNX graphs/);
-  assert.match(claims, /Seventeen goal-level WebMCP tools/);
+  assert.match(claims, /Nineteen goal-level WebMCP tools/);
   assert.match(claims, /Imagine.*Sequence.*Perform.*Reflect/);
   assert.match(claims, /not measured learning (?:gains|claims|outcomes)/i);
   assert.doesNotMatch(claims, /art therapy/i);

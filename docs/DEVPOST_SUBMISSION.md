@@ -34,7 +34,7 @@ Children already treat drawings as living characters. A few lines can have a nam
 5. A second visible approval explains that only the isolated drawing—not the live camera or room frame—may go to AniGen, which jointly predicts richer full geometry, an arbitrary skeleton, and skinning weights.
 6. WallAlive loads generated GLBs as Three.js `SkinnedMesh` assets. Unsupported branch actions stay locked instead of inventing a skeleton.
 7. Four original PBR worlds contain raycastable objects and progress-bearing activities: mini movie, firefly hide-and-seek, cooperation spell, and living-gallery curation.
-8. Seventeen goal-level WebMCP tools inspect rooms, per-figure readiness, rigs, quest objects, and the private Story Passport; request visible human repair; adapt the next learning challenge; prepare username invites; stage and direct stories; touch real scene objects; recommend products; stage a creator-credited Shopify handoff; and read attributed history.
+8. Nineteen goal-level WebMCP tools inspect rooms, per-figure readiness, rigs, 3D paint state, quest objects, and the private Story Passport; request visible human repair; stage a child-controlled paint adventure; adapt the next learning challenge; prepare username invites; stage and direct stories; touch real scene objects; recommend products; stage a creator-credited Shopify handoff; and read attributed history.
 9. WebXR hit testing places the same character on a real surface when supported; every other browser gets the camera-overlay experience.
 
 The child-facing outcome is a compact learning loop: **Imagine → Sequence → Perform → Reflect**. The learner starts with their own artifact, helps shape a beginning–middle–end story, approves the agent's plan, performs it, and then explains or revises what happened. A private Story Passport records completed beats, shared activity, the learner's retell, and one chosen revision; the agent can inspect that structured evidence to adapt its next scaffold without grading the child.
@@ -51,7 +51,7 @@ Without WebMCP, an agent would have to infer multiple rigs and coordinate dozens
 
 ## WebMCP implementation
 
-WallAlive registers seventeen imperative tools with `document.modelContext.registerTool()` in the top-level document:
+WallAlive registers nineteen imperative tools with `document.modelContext.registerTool()` in the top-level document:
 
 - `inspect_creative_scene`
 - `inspect_learning_progress`
@@ -106,7 +106,7 @@ The fourth challenge was anatomy. A good silhouette still gave straight, misplac
 - A locally trained 17-joint drawing pose model whose ONNX export exactly reproduces the untouched-test result
 - Generated bone-branch animation instead of whole-object-only motion
 - Real WebXR surface hit testing plus universal camera overlay
-- Seventeen goal-level WebMCP tools sharing the same live room, Story Passport, per-figure repair state, interactive 3D, and Creator Shop state as the human UI
+- Nineteen goal-level WebMCP tools sharing the same live room, Story Passport, child-controlled 3D paint studio, per-figure repair state, interactive 3D, and Creator Shop state as the human UI
 - Persistent username rooms and compact collaborative vector drawing through Cloudflare D1
 - Touchable quest objects with visible progress in all four original worlds
 - Artwork-aware product recommendations plus Shopify draft CSV, storefront blueprint, print artwork, and adult handoff exports

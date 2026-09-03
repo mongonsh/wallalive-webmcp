@@ -6,7 +6,7 @@
 
 **Public source:** https://github.com/mongonsh/wallalive-webmcp
 
-WallAlive is a collaborative drawing-to-story world for children, families, and classrooms. Friends join a shared room by guest username, paint one vector wall together, turn separate figures into a combined cast, and play cooperative activities in original interactive 3D sets. Seven drawing-specific local ONNX graphs isolate a selected figure and look for faces, pose, articulated parts, variable topology, and depth. Uncertain masks and skeleton branches are blocked instead of displayed as finished characters. The instant private tier is honestly labeled a spatial puppet; [AniGen](https://github.com/VAST-AI-Research/AniGen) is the optional full-sculpt tier for generated unseen surfaces and skinning. Seventeen WebMCP tools let a browser agent inspect per-figure reconstruction readiness, request a visible human repair, adapt the next Story Passport challenge, respect verified movement, coordinate collaboration, and prepare an adult-reviewed Shopify handoff.
+WallAlive is a collaborative drawing-to-story world for children, families, and classrooms. Friends join a shared room by guest username, paint one vector wall together, turn separate figures into a combined cast, paint directly on the live 3D surfaces, and play cooperative activities in original interactive 3D sets. Seven drawing-specific local ONNX graphs isolate a selected figure and look for faces, pose, articulated parts, variable topology, and depth. Uncertain masks and skeleton branches are blocked instead of displayed as finished characters. The instant private tier is honestly labeled a spatial puppet; [AniGen](https://github.com/VAST-AI-Research/AniGen) is the optional full-sculpt tier for generated unseen surfaces and skinning. Nineteen goal-level WebMCP tools let a browser agent inspect per-figure reconstruction readiness, request a visible human repair, stage a child-controlled 3D paint adventure, adapt the next Story Passport challenge, respect verified movement, coordinate collaboration, and prepare an adult-reviewed Shopify handoff.
 
 **Suggested judge prompt:** `Inspect our shared room, creative scene, verified character abilities, and Story Passport. Stage a four-beat cooperation quest using only supported actions, then wait for my approval. After I perform and reflect, inspect learning progress and suggest one revision. Do not access the camera, share pixels, grade me, publish products, or buy anything.`
 
@@ -57,6 +57,8 @@ Those are intended learning benefits, not measured outcomes. WallAlive has not y
 | `inspect_shared_room` | Read | Returns guest handles, vector-operation count, sync status, and the current interactive quest without pixels or tokens. |
 | `prepare_room_invite` | Stage | Creates a visible username-addressed invite link but never sends it; the human chooses how to share. |
 | `interact_story_world` | Live | Raycasts/activates one listed 3D quest object and reports the narrative effect after the visible update. |
+| `inspect_3d_paint_studio` | Read | Returns available surface-paint tools, palette, reversible stroke evidence, and any staged adventure without pixels. |
+| `stage_3d_paint_adventure` | Stage | Proposes a palette, texture, prompt, and short steps in the visible UI; it cannot paint—the child applies every UV-mapped stroke. |
 | `list_collaboration_history` | Read | Returns attributed plan, approval, performance, and system activity without image data. |
 
 All tools are registered imperatively on `document.modelContext`. They use strict schemas, nested `additionalProperties: false`, short bounded inputs, cancellation signals, read-only annotations, capability validation, and explicit result evidence. Human UI and WebMCP executors share the same state and action functions. Mutating tools wait for a visible browser paint before returning. There is no camera, capture, upload, purchase, or approval tool.
@@ -64,6 +66,7 @@ All tools are registered imperatively on `document.modelContext`. They use stric
 ## Spatial studio and supporter fit
 
 - `OrbitControls` provides true 360° orbit, wheel/pinch zoom, and pan. WASD, arrow keys, and the visible movement pad translate the character through world space; the walk action advances continuously instead of looping in place.
+- The child can brush, spray, layer oil-like strokes, or splash color directly onto raycast-hit model UVs. Strokes remain attached while the model rotates and can be undone or cleared without changing the source drawing.
 - Three cinematic light rigs—`cyberpunk-neon`, `sunset-warm`, and `moonlight`—control real Hemisphere/Directional lights, exposure, grid color, particles, shadows, fog, and the PBR environment map.
 - Three camera presets transition the same live perspective camera: `cinematic-orbit`, `low-angle-hero`, and `overhead`.
 - **OpenAI / ChatGPT Sites:** the public HTTPS deployment is packaged and versioned from the exact pushed source commit, and ChatGPT's in-app browser can use the WebMCP surface directly.

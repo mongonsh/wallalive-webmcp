@@ -3,7 +3,7 @@
 
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { CSSProperties } from "react";
-import type { ARStageHandle, ARWorld, CameraPreset, CharacterAction, LightingMood, WorldObjectInteraction } from "./components/ARStage";
+import type { ARStageHandle, ARWorld, CameraPreset, CharacterAction, LightingMood, ModelPaintBrush, ModelPaintInspection, ModelPaintTool, WorldObjectInteraction } from "./components/ARStage";
 import { DrawingWall } from "./components/DrawingWall";
 import { SharedRoomPanel } from "./components/SharedRoomPanel";
 import { appendCaptureTarget, createAniGenDemoDrawing, createDemoDoodle, POSE_SKELETON_EDGES, selectAnimatableRigParts, type CaptureTarget, type DrawingExtraction, type SemanticPart, type SemanticPartKind, type SemanticSide } from "./lib/drawing";
@@ -79,6 +79,15 @@ type MagicShowPlan = {
   status: "awaiting-human-approval" | "playing" | "complete" | "dismissed";
 };
 type WorldActivity = { title: string; prompt: string; objectIds: string[]; reward: string };
+type PaintAdventure = {
+  id: string;
+  title: string;
+  prompt: string;
+  tool: ModelPaintTool;
+  palette: string[];
+  steps: string[];
+  status: "awaiting-child" | "painting" | "dismissed";
+};
 
 type WebMCPTool = RegisterableWebMCPTool;
 type WebMCPStatus = "unsupported" | "registering" | "registered" | "verified" | "error";
@@ -118,10 +127,12 @@ const toolNames = [
   ["inspect_shared_room", "READ"],
   ["prepare_room_invite", "STAGE"],
   ["interact_story_world", "LIVE"],
+  ["inspect_3d_paint_studio", "READ"],
+  ["stage_3d_paint_adventure", "STAGE"],
   ["list_collaboration_history", "READ"],
 ] as const;
 
-const suggestedJudgePrompt = "Help my child and me make a five-minute story from this drawing. Inspect the creative scene and shared room, guide us one visible step at a time, check any uncertain rig, then stage a three-beat story using only verified actions. Wait for us to approve playback. Never access camera frames or image pixels, grade the child, publish, or buy anything.";
+const suggestedJudgePrompt = "Help my child and me turn this drawing into a tiny painted story. Inspect the creative scene, 3D paint studio, and shared room. Propose a joyful palette and stage a short paint adventure, but let my child paint the model by touch. Then stage a three-beat show using only verified actions and wait for us to approve playback. Never access camera frames or image pixels, grade the child, publish, or buy anything.";
 
 const worlds: Array<{ id: WorldId; label: string; short: string }> = [
   { id: "studio", label: "My room", short: "ROOM" },
@@ -149,6 +160,14 @@ const actions: Array<{ action: CharacterAction; label: string; glyph: string }> 
 const spatialActions = ["walk", "spin", "float", "dance"] as const;
 const lightingMoods = ["cyberpunk-neon", "sunset-warm", "moonlight"] as const satisfies readonly LightingMood[];
 const cameraPresets = ["cinematic-orbit", "low-angle-hero", "overhead"] as const satisfies readonly CameraPreset[];
+const modelPaintTools: Array<{ id: ModelPaintTool; label: string; glyph: string }> = [
+  { id: "brush", label: "Brush", glyph: "●" },
+  { id: "spray", label: "Spray", glyph: "⁙" },
+  { id: "oil", label: "Oil", glyph: "≈" },
+  { id: "spill", label: "Splash", glyph: "✦" },
+];
+const modelPaintPalette = ["#ff5d73", "#ffb21c", "#ffe55c", "#43c59e", "#42a5f5", "#7557d9", "#f8f5ed", "#263645"];
+const emptyPaintInspection: ModelPaintInspection = { strokeCount: 0, paintedSurfaceCount: 0, colors: [], tools: [] };
 
 const anatomyKinds = ["eye", "cheek", "nose", "mouth", "ear", "arm", "hand", "leg", "foot"] as const satisfies readonly SemanticPartKind[];
 const anatomyLabel: Record<(typeof anatomyKinds)[number], string> = {
@@ -211,6 +230,10 @@ export default function Home() {
   const lightingMoodRef = useRef<LightingMood>("sunset-warm");
   const cameraPresetRef = useRef<CameraPreset>("cinematic-orbit");
   const worldInteractionActorRef = useRef<{ actor: Actor; toolName?: string }>({ actor: "CHILD" });
+  const paintGestureRef = useRef<{ pointerId: number; painted: boolean } | null>(null);
+  const paintAdventureRef = useRef<PaintAdventure | null>(null);
+  const paintBrushRef = useRef<ModelPaintBrush>({ tool: "brush", color: "#42a5f5", size: 0.42 });
+  const paintInspectionRef = useRef<ModelPaintInspection>(emptyPaintInspection);
 
   const [step, setStep] = useState<AppStep>("ready");
   const [cameraState, setCameraState] = useState<CameraState>("idle");
@@ -260,6 +283,10 @@ export default function Home() {
   const [adultExportApproved, setAdultExportApproved] = useState(false);
   const [worldInteractions, setWorldInteractions] = useState<Record<WorldId, string[]>>({ studio: [], storybook: [], wizard: [], museum: [] });
   const [lastWorldMoment, setLastWorldMoment] = useState<WorldObjectInteraction | null>(null);
+  const [paintStudioOpen, setPaintStudioOpen] = useState(false);
+  const [paintBrush, setPaintBrush] = useState<ModelPaintBrush>({ tool: "brush", color: "#42a5f5", size: 0.42 });
+  const [paintInspection, setPaintInspection] = useState<ModelPaintInspection>(emptyPaintInspection);
+  const [paintAdventure, setPaintAdventure] = useState<PaintAdventure | null>(null);
   const sharedRoom = useSharedRoom();
   const prepareRoomInvite = sharedRoom.prepareInvite;
   const search = useSyncExternalStore(
@@ -289,6 +316,21 @@ export default function Home() {
     characterRef.current = next;
     setCharacter(next);
     if (message) setNotice(message);
+  }, []);
+
+  const commitPaintAdventure = useCallback((next: PaintAdventure | null) => {
+    paintAdventureRef.current = next;
+    setPaintAdventure(next);
+  }, []);
+
+  const commitPaintInspection = useCallback((next: ModelPaintInspection) => {
+    paintInspectionRef.current = next;
+    setPaintInspection(next);
+  }, []);
+
+  const choosePaintBrush = useCallback((next: ModelPaintBrush) => {
+    paintBrushRef.current = next;
+    setPaintBrush(next);
   }, []);
 
   const commitNeuralAsset = useCallback((next: NeuralAsset | null) => {
@@ -364,6 +406,10 @@ export default function Home() {
     setReflectionRetell("");
     setReflectionNextChange("new-ending");
     setEnsembleActions(null);
+    setPaintStudioOpen(false);
+    paintGestureRef.current = null;
+    commitPaintAdventure(null);
+    commitPaintInspection(emptyPaintInspection);
     commitNeuralAsset(null);
     handleRiggedAssetInfo(null);
     externalUploadApprovedRef.current = false;
@@ -404,7 +450,7 @@ export default function Home() {
       : ensemble.length > 1
         ? `${ensemble.length} independent instance masks · per-figure pose/topology gates · no upload.`
         : `Drawing-aware point extraction · character-evidence gate ${next.characterValidation?.score ?? "passed"} · human cutout review · no 3D claim · no upload.`);
-  }, [commitCharacter, commitNeuralAsset, handleRiggedAssetInfo, record]);
+  }, [commitCharacter, commitNeuralAsset, commitPaintAdventure, commitPaintInspection, handleRiggedAssetInfo, record]);
 
   const recognizeAndSetDrawing = useCallback(async (next: DrawingExtraction, source: "camera" | "upload" | "demo") => {
     setNotice("Preserving the artwork and checking optional rig suggestions locally…");
@@ -1312,6 +1358,88 @@ export default function Home() {
     record("CHILD", "Declined the staged Magic Show", `${current.title} was left unplayed.`);
   }, [record]);
 
+  const inspect3DPaintStudio = useCallback(() => ({
+    characterReady: characterRef.current.created,
+    interaction: "Touch or drag directly on the live 3D model. Paint follows the hit surface through UV textures or spatial vertex color, while the model remains orbitable outside paint mode.",
+    availableTools: modelPaintTools.map(({ id, label }) => ({ id, label })),
+    availablePalette: modelPaintPalette,
+    currentBrush: paintBrushRef.current,
+    paint: stageRef.current?.inspectPaint() ?? paintInspectionRef.current,
+    stagedAdventure: paintAdventureRef.current,
+    humanControl: {
+      agentMayStagePalette: true,
+      agentMayPaintPixels: false,
+      childAppliesEveryStroke: true,
+      undoAndResetVisible: true,
+    },
+    cameraDataIncluded: false,
+    artworkPixelsIncluded: false,
+  }), []);
+
+  const stage3DPaintAdventure = useCallback((input: Record<string, unknown>) => {
+    if (!characterRef.current.created) throw new Error("No 3D character is ready. Ask the family to approve a drawing and create its character first.");
+    const requestedTool = stringValue(input.tool, "brush", 12) as ModelPaintTool;
+    const tool = modelPaintTools.some((candidate) => candidate.id === requestedTool) ? requestedTool : "brush";
+    const requestedPalette = Array.isArray(input.palette)
+      ? input.palette.filter((color): color is string => typeof color === "string" && /^#[0-9a-f]{6}$/i.test(color)).slice(0, 5).map((color) => color.toLowerCase())
+      : [];
+    if (!requestedPalette.length) throw new Error("The palette needs one to five colors in #RRGGBB format.");
+    const steps = Array.isArray(input.steps)
+      ? input.steps.map((step) => stringValue(step, "", 80)).filter(Boolean).slice(0, 4)
+      : [];
+    if (!steps.length) throw new Error("Add one to four short, child-friendly painting steps.");
+    const adventure: PaintAdventure = {
+      id: makeId(),
+      title: stringValue(input.title, "Color magic", 48),
+      prompt: stringValue(input.prompt, "What happens when these colors meet?", 100),
+      tool,
+      palette: requestedPalette,
+      steps,
+      status: "awaiting-child",
+    };
+    commitPaintAdventure(adventure);
+    choosePaintBrush({ ...paintBrushRef.current, tool, color: requestedPalette[0] });
+    setPaintStudioOpen(true);
+    setAgentLine(`I staged “${adventure.title}.” Your child makes every mark.`);
+    setNotice("A paint idea is ready. Tap Start painting—or Not now. The agent changed no pixels.");
+    record("BROWSER AGENT", "Staged a 3D paint adventure", `${adventure.title} · ${tool} · ${requestedPalette.length} colors · child applies every stroke.`, "stage_3d_paint_adventure");
+    return {
+      adventure,
+      visibleReviewOpen: true,
+      requiresChildAction: true,
+      pixelsChanged: false,
+      nextStep: "The child chooses Start painting, then touches the live 3D character.",
+    };
+  }, [choosePaintBrush, commitPaintAdventure, record]);
+
+  const beginPaintAdventure = useCallback(() => {
+    const current = paintAdventureRef.current;
+    if (current) commitPaintAdventure({ ...current, status: "painting" });
+    setPaintStudioOpen(true);
+    setNotice("Paint the character itself. Drag for brush, spray, or oil; tap once for a splash.");
+    record("CHILD", "Started the staged paint adventure", current?.title ?? "Free paint");
+  }, [commitPaintAdventure, record]);
+
+  const dismissPaintAdventure = useCallback(() => {
+    const current = paintAdventureRef.current;
+    if (current) commitPaintAdventure({ ...current, status: "dismissed" });
+    setNotice("Paint idea dismissed. The model was not changed.");
+    record("CHILD", "Dismissed the paint adventure", current?.title ?? "Paint suggestion");
+  }, [commitPaintAdventure, record]);
+
+  const undoModelPaint = useCallback(() => {
+    const next = stageRef.current?.undoPaint() ?? emptyPaintInspection;
+    commitPaintInspection(next);
+    setNotice(next.strokeCount ? `Undid one stroke. ${next.strokeCount} left.` : "Paint returned to the original drawing.");
+  }, [commitPaintInspection]);
+
+  const resetModelPaint = useCallback(() => {
+    const next = stageRef.current?.resetPaint() ?? emptyPaintInspection;
+    commitPaintInspection(next);
+    setNotice("All added paint cleared. The original drawing is safe.");
+    record("CHILD", "Cleared added 3D paint", "Original artwork texture restored; no source pixels changed.");
+  }, [commitPaintInspection, record]);
+
   useEffect(() => {
     const context = document.modelContext;
     if (!context?.registerTool) {
@@ -1732,6 +1860,45 @@ export default function Home() {
         },
       },
       {
+        name: "inspect_3d_paint_studio",
+        title: "Inspect the child's 3D paint studio",
+        description: "Read the current paint tool, available child-safe palette, stroke evidence, and any staged paint adventure. Returns structured state only, without camera frames or artwork pixels.",
+        inputSchema: { ...base, properties: {} },
+        annotations: { readOnlyHint: true, untrustedContentHint: true },
+        execute: async (_input, options) => {
+          const signal = executionSignal(options);
+          guard(signal);
+          return ok({ studio: inspect3DPaintStudio(), observedAt: new Date().toISOString() });
+        },
+      },
+      {
+        name: "stage_3d_paint_adventure",
+        title: "Stage a 3D paint adventure for the child",
+        description: "Stage one visible palette, texture tool, creative prompt, and one-to-four short steps beside the live 3D model. The tool changes no pixels; the child decides whether to start and applies every stroke by touch.",
+        inputSchema: {
+          ...base,
+          properties: {
+            title: { type: "string", minLength: 1, maxLength: 48, description: "Short playful adventure title." },
+            prompt: { type: "string", minLength: 1, maxLength: 100, description: "Open-ended creative question for the child." },
+            tool: { type: "string", enum: ["brush", "spray", "oil", "spill"], description: "Starting texture; the child can change it." },
+            palette: { type: "array", minItems: 1, maxItems: 5, items: { type: "string", pattern: "^#[0-9a-fA-F]{6}$" }, description: "One to five proposed colors." },
+            steps: { type: "array", minItems: 1, maxItems: 4, items: { type: "string", minLength: 1, maxLength: 80 }, description: "Short optional ideas, not commands." },
+          },
+          required: ["title", "prompt", "tool", "palette", "steps"],
+        },
+        annotations: { readOnlyHint: false, untrustedContentHint: true },
+        execute: async (input, options) => {
+          const signal = executionSignal(options);
+          try {
+            guard(signal);
+            const result = stage3DPaintAdventure(input);
+            await afterVisiblePaint();
+            guard(signal);
+            return ok(result);
+          } catch (error) { return fail(error); }
+        },
+      },
+      {
         name: "list_collaboration_history",
         title: "List attributed human-agent history",
         description: "Read recent staged plans, human approvals, performances, and system actions. Camera pixels and drawing image data are excluded.",
@@ -1752,7 +1919,7 @@ export default function Home() {
       setWebMcpStatus("error");
     });
     return () => controller.abort();
-  }, [commitNeuralAsset, createCharacter, currentCharacterCapabilities, directEnsembleBeat, inspectCreativeScene, inspectCreatorDrop, inspectLearningProgress, inspectReconstructionReadiness, interactWithWorldObject, orchestrateSpatialCinematics, parseShowMoves, prepareRoomInvite, recommendProductsForArtwork, record, requestNeuralConsent, stageMagicShow, stageNextLearningChallenge, stageShopifyImportKit, worldInteractions]);
+  }, [commitNeuralAsset, createCharacter, currentCharacterCapabilities, directEnsembleBeat, inspect3DPaintStudio, inspectCreativeScene, inspectCreatorDrop, inspectLearningProgress, inspectReconstructionReadiness, interactWithWorldObject, orchestrateSpatialCinematics, parseShowMoves, prepareRoomInvite, recommendProductsForArtwork, record, requestNeuralConsent, stage3DPaintAdventure, stageMagicShow, stageNextLearningChallenge, stageShopifyImportKit, worldInteractions]);
 
   const runMagicDemo = useCallback(async () => {
     if (demoRunning) return;
@@ -1819,12 +1986,39 @@ export default function Home() {
   }, [cameraState, placeCharacter]);
 
   const handleStagePointerDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (paintStudioOpen && characterRef.current.created) {
+      if (!(event.target instanceof HTMLCanvasElement)) return;
+      event.preventDefault();
+      const bounds = event.currentTarget.getBoundingClientRect();
+      stageRef.current?.beginPaintStroke(paintBrushRef.current);
+      const result = stageRef.current?.paintAtNormalized(
+        (event.clientX - bounds.left) / Math.max(1, bounds.width),
+        (event.clientY - bounds.top) / Math.max(1, bounds.height),
+        event.pressure || 0.5,
+      );
+      paintGestureRef.current = { pointerId: event.pointerId, painted: Boolean(result?.painted) };
+      event.currentTarget.setPointerCapture(event.pointerId);
+      if (!result?.painted) setNotice("Touch the 3D character to paint it. Empty world space stays clean.");
+      return;
+    }
     if (characterRef.current.created && event.target instanceof HTMLCanvasElement) return;
     rotateGestureRef.current = { pointerId: event.pointerId, lastX: event.clientX, lastY: event.clientY, moved: false };
     event.currentTarget.setPointerCapture(event.pointerId);
-  }, []);
+  }, [paintStudioOpen]);
 
   const handleStagePointerMove = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    const paintGesture = paintGestureRef.current;
+    if (paintStudioOpen && paintGesture?.pointerId === event.pointerId) {
+      event.preventDefault();
+      const bounds = event.currentTarget.getBoundingClientRect();
+      const result = stageRef.current?.paintAtNormalized(
+        (event.clientX - bounds.left) / Math.max(1, bounds.width),
+        (event.clientY - bounds.top) / Math.max(1, bounds.height),
+        event.pressure || 0.5,
+      );
+      if (result?.painted) paintGesture.painted = true;
+      return;
+    }
     if (event.target instanceof HTMLCanvasElement) return;
     const gesture = rotateGestureRef.current;
     if (!gesture || gesture.pointerId !== event.pointerId || !characterRef.current.created || cameraState === "active") return;
@@ -1835,9 +2029,21 @@ export default function Home() {
     gesture.lastY = event.clientY;
     const bounds = event.currentTarget.getBoundingClientRect();
     stageRef.current?.rotateBy((dx / Math.max(1, bounds.width)) * Math.PI * 1.7, (dy / Math.max(1, bounds.height)) * Math.PI * 1.15);
-  }, [cameraState]);
+  }, [cameraState, paintStudioOpen]);
 
   const handleStagePointerUp = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    const paintGesture = paintGestureRef.current;
+    if (paintGesture?.pointerId === event.pointerId) {
+      paintGestureRef.current = null;
+      const next = stageRef.current?.endPaintStroke() ?? emptyPaintInspection;
+      commitPaintInspection(next);
+      if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+      if (paintGesture.painted) {
+        setNotice(`${paintBrushRef.current.tool === "spill" ? "Splash" : paintBrushRef.current.tool} added in 3D. Undo is always available.`);
+        record("CHILD", "Painted directly on the 3D character", `${paintBrushRef.current.tool} · ${paintBrushRef.current.color} · ${next.strokeCount} strokes`);
+      }
+      return;
+    }
     if (event.target instanceof HTMLCanvasElement) return;
     const gesture = rotateGestureRef.current;
     rotateGestureRef.current = null;
@@ -1847,7 +2053,16 @@ export default function Home() {
       return;
     }
     activateStagePoint(event);
-  }, [activateStagePoint]);
+  }, [activateStagePoint, commitPaintInspection, record]);
+
+  const handleStagePointerCancel = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    rotateGestureRef.current = null;
+    if (paintGestureRef.current?.pointerId === event.pointerId) {
+      paintGestureRef.current = null;
+      commitPaintInspection(stageRef.current?.endPaintStroke() ?? emptyPaintInspection);
+    }
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+  }, [commitPaintInspection]);
 
   const nudgeCharacter = useCallback((x: number, z: number) => {
     if (!characterRef.current.created) return;
@@ -2224,15 +2439,28 @@ export default function Home() {
             })}</div>
           </div> : null}
 
-          <div className={`camera-frame step-${step} world-${world}`} onPointerDown={handleStagePointerDown} onPointerMove={handleStagePointerMove} onPointerUp={handleStagePointerUp} onPointerCancel={() => { rotateGestureRef.current = null; }}>
+          <div className={`camera-frame step-${step} world-${world}${paintStudioOpen ? " paint-mode" : ""}`} onPointerDown={handleStagePointerDown} onPointerMove={handleStagePointerMove} onPointerUp={handleStagePointerUp} onPointerCancel={handleStagePointerCancel}>
             <video ref={videoRef} className={cameraState === "active" ? "camera-video visible" : "camera-video"} autoPlay muted playsInline aria-label="Live local camera preview" />
             {cameraState !== "active" && world === "studio" ? <div className="demo-room"><span className="frame-a" /><span className="frame-b" /><span className="shelf" /><span className="plant" /><span className="baseboard" /></div> : null}
             {capture && cameraState !== "active" && world === "studio" ? <img className="captured-room" src={capture.previewUrl} alt="Original drawing scene" /> : null}
             {capture && cameraState !== "active" && !character.created ? <div className="cutout-review" onPointerDown={(event) => event.stopPropagation()}><img src={capture.textureUrl} alt="Isolated character cutout to review" /><span>{captureEnsemble.length > 1 ? `${captureEnsemble.length} SEPARATE FIGURES FOUND` : "IS THE WHOLE CHARACTER VISIBLE?"}</span><div><button onClick={requestNeuralConsent}>YES · CONTINUE</button><button onClick={() => capture.sourceScope === "camera" ? startCamera() : uploadRef.current?.click()}>NO · TRY AGAIN</button></div></div> : null}
             {step === "camera" ? <><div className="capture-guide"><span /><b>TAP EACH CHARACTER · THEN CAPTURE</b></div>{cameraTargets.map((target, index) => <div key={`${target.x}-${target.y}-${index}`} className="capture-target camera-cast-target" style={{ left: `${target.x * 100}%`, top: `${target.y * 100}%` }}><i>{index + 1}</i></div>)}</> : null}
             {character.created ? <Suspense fallback={<div className="three-layer" aria-hidden="true" />}>
-              <ARStage ref={stageRef} characters={character.created && !neuralAsset ? captureEnsemble : null} contour={capture?.contour ?? null} skeleton={capture?.skeleton ?? null} textureUrl={capture?.textureUrl ?? null} rig={capture?.rig ?? null} depth={capture?.depthRecognition ?? null} action={character.action} ensembleActions={ensembleActions} world={world} lightingMood={lightingMood} cameraPreset={cameraPreset} accent={character.accent} inflation={character.inflation} neuralAssetUrl={neuralAsset?.meshUrl ?? null} visible onCapability={handleARCapability} onRendererCapability={handleRendererCapability} onPlaced={handleARPlaced} onNeuralAssetInfo={handleRiggedAssetInfo} onWorldInteraction={handleStageWorldInteraction} />
+              <ARStage ref={stageRef} characters={character.created && !neuralAsset ? captureEnsemble : null} contour={capture?.contour ?? null} skeleton={capture?.skeleton ?? null} textureUrl={capture?.textureUrl ?? null} rig={capture?.rig ?? null} depth={capture?.depthRecognition ?? null} action={character.action} ensembleActions={ensembleActions} world={world} lightingMood={lightingMood} cameraPreset={cameraPreset} accent={character.accent} inflation={character.inflation} neuralAssetUrl={neuralAsset?.meshUrl ?? null} paintEnabled={paintStudioOpen} visible onCapability={handleARCapability} onRendererCapability={handleRendererCapability} onPlaced={handleARPlaced} onNeuralAssetInfo={handleRiggedAssetInfo} onWorldInteraction={handleStageWorldInteraction} />
             </Suspense> : null}
+            {character.created && !paintStudioOpen ? <button className="paint-studio-launch" onClick={() => { setPaintStudioOpen(true); setNotice("Touch the 3D character to paint. Choose a texture and color first."); }} onPointerDown={(event) => event.stopPropagation()}><i>🎨</i> PAINT 3D</button> : null}
+            {character.created && paintStudioOpen ? <section className="model-paint-studio" aria-label="Paint directly on the 3D character" onPointerDown={(event) => event.stopPropagation()}>
+              <header><div><span>PAINT THE 3D</span><b>{paintInspection.strokeCount ? `${paintInspection.strokeCount} stroke${paintInspection.strokeCount === 1 ? "" : "s"}` : "Touch the character"}</b></div><button onClick={() => { setPaintStudioOpen(false); setNotice("Paint saved on this 3D character. Drag the scene to orbit again."); }} aria-label="Finish painting">DONE</button></header>
+              {paintAdventure?.status === "awaiting-child" ? <div className="paint-adventure" role="dialog" aria-label="Agent paint idea">
+                <span>CHATGPT IDEA · YOU DECIDE</span><h3>{paintAdventure.title}</h3><p>{paintAdventure.prompt}</p>
+                <div>{paintAdventure.steps.map((paintStep, index) => <i key={`${paintAdventure.id}-${index}`}><b>{index + 1}</b>{paintStep}</i>)}</div>
+                <footer><button onClick={beginPaintAdventure}>START PAINTING</button><button onClick={dismissPaintAdventure}>NOT NOW</button></footer>
+              </div> : null}
+              <div className="paint-tools" role="group" aria-label="Paint texture">{modelPaintTools.map((item) => <button key={item.id} className={paintBrush.tool === item.id ? "active" : ""} onClick={() => choosePaintBrush({ ...paintBrushRef.current, tool: item.id })}><i>{item.glyph}</i>{item.label}</button>)}</div>
+              <div className="paint-colors" role="group" aria-label="Paint color">{[...new Set([...(paintAdventure?.palette ?? []), ...modelPaintPalette])].slice(0, 10).map((color) => <button key={color} className={paintBrush.color === color ? "active" : ""} style={{ "--paint-color": color } as CSSProperties} onClick={() => choosePaintBrush({ ...paintBrushRef.current, color })} aria-label={`Choose ${color}`} />)}</div>
+              <label className="paint-size"><span>SIZE</span><input type="range" min="0.08" max="1" step="0.02" value={paintBrush.size} onChange={(event) => choosePaintBrush({ ...paintBrushRef.current, size: Number(event.target.value) })} /><i style={{ "--brush-size": `${10 + paintBrush.size * 20}px`, "--paint-color": paintBrush.color } as CSSProperties} /></label>
+              <footer className="paint-history"><button onClick={undoModelPaint} disabled={!paintInspection.strokeCount}>↶ UNDO</button><button onClick={resetModelPaint} disabled={!paintInspection.strokeCount}>CLEAR</button><small>Original stays safe</small></footer>
+            </section> : null}
             {neuralConsentVisible ? <div className="neural-consent" role="dialog" aria-modal="true" aria-labelledby="neural-consent-title" onPointerDown={(event) => event.stopPropagation()}>
               <span>CHOOSE YOUR QUALITY</span><h2 id="neural-consent-title">Wake {captureEnsemble.length > 1 ? "the whole cast" : "this drawing"}</h2><p>{ensembleReadiness.some((report) => !report.motionReady) ? "A clean static spatial puppet is available now. Check every uncertain rig before expecting arms or legs to move." : captureEnsemble.length > 1 ? "Every selected figure passed the motion gate. Full sculpt currently handles one figure at a time." : "Use an instant private spatial puppet—or approve a full AI sculpt with generated unseen views."}</p><div><button onClick={startLocalReconstruction}>{ensembleReadiness.every((report) => report.motionReady) ? "PLAYABLE PUPPET · PRIVATE" : "STATIC PUPPET · PRIVATE"}</button>{captureEnsemble.length === 1 ? <button onClick={startNeuralReconstruction}>FULL 3D SCULPT · AI</button> : null}<button onClick={() => { setNeuralConsentVisible(false); openRigEditor(ensembleReadiness.findIndex((report) => !report.motionReady) < 0 ? 0 : ensembleReadiness.findIndex((report) => !report.motionReady)); }}>CHECK SKELETON</button></div>
             </div> : null}
