@@ -61,13 +61,16 @@ test("registers fourteen goal-level WebMCP collaboration tools with learning evi
 
   const registeredNames = [...page.matchAll(/name: ["']([^"']+)["']/g)].map((match) => match[1]);
   assert.equal(registeredNames.filter((name) => expectedTools.includes(name)).length, 14);
-  const toolSurface = page.slice(page.indexOf("const tools: WebMCPTool[]"), page.indexOf("Promise.all(tools.map"));
+  const toolSurface = page.slice(page.indexOf("const tools: WebMCPTool[]"), page.indexOf("registerAndVerifyWebMCP(context, tools"));
   assert.equal([...toolSurface.matchAll(/\n\s+name: ["']/g)].length, 14, "every registered tool must be represented exactly once");
   assert.equal([...toolSurface.matchAll(/\n\s+title: ["']/g)].length, 14, "every registered tool needs a human-readable title");
   assert.equal([...toolSurface.matchAll(/\n\s+annotations: \{ readOnlyHint: (?:true|false), untrustedContentHint: true \}/g)].length, 14, "every tool must declare trust and read/write intent");
   assert.equal(registeredNames.some((name) => /camera|capture|upload/.test(name)), false);
   assert.match(page, /document\.modelContext/);
-  assert.match(page, /registerTool\(tool, \{ signal: controller\.signal \}\)/);
+  const runtime = await readFile(new URL("../app/lib/webmcp-runtime.ts", import.meta.url), "utf8");
+  assert.match(runtime, /registerTool\(tool, \{ signal \}\)/);
+  assert.match(runtime, /context\.getTools\(\)/);
+  assert.match(runtime, /context\.executeTool\(probe, \{\}, \{ signal \}\)/);
   assert.match(page, /error instanceof DOMException && error\.name === "AbortError"/);
   assert.match(toolSurface, /const result = stageMagicShow\(input\);\s+await afterVisiblePaint\(\);\s+guard\(signal\);/);
   assert.match(toolSurface, /const result = await prepareRoomInvite[\s\S]+?await afterVisiblePaint\(\);\s+guard\(signal\);/);

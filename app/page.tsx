@@ -30,6 +30,7 @@ import {
   type CreatorVibe,
 } from "./lib/creator-commerce";
 import { useSharedRoom } from "./lib/use-shared-room";
+import { registerAndVerifyWebMCP, type RegisterableWebMCPTool, type WebMCPModelContext, type WebMCPRuntimeCheck } from "./lib/webmcp-runtime";
 
 const ARStage = lazy(() => import("./components/ARStage").then((module) => ({ default: module.ARStage })));
 
@@ -79,20 +80,12 @@ type MagicShowPlan = {
 };
 type WorldActivity = { title: string; prompt: string; objectIds: string[]; reward: string };
 
-type WebMCPTool = {
-  name: string;
-  title: string;
-  description: string;
-  inputSchema: Record<string, unknown>;
-  annotations: { readOnlyHint: boolean; untrustedContentHint: boolean };
-  execute: (input: Record<string, unknown>, options?: { signal?: AbortSignal }) => Promise<unknown> | unknown;
-};
+type WebMCPTool = RegisterableWebMCPTool;
+type WebMCPStatus = "unsupported" | "registering" | "registered" | "verified" | "error";
 
 declare global {
   interface Document {
-    modelContext?: {
-      registerTool: (tool: WebMCPTool, options?: { signal?: AbortSignal }) => Promise<void> | void;
-    };
+    modelContext?: WebMCPModelContext;
   }
 }
 
@@ -222,7 +215,8 @@ export default function Home() {
   const [character, setCharacter] = useState<CharacterState>(initialCharacter);
   const [activity, setActivity] = useState<Activity[]>([]);
   const [panelTab, setPanelTab] = useState<PanelTab>("agent");
-  const [webMcpReady, setWebMcpReady] = useState(false);
+  const [webMcpStatus, setWebMcpStatus] = useState<WebMCPStatus>("unsupported");
+  const [webMcpCheck, setWebMcpCheck] = useState<WebMCPRuntimeCheck | null>(null);
   const [immersiveAR, setImmersiveAR] = useState(false);
   const [rendererAvailable, setRendererAvailable] = useState<boolean | null>(null);
   const [notice, setNotice] = useState("Camera access only begins when you press Start camera.");
@@ -1185,8 +1179,13 @@ export default function Home() {
 
   useEffect(() => {
     const context = document.modelContext;
-    if (!context?.registerTool) return;
+    if (!context?.registerTool) {
+      setWebMcpStatus("unsupported");
+      setWebMcpCheck(null);
+      return;
+    }
     const controller = new AbortController();
+    setWebMcpStatus("registering");
     const base = { type: "object", additionalProperties: false };
     const ok = (payload: Record<string, unknown>) => ({ ok: true, ...payload });
     const fail = (error: unknown) => {
@@ -1544,10 +1543,16 @@ export default function Home() {
       },
     ];
 
-    Promise.all(tools.map((tool) => Promise.resolve(context.registerTool(tool, { signal: controller.signal })))).then(() => {
-      setWebMcpReady(true);
-      setNotice(`${tools.length} WebMCP tools are ready. Camera capture remains human-only.`);
-    }).catch(() => setWebMcpReady(false));
+    registerAndVerifyWebMCP(context, tools, controller.signal).then((result) => {
+      if (controller.signal.aborted) return;
+      setWebMcpCheck(result);
+      setWebMcpStatus(result.status);
+    }).catch((error) => {
+      if (controller.signal.aborted || (error instanceof DOMException && error.name === "AbortError")) return;
+      console.error("WallAlive WebMCP runtime check failed", error);
+      setWebMcpCheck(null);
+      setWebMcpStatus("error");
+    });
     return () => controller.abort();
   }, [commitNeuralAsset, createCharacter, currentCharacterCapabilities, directEnsembleBeat, inspectCreativeScene, inspectCreatorDrop, inspectLearningProgress, interactWithWorldObject, orchestrateSpatialCinematics, parseShowMoves, prepareRoomInvite, recommendProductsForArtwork, record, requestNeuralConsent, stageMagicShow, stageShopifyCreatorDrop, worldInteractions]);
 
@@ -1855,14 +1860,20 @@ export default function Home() {
       : { label: "START CAMERA", action: startCamera };
   if (capture && captureEnsemble.length > 1 && !character.created) primaryButton.label = `WAKE ${captureEnsemble.length} FIGURES`;
   const stepIndex = step === "ready" ? 0 : step === "camera" ? 1 : character.created ? 3 : 2;
+  const webMcpReady = webMcpStatus === "registered" || webMcpStatus === "verified";
+  const webMcpLabel = webMcpStatus === "verified" ? "WEBMCP VERIFIED"
+    : webMcpStatus === "registered" ? "WEBMCP LIVE"
+      : webMcpStatus === "registering" ? "WEBMCP CHECKING"
+        : webMcpStatus === "error" ? "WEBMCP ERROR"
+          : "WEBMCP NEEDS CHROME";
 
   return (
-    <main className="alive-shell">
+    <main className="alive-shell" data-webmcp-status={webMcpStatus} data-webmcp-tool-count={webMcpCheck?.registeredCount ?? 0} data-webmcp-probe={webMcpCheck?.verifiedTool ?? "none"}>
       <header className="alive-header">
         <a className="alive-brand" href="#play"><span>WALL</span>ALIVE<i>●</i></a>
         <div className="mini-steps" aria-label="Creative journey"><span className={stepIndex >= 1 ? "done" : "active"}>Make</span><i>→</i><span className={stepIndex >= 2 ? "done" : ""}>Wake</span><i>→</i><span className={stepIndex >= 3 ? "done" : ""}>Share</span></div>
         <div className="header-actions">
-          <div className={`ready-pill ${webMcpReady ? "is-ready" : ""}`}><i /> {webMcpReady ? "AGENT READY" : "DEMO READY"}</div>
+          <div className={`ready-pill ${webMcpReady ? "is-ready" : ""}`}><i /> {webMcpLabel}</div>
           <button className={`room-toggle ${sharedRoom.session ? "is-live" : ""}`} onClick={() => setSharedRoomOpen(true)} aria-label="Open collaborative drawing room">{sharedRoom.session ? `${sharedRoom.participants.length} LIVE` : "DRAW TOGETHER"}</button>
           <button className="merch-toggle" onClick={openCreatorStudio} aria-label="Open Creator Shop">CREATOR SHOP</button>
           <button className="inspector-toggle" onClick={() => { setInspectorOpen(true); setPanelTab("agent"); }}>HOW AGENTS HELP</button>
@@ -2028,7 +2039,7 @@ export default function Home() {
 
           {panelTab === "agent" ? (
             <div className="panel-body">
-              <div className="agent-status"><div><i /> BROWSER AGENT</div><span>{webMcpReady ? "CONNECTED" : "DEMO MODE"}</span></div>
+              <div className="agent-status"><div><i /> BROWSER AGENT</div><span>{webMcpLabel}</span></div>
               <p className="kicker">SHARED IMAGINATION</p>
               <h2>{agentLine}</h2>
               <p>The agent reads each real rig, assigns compatible roles, and stages ensemble choreography. The child approves the final performance.</p>
