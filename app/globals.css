@@ -1253,7 +1253,7 @@ body {
 .store-hero small { font-size: 9px; font-weight: 760; letter-spacing: .05em; text-transform: uppercase; }
 .store-hero h3 { margin: 9px 0 8px; font-family: var(--font-geist-sans), sans-serif; font-size: 35px; font-weight: 680; line-height: .95; letter-spacing: -.05em; }
 .store-hero p { margin: 0; color: rgba(22,59,57,.67); font-size: 11px; line-height: 1.5; }
-.store-hero button { min-height: 38px; margin-top: 16px; padding: 0 13px; border: 0; border-radius: 999px; background: var(--ink); color: white; font-size: 8px; font-weight: 800; pointer-events: none; }
+.storefront-cta { width: fit-content; min-height: 38px; margin-top: 16px; padding: 0 13px; border-radius: 999px; display: inline-flex; align-items: center; background: var(--ink); color: white; font-size: 8px; font-weight: 800; }
 .store-hero figure { position: relative; min-height: 210px; margin: 0; display: grid; place-items: center; }
 .store-hero figure::before { content: ""; position: absolute; width: 170px; height: 170px; border-radius: 48% 52% 63% 37% / 38% 44% 56% 62%; background: rgba(255,255,255,.66); transform: rotate(8deg); }
 .store-hero img { position: relative; z-index: 1; width: 84%; height: 190px; object-fit: contain; filter: drop-shadow(0 18px 16px rgba(22,59,57,.18)); }

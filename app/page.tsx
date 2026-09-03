@@ -1953,7 +1953,7 @@ export default function Home() {
                 {creatorDrop ? <section className={`creator-store-preview vibe-${creatorDrop.vibe}`} aria-label="Staged Shopify storefront preview">
                   <div className="store-browser"><i /><i /><i /><span>YOUR SHOPIFY DRAFT</span></div>
                   <div className="store-hero" style={{ "--store-accent": creatorDrop.palette.accent, "--store-highlight": creatorDrop.palette.highlight } as CSSProperties}>
-                    <div><small>{creatorDrop.storefront.announcement}</small><h3>{creatorDrop.name}</h3><p>{creatorDrop.story}</p><button tabIndex={-1}>{creatorDrop.threeDExperience.enabled ? "EXPLORE THE 3D STORY" : "MEET THE COLLECTION"}</button></div>
+                    <div><small>{creatorDrop.storefront.announcement}</small><h3>{creatorDrop.name}</h3><p>{creatorDrop.story}</p><span className="storefront-cta" aria-hidden="true">{creatorDrop.threeDExperience.enabled ? "EXPLORE THE 3D STORY" : "MEET THE COLLECTION"}</span></div>
                     <figure>{capture ? <img src={capture.textureUrl} alt="Approved artwork in the staged collection" /> : null}<i>✦</i>{creatorDrop.threeDExperience.enabled ? <b>360° 3D · {creatorDrop.threeDExperience.activeWorld}</b> : null}</figure>
                   </div>
                   <div className="store-products">{creatorDrop.products.map((product) => <div key={product.id}><i>{product.glyph}</i><span><b>{product.label}</b><small>${product.price}.00</small></span></div>)}</div>
