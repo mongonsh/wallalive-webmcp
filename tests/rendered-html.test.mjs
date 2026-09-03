@@ -38,6 +38,22 @@ test("server-renders the WallAlive product shell and security headers", async ()
   assert.doesNotMatch(html, /codex-preview|react-loading-skeleton|Starter Project|CutRoom/i);
 });
 
+test("exports a complete Vercel client while keeping shared rooms on durable D1", async () => {
+  const config = JSON.parse(await readFile(new URL("../vercel.json", import.meta.url), "utf8"));
+  const nextConfig = await readFile(new URL("../next.config.ts", import.meta.url), "utf8");
+  const layout = await readFile(new URL("../app/layout.tsx", import.meta.url), "utf8");
+
+  assert.equal(config.outputDirectory, "dist/client");
+  assert.equal(config.buildCommand, "npm run build");
+  assert.deepEqual(config.rewrites, [{
+    source: "/api/rooms",
+    destination: "https://wallalive-webmcp.mungunshagai-tb.chatgpt.site/api/rooms",
+  }]);
+  assert.ok(config.headers[0].headers.some((header) => header.key === "Permissions-Policy" && /tools=\(self\)/.test(header.value)));
+  assert.match(nextConfig, /process\.env\.VERCEL === ["']1["'] \? ["']export["']/);
+  assert.doesNotMatch(layout, /next\/font/, "static exports must not emit build-machine font paths");
+});
+
 test("registers nineteen goal-level WebMCP collaboration tools with 3D paint, repair, learning, spatial direction, and creator commerce", async () => {
   const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
   const expectedTools = [

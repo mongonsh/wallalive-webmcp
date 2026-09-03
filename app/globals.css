@@ -9,7 +9,9 @@
   --blue: #5fc7df;
   --violet: #7d67c7;
   --line: rgba(24, 49, 46, 0.17);
-  --mono: var(--font-geist-mono), ui-monospace, monospace;
+  --font-geist-sans: "Avenir Next", "Segoe UI", Arial, sans-serif;
+  --font-geist-mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  --mono: var(--font-geist-mono);
   --serif: Georgia, "Times New Roman", serif;
 }
 
