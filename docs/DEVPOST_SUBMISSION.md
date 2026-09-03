@@ -34,10 +34,10 @@ Children already treat drawings as living characters. A few lines can have a nam
 5. A second visible approval explains that only the isolated drawing—not the live camera or room frame—may go to AniGen, which jointly predicts richer full geometry, an arbitrary skeleton, and skinning weights.
 6. WallAlive loads generated GLBs as Three.js `SkinnedMesh` assets. Unsupported branch actions stay locked instead of inventing a skeleton.
 7. Four original PBR worlds contain raycastable objects and progress-bearing activities: mini movie, firefly hide-and-seek, cooperation spell, and living-gallery curation.
-8. Thirteen goal-level WebMCP tools inspect rooms, rigs, and quest objects; prepare username invites; stage and direct stories; touch real scene objects; recommend products; stage a creator-credited Shopify handoff; and read attributed history.
+8. Fourteen goal-level WebMCP tools inspect rooms, rigs, quest objects, and the private Story Passport; prepare username invites; stage and direct stories; touch real scene objects; recommend products; stage a creator-credited Shopify handoff; and read attributed history.
 9. WebXR hit testing places the same character on a real surface when supported; every other browser gets the camera-overlay experience.
 
-The child-facing outcome is a compact learning loop: **Imagine → Sequence → Perform → Reflect**. The learner starts with their own artifact, helps shape a beginning–middle–end story, approves the agent's plan, performs it, and then explains or revises what happened.
+The child-facing outcome is a compact learning loop: **Imagine → Sequence → Perform → Reflect**. The learner starts with their own artifact, helps shape a beginning–middle–end story, approves the agent's plan, performs it, and then explains or revises what happened. A private Story Passport records completed beats, shared activity, the learner's retell, and one chosen revision; the agent can inspect that structured evidence to adapt its next scaffold without grading the child.
 
 The one-click judge demo uses the exact supplied drawing and loads its precomputed full neural reconstruction immediately: 68,326 vertices, 136,648 triangles, seven active semantic bones, a complete watertight back, normalized weights, and restored approved front color without copying facial marks onto the rear. Judging never depends on shared public GPU quota. A separate official AniGen reference fixture remains in the automated evidence suite.
 
@@ -51,9 +51,10 @@ Without WebMCP, an agent would have to infer multiple rigs and coordinate dozens
 
 ## WebMCP implementation
 
-WallAlive registers thirteen imperative tools with `document.modelContext.registerTool()` in the top-level document:
+WallAlive registers fourteen imperative tools with `document.modelContext.registerTool()` in the top-level document:
 
 - `inspect_creative_scene`
+- `inspect_learning_progress`
 - `inspect_character_capabilities`
 - `request_rigged_3d_cast`
 - `stage_magic_show`
@@ -102,7 +103,7 @@ The fourth challenge was anatomy. A good silhouette still gave straight, misplac
 - A locally trained 17-joint drawing pose model whose ONNX export exactly reproduces the untouched-test result
 - Generated bone-branch animation instead of whole-object-only motion
 - Real WebXR surface hit testing plus universal camera overlay
-- Thirteen goal-level WebMCP tools sharing the same live room, story, interactive 3D, and Creator Shop state as the human UI
+- Fourteen goal-level WebMCP tools sharing the same live room, Story Passport, interactive 3D, and Creator Shop state as the human UI
 - Persistent username rooms and compact collaborative vector drawing through Cloudflare D1
 - Touchable quest objects with visible progress in all four original worlds
 - Artwork-aware product recommendations plus Shopify draft CSV, storefront blueprint, print artwork, and adult handoff exports

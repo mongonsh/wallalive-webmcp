@@ -12,6 +12,7 @@ import { recognizeDrawingParts, recognizeDrawingsFromImageUrl, recognizeDrawings
 import { createBundledAniGenAsset, disposeNeuralAsset, generateAniGenAsset, isAniGenUnavailableError, type NeuralAsset, type NeuralProgress } from "./lib/anigen";
 import { assessReconstructionReadiness } from "./lib/character-quality";
 import { getAccessibleWorldInteraction } from "./lib/world-interactions";
+import { buildLearningProgress, type LearningReflection, type ReflectionRevision } from "./lib/learning-progress";
 import type { RiggedAssetInfo } from "./lib/rigged-model";
 import {
   CREATOR_PRODUCT_IDS,
@@ -35,7 +36,7 @@ const ARStage = lazy(() => import("./components/ARStage").then((module) => ({ de
 type Actor = "CHILD" | "BROWSER AGENT" | "WALLALIVE";
 type AppStep = "ready" | "camera" | "captured" | "alive";
 type CameraState = "idle" | "requesting" | "active" | "denied" | "unavailable";
-type PanelTab = "agent" | "tools" | "commerce" | "privacy" | "history";
+type PanelTab = "agent" | "learning" | "tools" | "commerce" | "privacy" | "history";
 type WorldId = ARWorld;
 
 type CharacterState = {
@@ -109,6 +110,7 @@ const initialCharacter: CharacterState = {
 
 const toolNames = [
   ["inspect_creative_scene", "READ"],
+  ["inspect_learning_progress", "READ"],
   ["inspect_character_capabilities", "READ"],
   ["request_rigged_3d_cast", "REQUEST"],
   ["stage_magic_show", "STAGE"],
@@ -123,7 +125,7 @@ const toolNames = [
   ["list_collaboration_history", "READ"],
 ] as const;
 
-const suggestedJudgePrompt = "Inspect our shared room, creative scene, verified character abilities, and current story-world objects. Stage a four-beat cooperation quest, use only supported character actions, and wait for my approval. Do not access the camera, share pixels, publish products, or buy anything.";
+const suggestedJudgePrompt = "Inspect our shared room, creative scene, verified character abilities, and Story Passport. Stage a four-beat cooperation quest using only supported actions, then wait for my approval. After I perform and reflect, inspect learning progress and suggest one revision. Do not access the camera, share pixels, grade me, publish products, or buy anything.";
 
 const worlds: Array<{ id: WorldId; label: string; short: string }> = [
   { id: "studio", label: "My room", short: "ROOM" },
@@ -205,6 +207,8 @@ export default function Home() {
   const pendingUploadRef = useRef<PendingUpload | null>(null);
   const worldRef = useRef<WorldId>("studio");
   const magicShowPlanRef = useRef<MagicShowPlan | null>(null);
+  const completedShowBeatsRef = useRef(0);
+  const learningReflectionRef = useRef<LearningReflection | null>(null);
   const showAbortRef = useRef<AbortController | null>(null);
   const showPlayingRef = useRef(false);
   const lightingMoodRef = useRef<LightingMood>("sunset-warm");
@@ -220,6 +224,7 @@ export default function Home() {
   const [panelTab, setPanelTab] = useState<PanelTab>("agent");
   const [webMcpReady, setWebMcpReady] = useState(false);
   const [immersiveAR, setImmersiveAR] = useState(false);
+  const [rendererAvailable, setRendererAvailable] = useState<boolean | null>(null);
   const [notice, setNotice] = useState("Camera access only begins when you press Start camera.");
   const [agentLine, setAgentLine] = useState("Show me a drawing and I’ll help it find a personality.");
   const [storyCaption, setStoryCaption] = useState("The room is waiting for a new friend.");
@@ -239,6 +244,10 @@ export default function Home() {
   const [dismissedInvite, setDismissedInvite] = useState("");
   const [world, setWorld] = useState<WorldId>("studio");
   const [magicShowPlan, setMagicShowPlan] = useState<MagicShowPlan | null>(null);
+  const [completedShowBeats, setCompletedShowBeats] = useState(0);
+  const [learningReflection, setLearningReflection] = useState<LearningReflection | null>(null);
+  const [reflectionRetell, setReflectionRetell] = useState("");
+  const [reflectionNextChange, setReflectionNextChange] = useState<ReflectionRevision>("new-ending");
   const [ensembleActions, setEnsembleActions] = useState<CharacterAction[] | null>(null);
   const [showPlaying, setShowPlaying] = useState(false);
   const [lightingMood, setLightingMood] = useState<LightingMood>("sunset-warm");
@@ -346,13 +355,20 @@ export default function Home() {
     showAbortRef.current = null;
     showPlayingRef.current = false;
     magicShowPlanRef.current = null;
+    completedShowBeatsRef.current = 0;
+    learningReflectionRef.current = null;
     setShowPlaying(false);
     setMagicShowPlan(null);
+    setCompletedShowBeats(0);
+    setLearningReflection(null);
+    setReflectionRetell("");
+    setReflectionNextChange("new-ending");
     setEnsembleActions(null);
     commitNeuralAsset(null);
     handleRiggedAssetInfo(null);
     externalUploadApprovedRef.current = false;
     setNeuralConsentVisible(false);
+    setRendererAvailable(null);
     setNeuralProgress({ phase: "idle", progress: 0, message: "" });
     const isJudgeDemo = source === "demo";
     if (source === "camera") {
@@ -932,6 +948,70 @@ export default function Home() {
     };
   }, [currentCharacterCapabilities, inspectScene]);
 
+  const inspectLearningProgress = useCallback(() => {
+    const plan = magicShowPlanRef.current;
+    const room = sharedRoomStateRef.current;
+    return buildLearningProgress({
+      story: plan ? {
+        title: plan.title,
+        learningGoal: plan.learningGoal,
+        plannedBeats: plan.beats.length,
+        completedBeats: completedShowBeatsRef.current,
+        status: plan.status,
+      } : null,
+      reflection: learningReflectionRef.current,
+      humanTurns: activityRef.current.filter((item) => item.actor === "CHILD").length,
+      agentTurns: activityRef.current.filter((item) => item.actor === "BROWSER AGENT").length,
+      participantCount: room.session ? Math.max(1, room.participants.length) : 1,
+      sharedVectorOperations: room.operations.length,
+      worldInteractions: Object.fromEntries(worlds.map(({ id }) => [id, worldInteractions[id].length])),
+      worldTotals: Object.fromEntries(worlds.map(({ id }) => [id, worldActivities[id].objectIds.length])),
+    });
+  }, [worldInteractions]);
+
+  const saveLearningReflection = useCallback(() => {
+    const retell = reflectionRetell.trim().slice(0, 360);
+    if (retell.length < 3) {
+      setNotice("Tell one thing that happened before saving your Story Passport.");
+      return;
+    }
+    const reflection: LearningReflection = {
+      retell,
+      nextChange: reflectionNextChange,
+      savedAt: new Date().toISOString(),
+    };
+    learningReflectionRef.current = reflection;
+    setLearningReflection(reflection);
+    setNotice("Story Passport saved privately in this tab. The agent can now suggest one evidence-based revision.");
+    record("CHILD", "Reflected on the completed story", `Retell recorded · next revision: ${reflectionNextChange.replaceAll("-", " ")}.`);
+  }, [record, reflectionNextChange, reflectionRetell]);
+
+  const downloadLearningEvidence = useCallback(() => {
+    const progress = inspectLearningProgress();
+    const story = progress.story;
+    const evidence = progress.observedEvidence;
+    const lines = [
+      "WALLALIVE STORY PASSPORT",
+      "Observational evidence — not a grade or measured learning gain",
+      "",
+      `Story: ${story?.title ?? "Not staged"}`,
+      `Learning goal: ${story?.learningGoal ?? "Not set"}`,
+      `Sequence performed: ${story?.completedBeats ?? 0}/${story?.plannedBeats ?? 0} beats`,
+      `Interactive world moments: ${evidence.completedWorldInteractions}`,
+      `Completed worlds: ${evidence.completedWorlds.join(", ") || "None yet"}`,
+      `Creators present: ${evidence.participantCount}`,
+      `Shared drawing operations: ${evidence.sharedVectorOperations}`,
+      "",
+      `Learner retell: ${progress.reflection?.retell ?? "Not recorded"}`,
+      `Learner's next revision: ${progress.reflection?.nextChange.replaceAll("-", " ") ?? "Not chosen"}`,
+      "",
+      `Suggested next scaffold: ${progress.suggestedNextScaffold}`,
+      "Camera frames and artwork pixels are not included.",
+    ];
+    downloadTextFile("wallalive-story-passport.txt", lines.join("\n"), "text/plain;charset=utf-8");
+    record("CHILD", "Downloaded a private Story Passport", "Structured story evidence only · no camera frames or artwork pixels.");
+  }, [downloadTextFile, inspectLearningProgress, record]);
+
   const parseShowMoves = useCallback((value: unknown, capabilities: CharacterCapability[]) => {
     if (!Array.isArray(value) || value.length < 1 || value.length > 6) throw new Error("Each beat needs one to six character moves.");
     const seen = new Set<number>();
@@ -1031,7 +1111,12 @@ export default function Home() {
       status: "awaiting-human-approval",
     };
     magicShowPlanRef.current = plan;
+    completedShowBeatsRef.current = 0;
+    learningReflectionRef.current = null;
     setMagicShowPlan(plan);
+    setCompletedShowBeats(0);
+    setLearningReflection(null);
+    setReflectionRetell("");
     setAgentLine(actor === "BROWSER AGENT"
       ? `I staged “${plan.title}” from the verified abilities of ${plan.cast.length} character${plan.cast.length === 1 ? "" : "s"}. Only you can start it.`
       : `The guided demo staged “${plan.title}.” A real browser agent uses the same validated planning function through WebMCP.`);
@@ -1065,13 +1150,19 @@ export default function Home() {
     record("CHILD", "Approved the agent's staged Magic Show", `${current.title} · explicit visible approval.`);
     changeWorld(current.world, "WALLALIVE");
     try {
-      for (const beat of current.beats) await directEnsembleBeat(beat, "WALLALIVE", "approved_magic_show", controller.signal);
+      for (const [index, beat] of current.beats.entries()) {
+        await directEnsembleBeat(beat, "WALLALIVE", "approved_magic_show", controller.signal);
+        completedShowBeatsRef.current = index + 1;
+        setCompletedShowBeats(index + 1);
+      }
       const complete = { ...current, status: "complete" as const };
       magicShowPlanRef.current = complete;
       setMagicShowPlan(complete);
       setStoryCaption(`${current.title} — made together.`);
-      setNotice("Magic Show complete. The plan, approval, and visible performance are recorded in History.");
+      setNotice("Magic Show complete. Retell what happened in your Story Passport.");
       record("WALLALIVE", "Completed the approved Magic Show", `${current.title} · ${current.beats.length} verified beats.`);
+      setInspectorOpen(true);
+      setPanelTab("learning");
     } catch (error) {
       if (!(error instanceof DOMException && error.name === "AbortError")) setNotice(error instanceof Error ? error.message : "The Magic Show stopped.");
     } finally {
@@ -1113,6 +1204,18 @@ export default function Home() {
         inputSchema: { ...base, properties: {} },
         annotations: { readOnlyHint: true, untrustedContentHint: true },
         execute: async (_input, options) => { const signal = executionSignal(options); guard(signal); return ok({ scene: inspectCreativeScene(), verification: { observedAt: new Date().toISOString(), cameraDataIncluded: false } }); },
+      },
+      {
+        name: "inspect_learning_progress",
+        title: "Inspect the learner's Story Passport",
+        description: "Read the visible plan, completed beats, collaborative turns, world activity, reflection, and suggested next scaffold. This is observational evidence, not a grade; it returns no camera frames or artwork pixels.",
+        inputSchema: { ...base, properties: {} },
+        annotations: { readOnlyHint: true, untrustedContentHint: true },
+        execute: async (_input, options) => {
+          const signal = executionSignal(options);
+          guard(signal);
+          return ok({ progress: inspectLearningProgress(), observedAt: new Date().toISOString() });
+        },
       },
       {
         name: "request_rigged_3d_cast",
@@ -1446,7 +1549,7 @@ export default function Home() {
       setNotice(`${tools.length} WebMCP tools are ready. Camera capture remains human-only.`);
     }).catch(() => setWebMcpReady(false));
     return () => controller.abort();
-  }, [commitNeuralAsset, createCharacter, currentCharacterCapabilities, directEnsembleBeat, inspectCreativeScene, inspectCreatorDrop, interactWithWorldObject, orchestrateSpatialCinematics, parseShowMoves, prepareRoomInvite, recommendProductsForArtwork, record, requestNeuralConsent, stageMagicShow, stageShopifyCreatorDrop, worldInteractions]);
+  }, [commitNeuralAsset, createCharacter, currentCharacterCapabilities, directEnsembleBeat, inspectCreativeScene, inspectCreatorDrop, inspectLearningProgress, interactWithWorldObject, orchestrateSpatialCinematics, parseShowMoves, prepareRoomInvite, recommendProductsForArtwork, record, requestNeuralConsent, stageMagicShow, stageShopifyCreatorDrop, worldInteractions]);
 
   const runMagicDemo = useCallback(async () => {
     if (demoRunning) return;
@@ -1546,6 +1649,10 @@ export default function Home() {
 
   const handleARCapability = useCallback((supported: boolean) => {
     setImmersiveAR(supported);
+  }, []);
+
+  const handleRendererCapability = useCallback((supported: boolean) => {
+    setRendererAvailable(supported);
   }, []);
 
   const handleARPlaced = useCallback((surface: "screen" | "world") => {
@@ -1724,6 +1831,22 @@ export default function Home() {
     const capabilities = buildCharacterCapabilities(captureEnsemble, Boolean(neuralAsset));
     return new Set(SAFE_SHOW_ACTIONS.filter((action) => capabilities.length > 0 && capabilities.every((capability) => capability.availableActions.includes(action))));
   }, [captureEnsemble, neuralAsset]);
+  const learningProgress = useMemo(() => buildLearningProgress({
+    story: magicShowPlan ? {
+      title: magicShowPlan.title,
+      learningGoal: magicShowPlan.learningGoal,
+      plannedBeats: magicShowPlan.beats.length,
+      completedBeats: completedShowBeats,
+      status: magicShowPlan.status,
+    } : null,
+    reflection: learningReflection,
+    humanTurns: activity.filter((item) => item.actor === "CHILD").length,
+    agentTurns: activity.filter((item) => item.actor === "BROWSER AGENT").length,
+    participantCount: sharedRoom.session ? Math.max(1, sharedRoom.participants.length) : 1,
+    sharedVectorOperations: sharedRoom.operations.length,
+    worldInteractions: Object.fromEntries(worlds.map(({ id }) => [id, worldInteractions[id].length])),
+    worldTotals: Object.fromEntries(worlds.map(({ id }) => [id, worldActivities[id].objectIds.length])),
+  }), [activity, completedShowBeats, learningReflection, magicShowPlan, sharedRoom.operations.length, sharedRoom.participants.length, sharedRoom.session, worldInteractions]);
   const neuralBusy = ["connecting", "preparing", "queued", "generating", "downloading"].includes(neuralProgress.phase);
   const primaryButton = cameraState === "active"
     ? { label: "CAPTURE DRAWING", action: captureDrawing }
@@ -1794,7 +1917,7 @@ export default function Home() {
                     : capture.skeleton.map((point, index) => <circle key={index} cx={(point.x / 1.4 + 0.5) * 100} cy={(0.5 - point.y / 1.4) * 100} r={Math.max(1.1, point.radius / 1.4 * 100)} />)}
                 </svg>
               </div>
-              <div><p className="kicker">{neuralAsset ? "FULL NEURAL RIG + DRAWING PARTS" : "VERIFIED CUTOUT · REVIEW"}</p><strong>{neuralAsset ? capture.rig.detectedKinds.filter((kind) => kind !== "body").join(" · ") || capture.analysis.shapeHint : capture.characterValidation?.evidence.join(" · ") || "CHARACTER EVIDENCE"}</strong><span><i style={{ background: capture.rig.bodyColor }} /><i style={{ background: capture.rig.lineColor }} /> {riggedAssetInfo ? `${riggedAssetInfo.bones} BONES · ${riggedAssetInfo.semanticParts} PROJECTED PARTS${riggedAssetInfo.colorTransfer ? " · COLOR MATCHED" : ""} · ${riggedAssetInfo.vertices.toLocaleString()} VERTICES` : neuralAsset ? "RIGGED GLB LOADING" : "2D CUTOUT · NO FAKE 3D"}</span></div>
+              <div><p className="kicker">{neuralAsset ? "FULL NEURAL RIG + DRAWING PARTS" : "VERIFIED CUTOUT · REVIEW"}</p><strong>{neuralAsset ? capture.rig.detectedKinds.filter((kind) => kind !== "body").join(" · ") || capture.analysis.shapeHint : capture.characterValidation?.evidence.join(" · ") || "CHARACTER EVIDENCE"}</strong><span><i style={{ background: capture.rig.bodyColor }} /><i style={{ background: capture.rig.lineColor }} /> {riggedAssetInfo ? `${riggedAssetInfo.bones} BONES · ${riggedAssetInfo.semanticParts} PROJECTED PARTS${riggedAssetInfo.colorTransfer ? " · COLOR MATCHED" : ""} · ${riggedAssetInfo.vertices.toLocaleString()} VERTICES` : neuralAsset ? rendererAvailable === false ? "3D ASSET VERIFIED · PREVIEW NEEDS WEBGL" : "RIGGED GLB LOADING" : "2D CUTOUT · NO FAKE 3D"}</span></div>
             </div>
           ) : null}
 
@@ -1841,7 +1964,7 @@ export default function Home() {
             {capture && cameraState !== "active" && !character.created ? <div className="cutout-review" onPointerDown={(event) => event.stopPropagation()}><img src={capture.textureUrl} alt="Isolated character cutout to review" /><span>{captureEnsemble.length > 1 ? `${captureEnsemble.length} SEPARATE FIGURES FOUND` : "IS THE WHOLE CHARACTER VISIBLE?"}</span><div><button onClick={requestNeuralConsent}>YES · CONTINUE</button><button onClick={() => capture.sourceScope === "camera" ? startCamera() : uploadRef.current?.click()}>NO · TRY AGAIN</button></div></div> : null}
             {step === "camera" ? <><div className="capture-guide"><span /><b>TAP CHARACTER · THEN CAPTURE</b></div><div className="capture-target" style={{ left: `${captureTarget.x * 100}%`, top: `${captureTarget.y * 100}%` }}><i /></div></> : null}
             {character.created ? <Suspense fallback={<div className="three-layer" aria-hidden="true" />}>
-              <ARStage ref={stageRef} characters={character.created && !neuralAsset ? captureEnsemble : null} contour={capture?.contour ?? null} skeleton={capture?.skeleton ?? null} textureUrl={capture?.textureUrl ?? null} rig={capture?.rig ?? null} depth={capture?.depthRecognition ?? null} action={character.action} ensembleActions={ensembleActions} world={world} lightingMood={lightingMood} cameraPreset={cameraPreset} accent={character.accent} inflation={character.inflation} neuralAssetUrl={neuralAsset?.meshUrl ?? null} visible onCapability={handleARCapability} onPlaced={handleARPlaced} onNeuralAssetInfo={handleRiggedAssetInfo} onWorldInteraction={handleStageWorldInteraction} />
+              <ARStage ref={stageRef} characters={character.created && !neuralAsset ? captureEnsemble : null} contour={capture?.contour ?? null} skeleton={capture?.skeleton ?? null} textureUrl={capture?.textureUrl ?? null} rig={capture?.rig ?? null} depth={capture?.depthRecognition ?? null} action={character.action} ensembleActions={ensembleActions} world={world} lightingMood={lightingMood} cameraPreset={cameraPreset} accent={character.accent} inflation={character.inflation} neuralAssetUrl={neuralAsset?.meshUrl ?? null} visible onCapability={handleARCapability} onRendererCapability={handleRendererCapability} onPlaced={handleARPlaced} onNeuralAssetInfo={handleRiggedAssetInfo} onWorldInteraction={handleStageWorldInteraction} />
             </Suspense> : null}
             {neuralConsentVisible ? <div className="neural-consent" role="dialog" aria-modal="true" aria-labelledby="neural-consent-title" onPointerDown={(event) => event.stopPropagation()}>
               <span>CHOOSE YOUR QUALITY</span><h2 id="neural-consent-title">Wake {captureEnsemble.length > 1 ? "the whole cast" : "this drawing"}</h2><p>{captureEnsemble.length > 1 ? "Preview the cast now with separate confidence-gated rigs. Full sculpt currently handles one figure at a time." : "Use an instant private spatial puppet—or approve a full AI sculpt with generated unseen views."}</p><div><button onClick={startLocalReconstruction}>INSTANT PUPPET · PRIVATE</button>{captureEnsemble.length === 1 ? <button onClick={startNeuralReconstruction}>FULL 3D SCULPT · AI</button> : null}<button onClick={() => { setNeuralConsentVisible(false); setPartEditorOpen(true); }}>CHECK SKELETON</button></div>
@@ -1865,7 +1988,7 @@ export default function Home() {
               </div>
               <span>DRAG ORBIT · PINCH ZOOM · PAN</span>
             </div> : null}
-            <div className="camera-hud"><span><i /> {cameraState === "active" ? "LIVE CAMERA · LOCAL" : neuralAsset && character.created ? `FULL NEURAL RIG · ${riggedAssetInfo?.bones ?? "…"} BONES` : character.created ? `${captureEnsemble.length} INSTANT SPATIAL PUPPET${captureEnsemble.length === 1 ? "" : "S"}` : capture ? "CUTOUT REVIEW · LOCAL" : "SAFE DEMO ROOM"}</span><strong>{immersiveAR ? "WEBXR READY" : `${world.toUpperCase()} · INTERACTIVE 3D`}</strong></div>
+            <div className="camera-hud"><span><i /> {cameraState === "active" ? "LIVE CAMERA · LOCAL" : neuralAsset && character.created ? rendererAvailable === false ? "FULL NEURAL ASSET · PREVIEW PAUSED" : `FULL NEURAL RIG · ${riggedAssetInfo?.bones ?? "…"} BONES` : character.created ? `${captureEnsemble.length} INSTANT SPATIAL PUPPET${captureEnsemble.length === 1 ? "" : "S"}` : capture ? "CUTOUT REVIEW · LOCAL" : "SAFE DEMO ROOM"}</span><strong>{immersiveAR ? "WEBXR READY" : rendererAvailable === false ? "ACCESSIBLE STORY MODE" : `${world.toUpperCase()} · INTERACTIVE 3D`}</strong></div>
             {character.created && storyCaption ? <div className="story-caption"><span>{character.storyTitle || "LIVE MOMENT"}</span><p>{storyCaption}</p></div> : null}
             {cameraState === "denied" || cameraState === "unavailable" ? <div className="camera-message"><b>CAMERA OPTIONAL</b><p>The demo doodle still proves the complete WebMCP and 3D workflow.</p></div> : null}
           </div>
@@ -1890,12 +2013,17 @@ export default function Home() {
           </div> : null}
           <p className="placement-tip">{character.created ? neuralAsset ? "Full sculpt · generated unseen views · verified rig" : "Instant puppet · artwork preserved · only verified branches move" : capture ? "Check the cutout and skeleton, then choose instant puppet or full AI sculpt" : "Photograph a clear figure—uncertain recognition is blocked before 3D"}</p>
           <div className="learning-loop" aria-label="WallAlive learning loop"><b>LEARNING LOOP</b><span>Imagine</span><i>→</i><span>Sequence</span><i>→</i><span>Perform</span><i>→</i><span>Reflect</span></div>
+          {character.created ? <button className={`story-passport-peek phase-${learningProgress.phase}`} onClick={() => { setInspectorOpen(true); setPanelTab("learning"); }}>
+            <span>STORY PASSPORT</span>
+            <b>{learningReflection ? "Reflection saved" : completedShowBeats ? "Tell it back" : magicShowPlan ? "Story in progress" : "Make thinking visible"}</b>
+            <i>{magicShowPlan ? `${completedShowBeats}/${magicShowPlan.beats.length} beats` : "OPEN"} →</i>
+          </button> : null}
         </section>
 
         <aside className={`agent-panel ${inspectorOpen ? "is-open" : ""}`} aria-hidden={!inspectorOpen}>
           <button className="inspector-close" onClick={() => setInspectorOpen(false)} aria-label="Close WebMCP inspector">×</button>
           <div className="right-tabs" role="tablist" aria-label="WallAlive inspector">
-            {(["agent", "tools", "commerce", "privacy", "history"] as const).map((tab) => <button key={tab} role="tab" aria-selected={panelTab === tab} className={panelTab === tab ? "active" : ""} onClick={() => setPanelTab(tab)}>{tab}</button>)}
+            {(["agent", "learning", "tools", "commerce", "privacy", "history"] as const).map((tab) => <button key={tab} role="tab" aria-selected={panelTab === tab} className={panelTab === tab ? "active" : ""} onClick={() => setPanelTab(tab)}>{tab}</button>)}
           </div>
 
           {panelTab === "agent" ? (
@@ -1907,6 +2035,31 @@ export default function Home() {
               <div className="agent-call"><span>↳</span><div><b>{latestAgentActivity?.toolName ?? "inspect_creative_scene"}</b><small>{latestAgentActivity?.detail ?? "Shared state visible · Camera private"}</small></div></div>
               <blockquote>“{suggestedJudgePrompt}”</blockquote>
               <button className="copy-prompt" onClick={copyDemoPrompt}>COPY JUDGE DEMO PROMPT <span>⧉</span></button>
+            </div>
+          ) : null}
+
+          {panelTab === "learning" ? (
+            <div className="panel-body learning-panel">
+              <p className="kicker">STORY PASSPORT · PRIVATE LEARNING EVIDENCE</p>
+              <h2>{learningProgress.story?.title ?? "Plan it. Play it. Tell it back."}</h2>
+              <p>{learningProgress.story?.learningGoal ?? "Complete a short story or world quest, then capture the learner's own retell and next creative choice."}</p>
+              <div className="learning-metrics" aria-label="Observed story progress">
+                <div><b>{learningProgress.story ? `${learningProgress.story.completedBeats}/${learningProgress.story.plannedBeats}` : "0"}</b><span>beats performed</span></div>
+                <div><b>{learningProgress.observedEvidence.completedWorldInteractions}</b><span>world moments</span></div>
+                <div><b>{learningProgress.observedEvidence.participantCount}</b><span>creator{learningProgress.observedEvidence.participantCount === 1 ? "" : "s"}</span></div>
+              </div>
+              {learningProgress.phase === "performed-needs-reflection" || learningProgress.phase === "reflected" ? <section className="reflection-routine">
+                <label htmlFor="story-retell"><span>WHAT HAPPENED?</span><small>Try “First… then… finally…”</small></label>
+                <textarea id="story-retell" value={reflectionRetell} maxLength={360} onChange={(event) => setReflectionRetell(event.target.value)} placeholder="First my character… Then… Finally…" />
+                <fieldset><legend>What should change next?</legend>{([
+                  ["new-ending", "New ending"],
+                  ["new-feeling", "New feeling"],
+                  ["add-friend", "Add a friend"],
+                ] as const).map(([value, label]) => <button type="button" key={value} className={reflectionNextChange === value ? "active" : ""} onClick={() => setReflectionNextChange(value)}>{label}</button>)}</fieldset>
+                <button className="save-reflection" onClick={saveLearningReflection}>{learningReflection ? "UPDATE REFLECTION" : "SAVE MY REFLECTION"} <span>✦</span></button>
+              </section> : <div className="learning-next"><i>→</i><span><b>Next</b>{learningProgress.suggestedNextScaffold}</span></div>}
+              {learningReflection ? <button className="download-passport" onClick={downloadLearningEvidence}>DOWNLOAD TEACHER / PARENT NOTE <span>↓</span></button> : null}
+              <small className="evidence-boundary">Evidence, not a grade. Saved in this tab; no camera frames or artwork pixels.</small>
             </div>
           ) : null}
 

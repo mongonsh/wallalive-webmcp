@@ -6,6 +6,7 @@ import { parseAniGenPreview } from "../app/lib/anigen.ts";
 import { extractMedialSkeleton, inferSemanticRig, inkAroundEnclosedRegion, mapCoverTargetToSource, mergeLearnedPartHints, recoverEnclosedTargetRegion, recoverTargetSilhouette, scoreDrawingCandidate } from "../app/lib/drawing.ts";
 import { decodeTopology } from "../app/lib/learned-parts.ts";
 import { prepareNeuralCharacter, remapDominantHuePixels } from "../app/lib/rigged-model.ts";
+import { buildLearningProgress } from "../app/lib/learning-progress.ts";
 
 async function render() {
   const workerUrl = new URL("../dist/server/index.js", import.meta.url);
@@ -37,10 +38,11 @@ test("server-renders the WallAlive product shell and security headers", async ()
   assert.doesNotMatch(html, /codex-preview|react-loading-skeleton|Starter Project|CutRoom/i);
 });
 
-test("registers thirteen goal-level WebMCP collaboration tools with spatial direction and creator commerce", async () => {
+test("registers fourteen goal-level WebMCP collaboration tools with learning evidence, spatial direction, and creator commerce", async () => {
   const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
   const expectedTools = [
     "inspect_creative_scene",
+    "inspect_learning_progress",
     "inspect_character_capabilities",
     "request_rigged_3d_cast",
     "stage_magic_show",
@@ -58,11 +60,11 @@ test("registers thirteen goal-level WebMCP collaboration tools with spatial dire
   for (const tool of expectedTools) assert.match(page, new RegExp(`name: ["']${tool}["']`));
 
   const registeredNames = [...page.matchAll(/name: ["']([^"']+)["']/g)].map((match) => match[1]);
-  assert.equal(registeredNames.filter((name) => expectedTools.includes(name)).length, 13);
+  assert.equal(registeredNames.filter((name) => expectedTools.includes(name)).length, 14);
   const toolSurface = page.slice(page.indexOf("const tools: WebMCPTool[]"), page.indexOf("Promise.all(tools.map"));
-  assert.equal([...toolSurface.matchAll(/\n\s+name: ["']/g)].length, 13, "every registered tool must be represented exactly once");
-  assert.equal([...toolSurface.matchAll(/\n\s+title: ["']/g)].length, 13, "every registered tool needs a human-readable title");
-  assert.equal([...toolSurface.matchAll(/\n\s+annotations: \{ readOnlyHint: (?:true|false), untrustedContentHint: true \}/g)].length, 13, "every tool must declare trust and read/write intent");
+  assert.equal([...toolSurface.matchAll(/\n\s+name: ["']/g)].length, 14, "every registered tool must be represented exactly once");
+  assert.equal([...toolSurface.matchAll(/\n\s+title: ["']/g)].length, 14, "every registered tool needs a human-readable title");
+  assert.equal([...toolSurface.matchAll(/\n\s+annotations: \{ readOnlyHint: (?:true|false), untrustedContentHint: true \}/g)].length, 14, "every tool must declare trust and read/write intent");
   assert.equal(registeredNames.some((name) => /camera|capture|upload/.test(name)), false);
   assert.match(page, /document\.modelContext/);
   assert.match(page, /registerTool\(tool, \{ signal: controller\.signal \}\)/);
@@ -109,7 +111,7 @@ test("registers thirteen goal-level WebMCP collaboration tools with spatial dire
   assert.match(page, /LEARNING LOOP/);
 });
 
-test("keeps submission claims aligned with the shipped thirteen-tool educational and creator-commerce loops", async () => {
+test("keeps submission claims aligned with the shipped fourteen-tool educational and creator-commerce loops", async () => {
   const files = await Promise.all([
     readFile(new URL("../README.md", import.meta.url), "utf8"),
     readFile(new URL("../docs/DEVPOST_SUBMISSION.md", import.meta.url), "utf8"),
@@ -121,10 +123,45 @@ test("keeps submission claims aligned with the shipped thirteen-tool educational
   assert.doesNotMatch(claims, /(?:Six|six) (?:goal-level WebMCP|imperative) tools/);
   assert.doesNotMatch(claims, /(?:Six|six)(?:-graph| local| same-origin| ONNX)|six-model/);
   assert.match(claims, /Seven local ONNX graphs/);
-  assert.match(claims, /Thirteen goal-level WebMCP tools/);
+  assert.match(claims, /Fourteen goal-level WebMCP tools/);
   assert.match(claims, /Imagine.*Sequence.*Perform.*Reflect/);
   assert.match(claims, /not measured learning (?:gains|claims|outcomes)/i);
   assert.doesNotMatch(claims, /art therapy/i);
+});
+
+test("builds a private, non-grading learning evidence loop with an adaptive next scaffold", () => {
+  const performed = buildLearningProgress({
+    story: { title: "Pip's Quest", learningGoal: "sequence a story", plannedBeats: 3, completedBeats: 3, status: "complete" },
+    reflection: null,
+    humanTurns: 4,
+    agentTurns: 2,
+    participantCount: 2,
+    sharedVectorOperations: 18,
+    worldInteractions: { studio: 2, wizard: 1 },
+    worldTotals: { studio: 2, wizard: 4 },
+  });
+  assert.equal(performed.phase, "performed-needs-reflection");
+  assert.equal(performed.story.completedBeats, 3);
+  assert.deepEqual(performed.observedEvidence.completedWorlds, ["studio"]);
+  assert.match(performed.suggestedNextScaffold, /retell/i);
+  assert.equal(performed.cameraDataIncluded, false);
+  assert.equal(performed.artworkPixelsIncluded, false);
+  assert.match(performed.interpretationBoundary, /not a score/i);
+
+  const reflected = buildLearningProgress({
+    ...{
+      story: { title: "Pip's Quest", learningGoal: "sequence a story", plannedBeats: 3, completedBeats: 3, status: "complete" },
+      humanTurns: 5,
+      agentTurns: 2,
+      participantCount: 2,
+      sharedVectorOperations: 18,
+      worldInteractions: { studio: 2 },
+      worldTotals: { studio: 2 },
+    },
+    reflection: { retell: "First Pip hid, then hopped, and finally waved.", nextChange: "add-friend", savedAt: "2026-09-03T00:00:00.000Z" },
+  });
+  assert.equal(reflected.phase, "reflected");
+  assert.match(reflected.suggestedNextScaffold, /add friend/i);
 });
 
 test("ships a pressure-aware drawing wall and real switchable Three.js worlds", async () => {

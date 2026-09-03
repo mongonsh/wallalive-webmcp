@@ -99,11 +99,17 @@ The quota-free judge path uses the same exact supplied drawing but does not pret
 
 The current free ZeroGPU quota prevented repeated end-to-end generations across every example category in one session. The model and live pipeline are real; a dedicated endpoint is still required for reliable high-volume category testing and production use.
 
+## Learning-design evidence and limits
+
+The Story Passport is a short **plan → perform → reflect → revise** routine, not an automated assessment. The design follows the [Education Endowment Foundation's metacognition guidance](https://educationendowmentfoundation.org.uk/education-evidence/teaching-learning-toolkit/metacognition-and-self-regulation), which emphasizes explicit planning, monitoring, and evaluation embedded in a real task, and [Harvard Project Zero's Thinking Routines](https://www.pz.harvard.edu/thinking-routines), which emphasize short repeatable prompts and documenting learner ideas so thinking can be revisited. WallAlive therefore captures observable events—planned and completed story beats, collaborative activity, a learner-authored retell, and one revision choice—rather than generating a score.
+
+`inspect_learning_progress` gives the browser agent only this structured, session-local evidence and an appropriate next scaffold. It returns no camera data or artwork pixels. The evidence note explicitly says it is not a grade, diagnosis, or measured learning gain. Classroom impact remains a product hypothesis until a teacher-led pilot measures time to first story, sequence coherence, language used during retelling, turn-taking, and voluntary revision behavior.
+
 ## WebMCP design
 
 WallAlive follows the [WebMCP Community Group draft](https://webmachinelearning.github.io/webmcp/) and the official [imperative API explainer](https://github.com/webmachinelearning/webmcp#imperative-tool-registration-documentmodelcontext):
 
-- Register thirteen goal-level tools with `document.modelContext.registerTool()` in the top-level page, including shared-room inspection and invite preparation, interactive story objects, spatial cinematics, and evidence-based Creator Drop recommendation, staging, and inspection. Shopify publishing and purchase remain outside WallAlive's tool surface.
+- Register fourteen goal-level tools with `document.modelContext.registerTool()` in the top-level page, including shared-room and Story Passport inspection, invite preparation, interactive story objects, spatial cinematics, and evidence-based Creator Drop recommendation, staging, and inspection. Shopify publishing and purchase remain outside WallAlive's tool surface.
 - Expose shared workflow state and separate per-character action capabilities before mutation.
 - Use narrow descriptions, strict nested JSON Schema, bounded cast/beat arrays, and cancellation.
 - Validate every proposed move against verified pose/topology branches rather than silently animating the wrong geometry.

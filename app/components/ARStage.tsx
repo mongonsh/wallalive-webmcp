@@ -42,6 +42,7 @@ type ARStageProps = {
   neuralAssetUrl: string | null;
   visible: boolean;
   onCapability: (supported: boolean) => void;
+  onRendererCapability: (supported: boolean) => void;
   onPlaced: (surface: "screen" | "world", x: number, y: number) => void;
   onNeuralAssetInfo: (info: RiggedAssetInfo | null) => void;
   onWorldInteraction?: (interaction: WorldObjectInteraction) => void;
@@ -611,7 +612,7 @@ export function buildCharacter(
 }
 
 export const ARStage = forwardRef<ARStageHandle, ARStageProps>(function ARStage(
-  { characters, contour, skeleton, textureUrl, rig, depth, action, ensembleActions = null, world, lightingMood, cameraPreset, accent, inflation, neuralAssetUrl, visible, onCapability, onPlaced, onNeuralAssetInfo, onWorldInteraction },
+  { characters, contour, skeleton, textureUrl, rig, depth, action, ensembleActions = null, world, lightingMood, cameraPreset, accent, inflation, neuralAssetUrl, visible, onCapability, onRendererCapability, onPlaced, onNeuralAssetInfo, onWorldInteraction },
   ref,
 ) {
   const mountRef = useRef<HTMLDivElement>(null);
@@ -645,6 +646,7 @@ export const ARStage = forwardRef<ARStageHandle, ARStageProps>(function ARStage(
     if (!probe) {
       mount.dataset.renderer = "unavailable";
       setRendererError(true);
+      onRendererCapability(false);
       onCapability(false);
       return;
     }
@@ -665,10 +667,12 @@ export const ARStage = forwardRef<ARStageHandle, ARStageProps>(function ARStage(
     }
     if (!renderer) {
       setRendererError(true);
+      onRendererCapability(false);
       onCapability(false);
       return;
     }
     setRendererError(false);
+    onRendererCapability(true);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.setSize(width, height);
     renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -1183,7 +1187,7 @@ export const ARStage = forwardRef<ARStageHandle, ARStageProps>(function ARStage(
       handlesRef.current = null;
       dispose();
     };
-  }, [accent, characters, contour, depth, inflation, neuralAssetUrl, onCapability, onNeuralAssetInfo, onWorldInteraction, rig, skeleton, textureUrl, visible]);
+  }, [accent, characters, contour, depth, inflation, neuralAssetUrl, onCapability, onNeuralAssetInfo, onRendererCapability, onWorldInteraction, rig, skeleton, textureUrl, visible]);
 
   useEffect(() => {
     worldStateRef.current = world;
