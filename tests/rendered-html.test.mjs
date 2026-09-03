@@ -33,8 +33,8 @@ test("server-renders the WallAlive product shell and security headers", async ()
   assert.match(html, /Wake it/);
   assert.match(html, /START CAMERA/);
   assert.match(html, /SEE THE MAGIC/);
-  assert.match(html, /Private by default/);
-  assert.match(html, /CREATOR SHOP/);
+  assert.match(html, /Bring it to life/);
+  assert.match(html, />SHOP</);
   assert.doesNotMatch(html, /codex-preview|react-loading-skeleton|Starter Project|CutRoom/i);
 });
 
@@ -97,11 +97,11 @@ test("registers fourteen goal-level WebMCP collaboration tools with learning evi
   assert.match(page, /topologyRecognition/);
   assert.match(page, /variable graph decoded from learned centerline, endpoints, and junction fields/);
   assert.match(page, /world: worldRef\.current/);
-  assert.match(page, /DRAW SOMETHING/);
+  assert.match(page, />DRAW <span>✦/);
   assert.match(page, /recognizeDrawingsFromImageUrl\(dataUrl, target, 6\)/);
-  assert.match(page, /Try the full human \+ agent story/);
+  assert.match(page, /className="agent-prompt"/);
   assert.match(page, /cyberpunk-neon/);
-  assert.match(page, /CREATOR SHOP/);
+  assert.match(page, /CREATOR PRODUCTS · OFFLINE IMPORT KIT/);
   assert.match(page, /ADULT · CONFIRM PERMISSIONS/);
   assert.match(page, /Nothing is published, purchased, or sent to Shopify/);
   assert.match(page, /SHOPIFY IMPORT PREVIEW · NOT CONNECTED/);

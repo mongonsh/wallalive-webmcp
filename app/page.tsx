@@ -215,13 +215,13 @@ export default function Home() {
   const [character, setCharacter] = useState<CharacterState>(initialCharacter);
   const [activity, setActivity] = useState<Activity[]>([]);
   const [panelTab, setPanelTab] = useState<PanelTab>("agent");
-  const [webMcpStatus, setWebMcpStatus] = useState<WebMCPStatus>("unsupported");
+  const [webMcpStatus, setWebMcpStatus] = useState<WebMCPStatus>("registering");
   const [webMcpCheck, setWebMcpCheck] = useState<WebMCPRuntimeCheck | null>(null);
   const [immersiveAR, setImmersiveAR] = useState(false);
   const [rendererAvailable, setRendererAvailable] = useState<boolean | null>(null);
-  const [notice, setNotice] = useState("Camera access only begins when you press Start camera.");
-  const [agentLine, setAgentLine] = useState("Show me a drawing and I’ll help it find a personality.");
-  const [storyCaption, setStoryCaption] = useState("The room is waiting for a new friend.");
+  const [notice, setNotice] = useState("Camera stays on this device.");
+  const [agentLine, setAgentLine] = useState("Create together.");
+  const [storyCaption, setStoryCaption] = useState("Ready for a new friend.");
   const [demoRunning, setDemoRunning] = useState(false);
   const [captureTarget, setCaptureTarget] = useState<CaptureTarget>({ x: 0.5, y: 0.48 });
   const [neuralAsset, setNeuralAsset] = useState<NeuralAsset | null>(null);
@@ -1181,12 +1181,13 @@ export default function Home() {
   useEffect(() => {
     const context = document.modelContext;
     if (!context?.registerTool) {
-      setWebMcpStatus("unsupported");
-      setWebMcpCheck(null);
+      window.queueMicrotask(() => {
+        setWebMcpStatus("unsupported");
+        setWebMcpCheck(null);
+      });
       return;
     }
     const controller = new AbortController();
-    setWebMcpStatus("registering");
     const base = { type: "object", additionalProperties: false };
     const ok = (payload: Record<string, unknown>) => ({ ok: true, ...payload });
     const fail = (error: unknown) => {
@@ -1861,12 +1862,13 @@ export default function Home() {
       : { label: "START CAMERA", action: startCamera };
   if (capture && captureEnsemble.length > 1 && !character.created) primaryButton.label = `WAKE ${captureEnsemble.length} FIGURES`;
   const stepIndex = step === "ready" ? 0 : step === "camera" ? 1 : character.created ? 3 : 2;
+  const showLegacyStart: boolean = false;
   const webMcpReady = webMcpStatus === "registered" || webMcpStatus === "verified";
-  const webMcpLabel = webMcpStatus === "verified" ? "WEBMCP VERIFIED"
+  const webMcpLabel = webMcpStatus === "verified" ? `WEBMCP ✓ ${webMcpCheck?.registeredCount ?? toolNames.length}`
     : webMcpStatus === "registered" ? "WEBMCP LIVE"
-      : webMcpStatus === "registering" ? "WEBMCP CHECKING"
+      : webMcpStatus === "registering" ? "WEBMCP…"
         : webMcpStatus === "error" ? "WEBMCP ERROR"
-          : "WEBMCP NEEDS CHROME";
+          : "WEBMCP OFF";
 
   return (
     <main className="alive-shell" data-webmcp-status={webMcpStatus} data-webmcp-tool-count={webMcpCheck?.registeredCount ?? 0} data-webmcp-probe={webMcpCheck?.verifiedTool ?? "none"}>
@@ -1874,26 +1876,21 @@ export default function Home() {
         <a className="alive-brand" href="#play"><span>WALL</span>ALIVE<i>●</i></a>
         <div className="mini-steps" aria-label="Creative journey"><span className={stepIndex >= 1 ? "done" : "active"}>Make</span><i>→</i><span className={stepIndex >= 2 ? "done" : ""}>Wake</span><i>→</i><span className={stepIndex >= 3 ? "done" : ""}>Share</span></div>
         <div className="header-actions">
-          <div className={`ready-pill ${webMcpReady ? "is-ready" : ""}`}><i /> {webMcpLabel}</div>
+          <div className={`ready-pill ${webMcpReady ? "is-ready" : ""}`} title={webMcpStatus === "unsupported" ? "Open in ChatGPT or Chrome with WebMCP enabled" : webMcpLabel}><i /> {webMcpLabel}</div>
           <button className={`room-toggle ${sharedRoom.session ? "is-live" : ""}`} onClick={() => setSharedRoomOpen(true)} aria-label="Open collaborative drawing room">{sharedRoom.session ? `${sharedRoom.participants.length} LIVE` : "DRAW TOGETHER"}</button>
-          <button className="merch-toggle" onClick={openCreatorStudio} aria-label="Open Creator Shop">CREATOR SHOP</button>
-          <button className="inspector-toggle" onClick={() => { setInspectorOpen(true); setPanelTab("agent"); }}>HOW AGENTS HELP</button>
+          <button className="merch-toggle" onClick={openCreatorStudio} aria-label="Open Creator Shop">SHOP</button>
+          <button className="inspector-toggle" onClick={() => { setInspectorOpen(true); setPanelTab("agent"); }}>AGENT</button>
+          <button className="agent-prompt" onClick={copyDemoPrompt} aria-label="Copy the agent demo prompt">PROMPT</button>
           <button className="judge-demo" onClick={runMagicDemo} disabled={demoRunning}>{demoRunning ? "WAKING…" : "SEE THE MAGIC"}</button>
         </div>
       </header>
-      <button className="judge-prompt-banner" onClick={copyDemoPrompt} aria-label="Copy the agent demo prompt">
-        <span>FOR JUDGES</span>
-        <b>Try the full human + agent story</b>
-        <small>Copy one prompt that stages a safe, capability-aware performance.</small>
-        <i>Copy ↗</i>
-      </button>
+      <input ref={uploadRef} hidden type="file" accept="image/*" onChange={uploadDrawing} />
 
       <section className="alive-layout" id="play">
-        <aside className="steps-panel">
+        {showLegacyStart ? (<aside className="steps-panel" hidden aria-hidden="true">
           <p className="kicker">START HERE</p>
           <h2>Make a new friend.</h2>
           <p className="start-copy">Draw in the studio, choose a picture, or point the camera at artwork on a wall.</p>
-          <input ref={uploadRef} hidden type="file" accept="image/*" onChange={uploadDrawing} />
           <div className="start-choices">
             <button onClick={() => setDrawingWallOpen(true)}><i>✦</i><span><b>Draw something</b><small>Full paint studio</small></span><em>→</em></button>
             <button onClick={() => setSharedRoomOpen(true)}><i>∞</i><span><b>Draw together</b><small>{sharedRoom.session ? `${sharedRoom.participants.length} creator${sharedRoom.participants.length === 1 ? "" : "s"} live` : "Invite a friend"}</small></span><em>→</em></button>
@@ -1937,17 +1934,18 @@ export default function Home() {
             <div><b>Private by default</b><span>✓</span></div>
             <p>The agent never sees camera frames. You approve any AI sculpt or store export.</p>
           </div>
-        </aside>
+        </aside>) : null}
 
         <section className="magic-stage">
           <div className="stage-copy">
-            <div><p className="kicker">A CREATIVE PLAYGROUND FOR EVERY AGE</p><h1>Your drawing has<br /><em>somewhere to go.</em></h1><p className="stage-purpose">Make a character, bring it into a real 3D world, then tell a story or build a tiny creator collection—together with an agent.</p></div>
+            <div><p className="kicker">DRAW · WAKE · PLAY</p><h1>Draw it.<br /><em>Bring it to life.</em></h1><p className="stage-purpose">Draw, upload, or scan. Then play together in 3D.</p></div>
             <div className="stage-ctas">
               {immersiveAR && character.created ? <button className="ar-button" onClick={enterAR}>ENTER REAL AR <span>◎</span></button> : null}
               {cameraState === "active" ? <button className="stop-camera" onClick={stopCamera}>STOP CAMERA</button> : null}
-              {cameraState !== "active" && step === "ready" ? <button className="upload-camera" onClick={() => uploadRef.current?.click()}>USE A PICTURE</button> : null}
-              {cameraState !== "active" && !capture ? <button className="draw-wall-cta" onClick={() => setDrawingWallOpen(true)}>DRAW SOMETHING <span>✦</span></button> : null}
-              {capture ? <button className="merch-cta" onClick={openCreatorStudio}>BUILD A CREATOR DROP <span>↗</span></button> : null}
+              {cameraState !== "active" && step === "ready" ? <button className="upload-camera" onClick={() => uploadRef.current?.click()}>UPLOAD</button> : null}
+              {cameraState !== "active" && !capture ? <button className="draw-wall-cta" onClick={() => setDrawingWallOpen(true)}>DRAW <span>✦</span></button> : null}
+              {cameraState !== "active" && !capture ? <button className="share-wall-cta" onClick={() => setSharedRoomOpen(true)}>TOGETHER <span>∞</span></button> : null}
+              {capture ? <button className="merch-cta" onClick={openCreatorStudio}>MAKE PRODUCTS <span>↗</span></button> : null}
               <button className="primary-camera" onClick={primaryButton.action} disabled={cameraState === "requesting" || neuralBusy}>{cameraState === "requesting" ? "OPENING…" : neuralBusy ? "GENERATING…" : primaryButton.label}<span>↗</span></button>
             </div>
           </div>
@@ -2084,7 +2082,7 @@ export default function Home() {
 
           {panelTab === "commerce" ? (
             <div className="panel-body commerce-panel">
-              <p className="kicker">CREATOR SHOP · SHOPIFY DRAFT STUDIO</p>
+              <p className="kicker">CREATOR PRODUCTS · OFFLINE IMPORT KIT</p>
               <h2>{creatorDrop?.name ?? "Turn imagination into a tiny collection."}</h2>
               <p>{capture ? "The agent studies the approved artwork, explains which products fit, and designs a draft storefront. An adult owns the final export." : "Approve a drawing first. Then the Creator Shop can recommend products without exposing camera frames or image pixels to the agent."}</p>
 

@@ -13,7 +13,7 @@ test("runtime verification discovers every registered WebMCP tool and executes a
   assert.match(runtime, /context\.executeTool\(probe, \{\}, \{ signal \}\)/);
   assert.match(runtime, /verification\?\.cameraDataIncluded !== false/);
   assert.match(page, /registerAndVerifyWebMCP\(context, tools, controller\.signal\)/);
-  assert.match(page, /WEBMCP VERIFIED/);
-  assert.match(page, /WEBMCP NEEDS CHROME/);
+  assert.match(page, /WEBMCP ✓/);
+  assert.match(page, /WEBMCP OFF/);
   assert.doesNotMatch(page, /DEMO READY|DEMO MODE/);
 });

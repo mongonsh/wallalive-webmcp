@@ -1527,3 +1527,132 @@ body {
   .story-passport-peek > i { padding: 9px 10px; font-size: 8px; }
   .reflection-routine label { align-items: start; flex-direction: column; gap: 4px; }
 }
+
+/* v45 — calm sky workspace: one clear canvas, honest platform state. */
+:root {
+  --ink: #17324a;
+  --cream: #f3f9ff;
+  --paper: #ffffff;
+  --coral: #ff7282;
+  --lime: #79cdf2;
+  --blue: #56b9e8;
+  --violet: #6f9fd2;
+  --sun: #cdeeff;
+  --line: rgba(23, 50, 74, .12);
+}
+
+body {
+  background:
+    radial-gradient(circle at 8% 2%, rgba(121, 205, 242, .28), transparent 30rem),
+    radial-gradient(circle at 92% 14%, rgba(205, 238, 255, .65), transparent 28rem),
+    linear-gradient(180deg, #ffffff 0, #f3f9ff 42%, #eef7ff 100%);
+  color: var(--ink);
+}
+
+.alive-shell { padding-bottom: 42px; }
+.alive-header {
+  min-height: 72px;
+  padding: 0 clamp(16px, 3.2vw, 46px);
+  background: rgba(255, 255, 255, .9);
+  box-shadow: 0 10px 36px rgba(44, 103, 147, .09);
+  backdrop-filter: blur(18px);
+}
+.alive-brand { color: var(--ink); }
+.alive-brand span { color: #4aaedc; }
+.alive-brand i { color: #70c9ef; }
+.mini-steps span { color: rgba(23, 50, 74, .38); }
+.ready-pill, .ready-pill.is-ready, .alive-header .ready-pill {
+  display: flex;
+  min-height: 38px;
+  border-radius: 999px;
+  background: #e2f4ff;
+  color: #245f85;
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+.ready-pill i { background: #58bce8; }
+.room-toggle, .merch-toggle { background: #e9f6ff; color: var(--ink); }
+.room-toggle { white-space: nowrap; }
+.room-toggle.is-live { background: #cdeeff; box-shadow: 0 0 0 5px rgba(121, 205, 242, .18); }
+.inspector-toggle, .agent-prompt { min-height: 42px; padding: 0 12px; border: 0; border-radius: 999px; background: transparent; color: var(--ink); cursor: pointer; font: 760 9px var(--font-geist-sans), sans-serif; }
+.judge-demo { background: #1d5f88; color: white; }
+.judge-demo:hover { box-shadow: 0 9px 20px rgba(29, 95, 136, .22); }
+.judge-prompt-banner { display: none !important; }
+
+.alive-layout {
+  width: min(1220px, 100%);
+  margin: 0 auto;
+  padding: clamp(24px, 4vw, 54px) clamp(16px, 3.4vw, 44px) 0;
+  display: block !important;
+}
+.steps-panel { display: none !important; }
+.magic-stage { width: 100%; max-width: none; padding: 0 0 38px; }
+.stage-copy { margin-bottom: 24px; align-items: end; gap: 28px; }
+.stage-copy > div:first-child { max-width: 720px; }
+.stage-copy .kicker { color: #4b87ad; }
+.stage-copy h1 {
+  max-width: 720px;
+  font-size: clamp(48px, 6vw, 78px);
+  line-height: .92;
+}
+.stage-copy h1 em { margin-left: 0; color: #318fc0; white-space: normal; }
+.stage-purpose { max-width: 520px; margin-top: 15px; color: rgba(23, 50, 74, .65); font-size: 14px; }
+.stage-ctas { max-width: 470px; justify-content: flex-end; }
+.stage-ctas button { min-height: 48px; padding-inline: 16px; }
+.primary-camera { background: #1d5f88; color: white; }
+.draw-wall-cta { background: #bde8fb; color: var(--ink); }
+.share-wall-cta { background: #dfedff; color: var(--ink); }
+.upload-camera, .stop-camera { background: white; color: var(--ink); box-shadow: 0 0 0 1px rgba(23, 50, 74, .1); }
+.merch-cta { background: #d8efff; color: var(--ink); }
+.notice { background: rgba(255, 255, 255, .86); color: rgba(23, 50, 74, .72); box-shadow: 0 8px 26px rgba(44, 103, 147, .07); }
+.notice i { background: #5dbde8; }
+.camera-frame { box-shadow: 0 30px 80px rgba(44, 103, 147, .17), 0 0 0 7px rgba(255, 255, 255, .72); }
+.demo-room { background: linear-gradient(150deg, #f8fcff 0 58%, #dcefff 58%); }
+.demo-room .plant { background: #75bde2; }
+.demo-room .plant::before, .demo-room .plant::after { background: #a8daf2; }
+.anatomy-summary { background: rgba(255, 255, 255, .92); box-shadow: 0 14px 35px rgba(44, 103, 147, .10); }
+.story-caption, .agent-panel, .right-tabs, .shared-room-live { background: #173e5c; }
+.agent-panel { box-shadow: -30px 0 100px rgba(23, 62, 92, .28); }
+.world-quest { background: #1c5278; box-shadow: 0 18px 45px rgba(44, 103, 147, .14); }
+.world-quest.is-complete { background: linear-gradient(115deg, #1c5278, #438db9); }
+.shared-room-backdrop { background: rgba(21, 58, 87, .44); }
+.shared-room-panel { background: #ffffff; box-shadow: 0 34px 90px rgba(44, 103, 147, .23); }
+.shared-room-illustration { background: radial-gradient(circle at 72% 24%, #d8f2ff 0 10%, transparent 11%), linear-gradient(145deg, #68c8ef, #92d9f5 52%, #d9f2ff); }
+.shared-room-illustration i { background: #ffffff; }
+.invite-ready { background: rgba(121, 205, 242, .22); }
+.store-browser i:nth-child(3) { background: #72c8ef; }
+.creator-agent-action, .merch-toggle { background: #e4f4ff; }
+.creator-agent-action.is-primary, .adult-export-boundary > button { background: #7dcdf0; }
+.adult-export-boundary { background: rgba(121, 205, 242, .13); }
+.shopify-handoff b { color: #8bd6f5; }
+
+@media (max-width: 1350px) {
+  .alive-header .ready-pill { display: flex; }
+  .alive-header { grid-template-columns: auto minmax(0, 1fr); }
+  .mini-steps { display: none; }
+  .header-actions { justify-content: flex-end; }
+  .stage-copy { align-items: flex-start; flex-direction: column; }
+  .stage-ctas { width: 100%; max-width: none; justify-content: flex-start; }
+}
+
+@media (max-width: 820px) {
+  .alive-header { min-height: 64px; }
+  .room-toggle, .merch-toggle, .inspector-toggle, .agent-prompt { display: none; }
+  .alive-header .ready-pill { min-height: 34px; padding: 0 9px; font-size: 7px; }
+  .judge-demo { min-height: 40px; padding: 0 11px; font-size: 8px; }
+  .alive-layout { padding: 24px 12px 0; }
+  .magic-stage { padding-top: 0; }
+  .stage-copy { gap: 17px; }
+  .stage-copy h1 { font-size: clamp(45px, 13.2vw, 64px); }
+  .stage-purpose { margin-top: 12px; }
+  .stage-ctas { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .stage-ctas button { width: 100%; min-width: 0; }
+  .camera-frame { box-shadow: 0 20px 52px rgba(44, 103, 147, .16), 0 0 0 5px rgba(255,255,255,.7); }
+}
+
+@media (max-width: 440px) {
+  .alive-brand { font-size: 18px; }
+  .alive-header .ready-pill { max-width: 112px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .stage-copy h1 { font-size: clamp(43px, 13.5vw, 58px); }
+  .notice { min-height: 38px; margin-bottom: 10px; }
+}
