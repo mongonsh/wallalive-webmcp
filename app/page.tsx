@@ -121,7 +121,7 @@ const toolNames = [
   ["list_collaboration_history", "READ"],
 ] as const;
 
-const suggestedJudgePrompt = "Inspect reconstruction readiness for every figure. If one needs work, request its visible human repair and wait. Otherwise inspect our shared room and Story Passport, then stage the next learning challenge using only verified actions and wait for my approval. Do not access the camera, share pixels, correct my art, grade me, publish products, or buy anything.";
+const suggestedJudgePrompt = "Help my child and me make a five-minute story from this drawing. Inspect the creative scene and shared room, guide us one visible step at a time, check any uncertain rig, then stage a three-beat story using only verified actions. Wait for us to approve playback. Never access camera frames or image pixels, grade the child, publish, or buy anything.";
 
 const worlds: Array<{ id: WorldId; label: string; short: string }> = [
   { id: "studio", label: "My room", short: "ROOM" },
@@ -1880,7 +1880,7 @@ export default function Home() {
       document.execCommand("copy");
       textarea.remove();
     }
-    setNotice("Suggested judge demo prompt copied.");
+    setNotice("Family prompt copied. Paste it into ChatGPT while this page is open.");
   }, []);
 
   const selectRigFigure = useCallback((index: number) => {
@@ -2180,13 +2180,14 @@ export default function Home() {
 
         <section className="magic-stage">
           <div className="stage-copy">
-            <div><p className="kicker">DRAW · WAKE · PLAY</p><h1>Draw it.<br /><em>Bring it to life.</em></h1><p className="stage-purpose">Draw, upload, or scan. Then play together in 3D.</p></div>
+            <div><p className="kicker">DRAW · WAKE · PLAY</p><h1>Draw it.<br /><em>Bring it to life.</em></h1><p className="stage-purpose">You draw. The agent guides. You approve. Draw, upload, or scan. Then play together in 3D.</p><div className="human-agent-loop"><span><b>YOU</b> draw</span><i>+</i><span><b>CHATGPT</b> guides</span><i>→</i><span><b>YOU</b> approve &amp; play</span></div></div>
             <div className="stage-ctas">
               {immersiveAR && character.created ? <button className="ar-button" onClick={enterAR}>ENTER REAL AR <span>◎</span></button> : null}
               {cameraState === "active" ? <button className="stop-camera" onClick={stopCamera}>STOP CAMERA</button> : null}
               {cameraState !== "active" && step === "ready" ? <button className="upload-camera" onClick={() => uploadRef.current?.click()}>UPLOAD</button> : null}
               {cameraState !== "active" && !capture ? <button className="draw-wall-cta" onClick={() => setDrawingWallOpen(true)}>DRAW <span>✦</span></button> : null}
               {cameraState !== "active" && !capture ? <button className="share-wall-cta" onClick={() => setSharedRoomOpen(true)}>TOGETHER <span>∞</span></button> : null}
+              <button className="webmcp-coach" onClick={() => { void copyDemoPrompt(); setInspectorOpen(true); setPanelTab("agent"); }}>ASK CHATGPT <span>✦</span></button>
               {capture ? <button className="merch-cta" onClick={openCreatorStudio}>MAKE PRODUCTS <span>↗</span></button> : null}
               <button className="primary-camera" onClick={primaryButton.action} disabled={cameraState === "requesting" || neuralBusy}>{cameraState === "requesting" ? "OPENING…" : neuralBusy ? "GENERATING…" : primaryButton.label}<span>↗</span></button>
             </div>
@@ -2300,7 +2301,7 @@ export default function Home() {
               <p>The agent reads each real rig, assigns compatible roles, and stages ensemble choreography. The child approves the final performance.</p>
               <div className="agent-call"><span>↳</span><div><b>{latestAgentActivity?.toolName ?? "inspect_creative_scene"}</b><small>{latestAgentActivity?.detail ?? "Shared state visible · Camera private"}</small></div></div>
               <blockquote>“{suggestedJudgePrompt}”</blockquote>
-              <button className="copy-prompt" onClick={copyDemoPrompt}>COPY JUDGE DEMO PROMPT <span>⧉</span></button>
+              <button className="copy-prompt" onClick={copyDemoPrompt}>COPY FAMILY PROMPT <span>⧉</span></button>
             </div>
           ) : null}
 
@@ -2434,7 +2435,7 @@ export default function Home() {
         onJoin={async (roomId, username) => { const result = await sharedRoom.joinRoom(roomId, username); record("CHILD", "Joined a shared drawing room", `@${result.username} joined room ${result.roomId}.`); }}
         onInvite={async (username) => { const result = await sharedRoom.prepareInvite(username); record("CHILD", "Prepared a private room invite", `Invite prepared for @${result.friend}; WallAlive did not send a message.`); return result; }}
         onLeave={() => { sharedRoom.leaveRoom(); record("CHILD", "Left the shared room", "The local artwork stayed in this browser tab."); }}
-        onOpenWall={() => { setSharedRoomOpen(false); setDrawingWallOpen(true); }}
+        onOpenWall={() => { setSharedRoomOpen(false); setDismissedInvite(search); setDrawingWallOpen(true); }}
       />
       {pendingUpload ? <div className="paper-picker-backdrop" role="dialog" aria-modal="true" aria-labelledby="paper-picker-title">
         <section className="paper-picker">

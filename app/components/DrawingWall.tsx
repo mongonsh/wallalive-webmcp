@@ -218,12 +218,13 @@ export function DrawingWall({ open, onClose, onMake3D, sharedSession = null, sha
   const historyRef = useRef<string[]>([]);
   const historyIndexRef = useRef(-1);
   const appliedSharedOperationsRef = useRef(new Set<string>());
+  const initializedWallRef = useRef<string | null>(null);
   const [tool, setTool] = useState<Tool>("brush");
   const [color, setColor] = useState("#18312e");
   const [size, setSize] = useState(18);
   const [historyIndex, setHistoryIndex] = useState(-1);
   const [historyLength, setHistoryLength] = useState(0);
-  const [status, setStatus] = useState("Draw one character—or a whole cast.");
+  const [status, setStatus] = useState("Start with one big character. Leave space around it.");
 
   const saveSnapshot = useCallback(() => {
     const canvas = canvasRef.current;
@@ -261,14 +262,20 @@ export function DrawingWall({ open, onClose, onMake3D, sharedSession = null, sha
     const canvas = canvasRef.current;
     const context = canvas?.getContext("2d");
     if (!canvas || !context) return;
+    const wallScope = sharedRoomId || "solo";
+    if (initializedWallRef.current === wallScope) {
+      setStatus(sharedRoomId ? `Room ${sharedRoomId} is live. Keep drawing together.` : "Your drawing is still here.");
+      return;
+    }
     context.fillStyle = "#ffffff";
     context.fillRect(0, 0, canvas.width, canvas.height);
+    initializedWallRef.current = wallScope;
     appliedSharedOperationsRef.current = new Set();
     historyRef.current = [canvas.toDataURL("image/png")];
     historyIndexRef.current = 0;
     setHistoryIndex(0);
     setHistoryLength(1);
-    setStatus(sharedRoomId ? `Room ${sharedRoomId} is live. Draw together.` : "Draw one character—or a whole cast.");
+    setStatus(sharedRoomId ? `Room ${sharedRoomId} is live. Draw together.` : "Start with one big character. Leave space around it.");
   }, [open, sharedRoomId]);
 
   useEffect(() => {
@@ -304,6 +311,7 @@ export function DrawingWall({ open, onClose, onMake3D, sharedSession = null, sha
   }, [color, size, tool]);
 
   const pointerDown = useCallback((event: React.PointerEvent<HTMLCanvasElement>) => {
+    event.preventDefault();
     const canvas = event.currentTarget;
     const context = canvas.getContext("2d", { willReadFrequently: true });
     if (!context) return;
@@ -333,6 +341,7 @@ export function DrawingWall({ open, onClose, onMake3D, sharedSession = null, sha
   }, [color, drawSegment, onSharedOperation, saveSnapshot, sharedSession, size, tool]);
 
   const pointerMove = useCallback((event: React.PointerEvent<HTMLCanvasElement>) => {
+    event.preventDefault();
     const canvas = event.currentTarget;
     const gesture = gestureRef.current;
     const context = canvas.getContext("2d");
@@ -361,7 +370,7 @@ export function DrawingWall({ open, onClose, onMake3D, sharedSession = null, sha
     const gesture = gestureRef.current;
     if (!gesture || gesture.pointerId !== event.pointerId) return;
     gestureRef.current = null;
-    event.currentTarget.releasePointerCapture(event.pointerId);
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
     if (sharedSession && onSharedOperation) {
       const operation: SharedDrawingOperation = {
         id: gesture.id,
@@ -459,6 +468,12 @@ export function DrawingWall({ open, onClose, onMake3D, sharedSession = null, sha
           </div>
         </header>
 
+        <div className="wall-guide" aria-label="Three steps to make a playable character">
+          <span><b>1</b> Draw one big character</span>
+          <span><b>2</b> Add a face and limbs</span>
+          <span><b>3</b> Make it 3D</span>
+        </div>
+
         <div className="wall-workspace">
           <aside className="wall-tools" aria-label="Drawing tools">
             {tools.map((item) => <button key={item.id} className={tool === item.id ? "active" : ""} onClick={() => setTool(item.id)} title={item.label}><i>{item.glyph}</i><span>{item.label}</span></button>)}
@@ -471,7 +486,7 @@ export function DrawingWall({ open, onClose, onMake3D, sharedSession = null, sha
               onPointerDown={pointerDown}
               onPointerMove={pointerMove}
               onPointerUp={pointerUp}
-              onPointerCancel={() => { gestureRef.current = null; }}
+              onPointerCancel={pointerUp}
               aria-label="Large drawing wall"
             />
             <div className="wall-canvas-status"><i />{status}</div>

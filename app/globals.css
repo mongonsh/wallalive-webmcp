@@ -643,7 +643,7 @@ body::before {
   height: min(920px, calc(100dvh - 24px));
   min-height: 0;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
   overflow: hidden;
   border: 1px solid rgba(255,255,255,.3);
   background: var(--cream);
@@ -664,6 +664,9 @@ body::before {
 .wall-history { display: flex; gap: 6px; }
 .wall-history button { min-width: 43px; height: 43px; padding: 0 12px; border: 1px solid var(--line); background: transparent; cursor: pointer; font: 850 9px var(--mono); }
 .wall-history button:last-child { font: 27px/1 var(--font-geist-sans); }
+.wall-guide { min-height: 42px; padding: 7px 18px; display: flex; align-items: center; justify-content: center; gap: clamp(12px, 4vw, 52px); border-bottom: 1px solid var(--line); background: #eef8ff; color: #355f7b; font: 760 9px var(--font-geist-sans), sans-serif; }
+.wall-guide span { display: flex; align-items: center; gap: 7px; }
+.wall-guide b { width: 23px; height: 23px; display: grid; place-items: center; border-radius: 50%; background: #278ec2; color: white; font-size: 9px; }
 .wall-workspace { min-height: 0; display: grid; grid-template-columns: 84px minmax(0, 1fr); background: #d7cbb7; }
 .wall-tools { min-height: 0; padding: 8px; overflow-y: auto; display: grid; align-content: start; gap: 5px; border-right: 1px solid rgba(24,49,46,.18); background: var(--paper); }
 .wall-tools button { min-height: 54px; padding: 6px 2px; border: 1px solid transparent; display: grid; place-items: center; gap: 2px; background: transparent; cursor: pointer; font: 750 7px var(--mono); }
@@ -682,11 +685,11 @@ body::before {
 }
 .wall-canvas-wrap canvas {
   display: block;
-  width: 100%;
-  height: 100%;
-  max-width: 1400px;
-  max-height: 850px;
-  object-fit: contain;
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: 100%;
+  aspect-ratio: 1400 / 850;
   background: white;
   box-shadow: 0 18px 55px rgba(24,49,46,.2);
   cursor: crosshair;
@@ -719,9 +722,10 @@ body::before {
   .wall-history button { min-width: 36px; height: 38px; padding: 0 8px; }
   .wall-history button:nth-child(3) { display: none; }
   .wall-workspace { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); }
-  .wall-tools { padding: 6px; overflow-x: auto; overflow-y: hidden; grid-auto-flow: column; grid-auto-columns: 55px; border-right: 0; border-bottom: 1px solid var(--line); }
+  .wall-tools { padding: 6px; overflow-x: auto; overflow-y: hidden; grid-auto-flow: column; grid-auto-columns: 66px; border-right: 0; border-bottom: 1px solid var(--line); }
   .wall-tools button { min-height: 47px; }
-  .wall-tools button span { display: none; }
+  .wall-tools button span { display: block; }
+  .wall-guide { min-height: 38px; padding: 5px 8px; justify-content: flex-start; gap: 12px; overflow-x: auto; white-space: nowrap; }
   .wall-canvas-wrap { padding: 8px; }
   .wall-canvas-status { bottom: 14px; max-width: calc(100% - 28px); overflow: hidden; text-overflow: ellipsis; }
   .drawing-wall > footer { min-height: 112px; padding: 8px; grid-template-columns: minmax(0, 1fr) auto; gap: 9px; }
@@ -1450,8 +1454,12 @@ body {
 .room-invite { padding: 22px 32px 12px; }
 .room-invite label > div { display: grid; grid-template-columns: 1fr auto; gap: 8px; }
 .room-invite label button, .invite-ready button { padding: 0 17px; border: 0; border-radius: 14px; background: #ff765e; color: white; cursor: pointer; font: 800 9px var(--font-geist-sans), sans-serif; letter-spacing: .07em; }
-.invite-ready { display: flex; justify-content: space-between; align-items: center; margin-top: 9px; padding: 12px 15px; border-radius: 14px; background: rgba(200,241,90,.23); font: 650 12px var(--font-geist-sans), sans-serif; }
+.invite-ready { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; margin-top: 9px; padding: 9px; border-radius: 14px; background: #e9f7ff; font: 650 12px var(--font-geist-sans), sans-serif; }
+.invite-ready input { min-width: 0; min-height: 40px; border: 0; border-radius: 10px; padding: 0 11px; background: white; color: #355f7b; font: 600 10px var(--font-geist-sans), sans-serif; }
 .invite-ready button { min-height: 32px; background: var(--ink); }
+.invite-intro { margin: 0 0 2px; color: #4d6d82; font: 600 13px/1.45 var(--font-geist-sans), sans-serif; }
+.room-steps { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 9px; }
+.room-steps span { padding: 7px 9px; border-radius: 999px; background: #e9f7ff; color: #35647f; font: 750 9px var(--font-geist-sans), sans-serif; }
 .room-open-wall { width: calc(100% - 64px); margin: 4px 32px 8px; background: var(--lime); color: var(--ink); }
 .room-leave { display: block; margin: 0 auto 18px; border: 0; background: transparent; color: rgba(22,59,57,.55); cursor: pointer; font: 650 11px var(--font-geist-sans), sans-serif; }
 .shared-room-panel > footer { display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; align-items: center; padding: 17px 32px 23px; border-top: 1px solid rgba(22,59,57,.08); color: rgba(22,59,57,.66); font: 600 11px var(--font-geist-sans), sans-serif; }
@@ -1751,4 +1759,21 @@ body {
   .paper-picker-actions button:first-child { flex-basis: 100%; }
   .cast-check { grid-template-columns: 1fr; gap: 10px; }
   .part-editor { border-radius: 26px 26px 0 0; }
+}
+
+/* v48 — child-first guidance and a visible human–agent handoff. */
+.human-agent-loop { margin-top: 13px; display: flex; align-items: center; flex-wrap: wrap; gap: 6px; color: #52748b; font: 700 9px var(--font-geist-sans), sans-serif; }
+.human-agent-loop span { padding: 7px 10px; border-radius: 999px; background: rgba(255,255,255,.78); box-shadow: 0 5px 16px rgba(44,103,147,.07); }
+.human-agent-loop b { color: #196f9d; }
+.human-agent-loop i { color: #75afd0; font-style: normal; }
+.webmcp-coach { border: 0 !important; border-radius: 999px; background: #e5f5ff; color: #174e70; }
+.webmcp-coach span { color: #278ec2; }
+
+@media (max-width: 820px) {
+  .human-agent-loop { margin-top: 10px; gap: 4px; }
+  .human-agent-loop span { padding: 6px 8px; font-size: 8px; }
+}
+
+@media (max-width: 430px) {
+  .invite-ready { grid-template-columns: 1fr; }
 }

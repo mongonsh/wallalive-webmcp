@@ -43,3 +43,35 @@ test("the drawing wall replays remote operations and prevents divergent shared u
   assert.match(source, /onSharedOperation/);
   assert.match(source, /Undo is disabled in a live shared room/);
 });
+
+test("the mobile drawing wall keeps touch coordinates aligned and preserves unfinished work", async () => {
+  const source = await readFile(new URL("../app/components/DrawingWall.tsx", import.meta.url), "utf8");
+  const css = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
+  const canvasRule = css.match(/\.wall-canvas-wrap canvas \{[\s\S]*?\n\}/)?.[0] ?? "";
+
+  assert.match(source, /initializedWallRef/);
+  assert.match(source, /onPointerCancel=\{pointerUp\}/);
+  assert.match(source, /className="wall-guide"/);
+  assert.match(canvasRule, /width:\s*auto/);
+  assert.match(canvasRule, /height:\s*auto/);
+  assert.match(canvasRule, /aspect-ratio:\s*1400\s*\/\s*850/);
+  assert.doesNotMatch(canvasRule, /object-fit:\s*contain/);
+});
+
+test("an invitation wins over a stale room session and explains the three-step handoff", async () => {
+  const panel = await readFile(new URL("../app/components/SharedRoomPanel.tsx", import.meta.url), "utf8");
+  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  assert.match(panel, /const joiningInvitation = Boolean\(invitedRoom/);
+  assert.match(panel, /!session \|\| joiningInvitation/);
+  assert.match(panel, /JOIN THIS ROOM/);
+  assert.match(panel, /SHARE INVITE/);
+  assert.match(panel, /1 · Share link/);
+  assert.match(page, /onOpenWall=\{\(\) => \{ setSharedRoomOpen\(false\); setDismissedInvite\(search\); setDrawingWallOpen\(true\); \}\}/);
+});
+
+test("the first screen states the human-agent value in one sentence", async () => {
+  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  assert.match(page, /You draw\. The agent guides\. You approve\./);
+  assert.match(page, /ASK CHATGPT/);
+  assert.match(page, /COPY FAMILY PROMPT/);
+});
