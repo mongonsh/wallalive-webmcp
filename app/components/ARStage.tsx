@@ -9,15 +9,16 @@ import { RoundedBoxGeometry } from "three/addons/geometries/RoundedBoxGeometry.j
 import { selectAnimatableRigParts, type CharacterRig, type ContourPoint, type DrawingExtraction, type LearnedDepthField, type SkeletonPoint } from "../lib/drawing";
 import { buildArtworkShellGeometry } from "../lib/artwork-shell";
 import { hasRecognizableArtworkSurface } from "../lib/mesh-materials";
+import { resolvePaintProjection, type ModelPaintBrush, type ModelPaintTool } from "../lib/model-paint";
 import { disposeObject, prepareNeuralCharacter, type NeuralRigMap, type NeuralSemanticMap, type RiggedAssetInfo } from "../lib/rigged-model";
+
+export type { ModelPaintBrush, ModelPaintTool } from "../lib/model-paint";
 
 export type CharacterAction = "idle" | "wave" | "dance" | "hop" | "walk" | "hide" | "spin" | "float";
 export type ARWorld = "studio" | "storybook" | "wizard" | "museum";
 export type LightingMood = "cyberpunk-neon" | "sunset-warm" | "moonlight";
 export type CameraPreset = "cinematic-orbit" | "low-angle-hero" | "overhead";
 export type WorldObjectInteraction = { id: string; label: string; verb: string; story: string; world: ARWorld };
-export type ModelPaintTool = "brush" | "spray" | "oil" | "spill";
-export type ModelPaintBrush = { tool: ModelPaintTool; color: string; size: number };
 export type ModelPaintInspection = {
   strokeCount: number;
   paintedSurfaceCount: number;
@@ -686,12 +687,14 @@ function createModelPainter(renderer: THREE.WebGLRenderer, camera: THREE.Perspec
   let enabled = false;
 
   const materialForHit = (hit: THREE.Intersection<THREE.Object3D>) => {
-    if (!(hit.object instanceof THREE.Mesh) || !hit.uv) return null;
+    if (!(hit.object instanceof THREE.Mesh)) return null;
+    const projection = resolvePaintProjection({ hasUv: Boolean(hit.uv), hasFace: Boolean(hit.face) });
+    if (!projection) return null;
     const materials = Array.isArray(hit.object.material) ? hit.object.material : [hit.object.material];
     const materialIndex = hit.face?.materialIndex ?? 0;
     const material = materials[materialIndex] as PaintableMaterial | undefined;
     if (!material || !("color" in material || "map" in material)) return null;
-    return { material, mesh: hit.object, label: hit.object.name || "3D character" };
+    return { material, mesh: hit.object, label: hit.object.name || "3D character", projection };
   };
 
   const drawOriginalSurface = (surface: TexturePaintSurface) => {
@@ -981,7 +984,7 @@ function createModelPainter(renderer: THREE.WebGLRenderer, camera: THREE.Perspec
       if (!target) return { painted: false };
       const normalizedPressure = THREE.MathUtils.clamp(pressure || 0.5, 0.15, 1);
       let point: PaintedPoint;
-      if (hit.uv) {
+      if (target.projection === "texture" && hit.uv) {
         const surface = ensureSurface(target.material);
         if (!surface) return { painted: false };
         point = {
@@ -993,7 +996,7 @@ function createModelPainter(renderer: THREE.WebGLRenderer, camera: THREE.Perspec
         };
         const previous = activeStroke.points.at(-1);
         paintPoint(surface, point, activeStroke.brush, previous?.kind === "texture" && previous.surfaceKey === point.surfaceKey ? previous : undefined);
-      } else if (hit.face) {
+      } else if (target.projection === "vertex" && hit.face) {
         const surface = ensureVertexSurface(target.mesh);
         if (!surface) return { painted: false };
         point = { kind: "vertex", surfaceKey: surface.key, face: [hit.face.a, hit.face.b, hit.face.c], pressure: normalizedPressure };

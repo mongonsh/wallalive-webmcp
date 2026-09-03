@@ -13,6 +13,7 @@ import { createBundledAniGenAsset, disposeNeuralAsset, generateAniGenAsset, isAn
 import { assessReconstructionReadiness } from "./lib/character-quality";
 import { getAccessibleWorldInteraction } from "./lib/world-interactions";
 import { buildLearningProgress, type LearningReflection, type ReflectionRevision } from "./lib/learning-progress";
+import { createPaintSoundEngine, type PaintSoundEngine } from "./lib/model-paint";
 import type { RiggedAssetInfo } from "./lib/rigged-model";
 import {
   CREATOR_PRODUCT_IDS,
@@ -230,10 +231,11 @@ export default function Home() {
   const lightingMoodRef = useRef<LightingMood>("sunset-warm");
   const cameraPresetRef = useRef<CameraPreset>("cinematic-orbit");
   const worldInteractionActorRef = useRef<{ actor: Actor; toolName?: string }>({ actor: "CHILD" });
-  const paintGestureRef = useRef<{ pointerId: number; painted: boolean } | null>(null);
+  const paintGestureRef = useRef<{ pointerId: number; painted: boolean; soundActive: boolean } | null>(null);
   const paintAdventureRef = useRef<PaintAdventure | null>(null);
   const paintBrushRef = useRef<ModelPaintBrush>({ tool: "brush", color: "#42a5f5", size: 0.42 });
   const paintInspectionRef = useRef<ModelPaintInspection>(emptyPaintInspection);
+  const paintSoundRef = useRef<PaintSoundEngine | null>(null);
 
   const [step, setStep] = useState<AppStep>("ready");
   const [cameraState, setCameraState] = useState<CameraState>("idle");
@@ -287,6 +289,7 @@ export default function Home() {
   const [paintBrush, setPaintBrush] = useState<ModelPaintBrush>({ tool: "brush", color: "#42a5f5", size: 0.42 });
   const [paintInspection, setPaintInspection] = useState<ModelPaintInspection>(emptyPaintInspection);
   const [paintAdventure, setPaintAdventure] = useState<PaintAdventure | null>(null);
+  const [paintSoundEnabled, setPaintSoundEnabled] = useState(true);
   const sharedRoom = useSharedRoom();
   const prepareRoomInvite = sharedRoom.prepareInvite;
   const search = useSyncExternalStore(
@@ -357,6 +360,7 @@ export default function Home() {
     streamRef.current?.getTracks().forEach((track) => track.stop());
     neuralAbortRef.current?.abort();
     showAbortRef.current?.abort();
+    paintSoundRef.current?.dispose();
     disposeNeuralAsset(neuralAssetRef.current);
     if (pendingUploadRef.current?.url.startsWith("blob:")) URL.revokeObjectURL(pendingUploadRef.current.url);
   }, []);
@@ -1996,7 +2000,9 @@ export default function Home() {
         (event.clientY - bounds.top) / Math.max(1, bounds.height),
         event.pressure || 0.5,
       );
-      paintGestureRef.current = { pointerId: event.pointerId, painted: Boolean(result?.painted) };
+      const pressure = event.pressure || 0.5;
+      const soundActive = Boolean(result?.painted && paintSoundEnabled && (paintSoundRef.current ??= createPaintSoundEngine()).start(paintBrushRef.current.tool, pressure, paintBrushRef.current.size));
+      paintGestureRef.current = { pointerId: event.pointerId, painted: Boolean(result?.painted), soundActive };
       event.currentTarget.setPointerCapture(event.pointerId);
       if (!result?.painted) setNotice("Touch the 3D character to paint it. Empty world space stays clean.");
       return;
@@ -2004,7 +2010,7 @@ export default function Home() {
     if (characterRef.current.created && event.target instanceof HTMLCanvasElement) return;
     rotateGestureRef.current = { pointerId: event.pointerId, lastX: event.clientX, lastY: event.clientY, moved: false };
     event.currentTarget.setPointerCapture(event.pointerId);
-  }, [paintStudioOpen]);
+  }, [paintSoundEnabled, paintStudioOpen]);
 
   const handleStagePointerMove = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     const paintGesture = paintGestureRef.current;
@@ -2016,7 +2022,16 @@ export default function Home() {
         (event.clientY - bounds.top) / Math.max(1, bounds.height),
         event.pressure || 0.5,
       );
-      if (result?.painted) paintGesture.painted = true;
+      if (result?.painted) {
+        paintGesture.painted = true;
+        if (paintSoundEnabled) {
+          if (paintGesture.soundActive) paintSoundRef.current?.update(event.pressure || 0.5, paintBrushRef.current.size);
+          else paintGesture.soundActive = Boolean((paintSoundRef.current ??= createPaintSoundEngine()).start(paintBrushRef.current.tool, event.pressure || 0.5, paintBrushRef.current.size));
+        }
+      } else if (paintGesture.soundActive) {
+        paintSoundRef.current?.stop();
+        paintGesture.soundActive = false;
+      }
       return;
     }
     if (event.target instanceof HTMLCanvasElement) return;
@@ -2029,12 +2044,13 @@ export default function Home() {
     gesture.lastY = event.clientY;
     const bounds = event.currentTarget.getBoundingClientRect();
     stageRef.current?.rotateBy((dx / Math.max(1, bounds.width)) * Math.PI * 1.7, (dy / Math.max(1, bounds.height)) * Math.PI * 1.15);
-  }, [cameraState, paintStudioOpen]);
+  }, [cameraState, paintSoundEnabled, paintStudioOpen]);
 
   const handleStagePointerUp = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     const paintGesture = paintGestureRef.current;
     if (paintGesture?.pointerId === event.pointerId) {
       paintGestureRef.current = null;
+      if (paintBrushRef.current.tool !== "spill") paintSoundRef.current?.stop();
       const next = stageRef.current?.endPaintStroke() ?? emptyPaintInspection;
       commitPaintInspection(next);
       if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
@@ -2059,6 +2075,7 @@ export default function Home() {
     rotateGestureRef.current = null;
     if (paintGestureRef.current?.pointerId === event.pointerId) {
       paintGestureRef.current = null;
+      paintSoundRef.current?.stop();
       commitPaintInspection(stageRef.current?.endPaintStroke() ?? emptyPaintInspection);
     }
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
@@ -2459,7 +2476,7 @@ export default function Home() {
               <div className="paint-tools" role="group" aria-label="Paint texture">{modelPaintTools.map((item) => <button key={item.id} className={paintBrush.tool === item.id ? "active" : ""} onClick={() => choosePaintBrush({ ...paintBrushRef.current, tool: item.id })}><i>{item.glyph}</i>{item.label}</button>)}</div>
               <div className="paint-colors" role="group" aria-label="Paint color">{[...new Set([...(paintAdventure?.palette ?? []), ...modelPaintPalette])].slice(0, 10).map((color) => <button key={color} className={paintBrush.color === color ? "active" : ""} style={{ "--paint-color": color } as CSSProperties} onClick={() => choosePaintBrush({ ...paintBrushRef.current, color })} aria-label={`Choose ${color}`} />)}</div>
               <label className="paint-size"><span>SIZE</span><input type="range" min="0.08" max="1" step="0.02" value={paintBrush.size} onChange={(event) => choosePaintBrush({ ...paintBrushRef.current, size: Number(event.target.value) })} /><i style={{ "--brush-size": `${10 + paintBrush.size * 20}px`, "--paint-color": paintBrush.color } as CSSProperties} /></label>
-              <footer className="paint-history"><button onClick={undoModelPaint} disabled={!paintInspection.strokeCount}>↶ UNDO</button><button onClick={resetModelPaint} disabled={!paintInspection.strokeCount}>CLEAR</button><small>Original stays safe</small></footer>
+              <footer className="paint-history"><button onClick={undoModelPaint} disabled={!paintInspection.strokeCount}>↶ UNDO</button><button onClick={resetModelPaint} disabled={!paintInspection.strokeCount}>CLEAR</button><button aria-pressed={paintSoundEnabled} aria-label={`Paint sounds ${paintSoundEnabled ? "on" : "off"}`} onClick={() => { const next = !paintSoundEnabled; setPaintSoundEnabled(next); if (!next) paintSoundRef.current?.stop(); setNotice(`Paint sounds ${next ? "on" : "off"}.`); }}>{paintSoundEnabled ? "🔊 SOUND" : "🔇 MUTED"}</button><small>Original stays safe</small></footer>
             </section> : null}
             {neuralConsentVisible ? <div className="neural-consent" role="dialog" aria-modal="true" aria-labelledby="neural-consent-title" onPointerDown={(event) => event.stopPropagation()}>
               <span>CHOOSE YOUR QUALITY</span><h2 id="neural-consent-title">Wake {captureEnsemble.length > 1 ? "the whole cast" : "this drawing"}</h2><p>{ensembleReadiness.some((report) => !report.motionReady) ? "A clean static spatial puppet is available now. Check every uncertain rig before expecting arms or legs to move." : captureEnsemble.length > 1 ? "Every selected figure passed the motion gate. Full sculpt currently handles one figure at a time." : "Use an instant private spatial puppet—or approve a full AI sculpt with generated unseen views."}</p><div><button onClick={startLocalReconstruction}>{ensembleReadiness.every((report) => report.motionReady) ? "PLAYABLE PUPPET · PRIVATE" : "STATIC PUPPET · PRIVATE"}</button>{captureEnsemble.length === 1 ? <button onClick={startNeuralReconstruction}>FULL 3D SCULPT · AI</button> : null}<button onClick={() => { setNeuralConsentVisible(false); openRigEditor(ensembleReadiness.findIndex((report) => !report.motionReady) < 0 ? 0 : ensembleReadiness.findIndex((report) => !report.motionReady)); }}>CHECK SKELETON</button></div>

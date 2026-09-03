@@ -7,6 +7,7 @@ import { extractMedialSkeleton, inferSemanticRig, inkAroundEnclosedRegion, mapCo
 import { decodeTopology } from "../app/lib/learned-parts.ts";
 import { prepareNeuralCharacter, remapDominantHuePixels } from "../app/lib/rigged-model.ts";
 import { buildLearningProgress } from "../app/lib/learning-progress.ts";
+import { PAINT_SOUND_PROFILES, resolvePaintProjection } from "../app/lib/model-paint.ts";
 
 async function render() {
   const workerUrl = new URL("../dist/server/index.js", import.meta.url);
@@ -153,6 +154,33 @@ test("registers nineteen goal-level WebMCP collaboration tools with 3D paint, re
   assert.match(stage, /brush\.tool === "spray"/);
   assert.match(stage, /brush\.tool === "spill"/);
   assert.match(stage, /brush\.tool === "oil"/);
+});
+
+test("paints both UV textures and the vertex-colored no-UV demo mesh with surface-matched audio", async () => {
+  assert.equal(resolvePaintProjection({ hasUv: true, hasFace: true }), "texture");
+  assert.equal(resolvePaintProjection({ hasUv: false, hasFace: true }), "vertex");
+  assert.equal(resolvePaintProjection({ hasUv: false, hasFace: false }), null);
+  assert.equal(PAINT_SOUND_PROFILES.spray.filter, "highpass");
+  assert.ok(PAINT_SOUND_PROFILES.spray.gain > PAINT_SOUND_PROFILES.brush.gain);
+  assert.equal(PAINT_SOUND_PROFILES.spill.loop, false);
+
+  const asset = await readFile(new URL("../public/anigen-demo.glb", import.meta.url));
+  const gltf = await new Promise((resolve, reject) => {
+    new GLTFLoader().parse(asset.buffer.slice(asset.byteOffset, asset.byteOffset + asset.byteLength), "", resolve, reject);
+  });
+  const demoMesh = gltf.scene.getObjectByProperty("isMesh", true);
+  assert.ok(demoMesh?.geometry.getAttribute("color"), "demo must retain its authored vertex colors");
+  assert.equal(Boolean(demoMesh?.geometry.getAttribute("uv")), false, "regression fixture intentionally has no UV channel");
+  assert.equal(resolvePaintProjection({ hasUv: Boolean(demoMesh?.geometry.getAttribute("uv")), hasFace: true }), "vertex");
+
+  const stage = await readFile(new URL("../app/components/ARStage.tsx", import.meta.url), "utf8");
+  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  assert.doesNotMatch(stage, /instanceof THREE\.Mesh\) \|\| !hit\.uv/);
+  assert.match(stage, /resolvePaintProjection\(\{ hasUv: Boolean\(hit\.uv\), hasFace: Boolean\(hit\.face\) \}\)/);
+  assert.match(stage, /target\.projection === "vertex" && hit\.face/);
+  assert.match(page, /result\?\.painted && paintSoundEnabled/);
+  assert.match(page, /paintSoundRef\.current\?\.stop\(\)/);
+  assert.match(page, /Paint sounds \$\{next \? "on" : "off"\}/);
 });
 
 test("keeps submission claims aligned with the shipped nineteen-tool creative, educational, and commerce loops", async () => {
