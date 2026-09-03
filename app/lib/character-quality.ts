@@ -145,10 +145,11 @@ export function assessReconstructionReadiness(extraction: DrawingExtraction): Re
     && topology.nodes.filter((node) => node.confidence >= 0.42).length >= 3
     && topology.edges.filter((edge) => edge.confidence >= 0.38).length >= 2,
   );
-  const learnedBranches = extraction.rig.parts.filter((part) => (
+  const trustedBranches = extraction.rig.parts.filter((part) => (
     ["arm", "hand", "leg", "foot", "wing", "fin", "tail", "tentacle", "trunk", "branch", "linkage"].includes(part.kind)
-    && ["learned-model", "learned-pose", "learned-topology"].includes(part.source)
+    && (["learned-model", "learned-pose", "learned-topology"].includes(part.source) || part.reviewed === true)
     && part.confidence >= 0.62
+    && (!part.reviewed || !["arm", "leg", "wing", "fin", "tail", "tentacle", "trunk", "branch", "linkage"].includes(part.kind) || (part.path?.length ?? 0) >= 2)
   )).length;
 
   const blockers: string[] = [];
@@ -160,10 +161,10 @@ export function assessReconstructionReadiness(extraction: DrawingExtraction): Re
   if (areaPercent > maximumTrustedArea) blockers.push("The selection still contains too much paper or background.");
   if (extraction.contour.length < 12) blockers.push("The outline is too simple to preserve the drawing safely.");
   if (!poseReady && !topologyReady) warnings.push("The automatic skeleton is not reliable yet. Review the joints before asking it to move.");
-  if (!poseReady && !topologyReady && learnedBranches < 2) warnings.push("Arms and legs were not verified. Movement stays locked instead of inventing anatomy.");
+  if (!poseReady && !topologyReady && trustedBranches < 1) warnings.push("Arms and legs were not verified. Movement stays locked instead of inventing anatomy.");
 
   const cutoutReady = blockers.length === 0;
-  const motionReady = cutoutReady && (poseReady || topologyReady) && learnedBranches >= 1;
+  const motionReady = cutoutReady && (poseReady || topologyReady || trustedBranches >= 1) && trustedBranches >= 1;
   const score = clamp01(
     validation.score * 0.46
     + cutoutConfidence * 0.28

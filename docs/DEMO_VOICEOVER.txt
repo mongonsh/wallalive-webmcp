@@ -2,7 +2,7 @@ Children already turn simple marks into stories. WallAlive asks: what if those c
 
 A child explicitly opens the camera and approves one drawing. Local math isolates the centered ink, closes small gaps, flood-fills the silhouette, and traces its boundary. An interior distance field inflates wide regions more than narrow ones. Three.js Marching Cubes turns that 64-cubed field into one closed rounded mesh with a curved artwork front, real sides, and a generated back. Watch the full turn: this is volume, not a thick cutout. Nothing is uploaded, and no eyes or limbs are invented.
 
-Fourteen strict WebMCP tools let a browser agent inspect a shared room, verified character abilities, and the private Story Passport; prepare an invite without sending it; stage a cooperative story; touch listed 3D quest objects; recommend artwork-aware products; and prepare a creator-credited Shopify handoff. Human and agent actions change the same visible state, with every author shown in history and every sensitive step reserved for a person.
+Seventeen strict WebMCP tools let a browser agent inspect each figure's reconstruction readiness, request a visible human repair, adapt the next Story Passport challenge, coordinate a shared room, stage a cooperative story, touch listed 3D quest objects, recommend artwork-aware products, and prepare a creator-credited Shopify handoff. Human and agent actions change the same visible state, with every author shown in history and every sensitive step reserved for a person.
 
 The privacy boundary is the point: the camera is not a tool. An agent cannot open it, capture a frame, or upload a child’s room. The child chooses what enters the shared imagination.
 

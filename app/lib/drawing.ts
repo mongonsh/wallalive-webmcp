@@ -219,6 +219,23 @@ export type CharacterTargetCandidate = {
   span: number;
 };
 
+/**
+ * Adds an explicit human-selected character target without allowing accidental
+ * double taps to create duplicate figures. Explicit targets are deliberately
+ * kept in selection order so a child can identify "character 1", "character
+ * 2", and so on before any recognition work starts.
+ */
+export function appendCaptureTarget(
+  targets: CaptureTarget[],
+  target: CaptureTarget,
+  maximum = 6,
+  minimumDistance = 0.065,
+): CaptureTarget[] {
+  const next = { x: Math.min(1, Math.max(0, target.x)), y: Math.min(1, Math.max(0, target.y)) };
+  if (targets.some((existing) => Math.hypot(existing.x - next.x, existing.y - next.y) < minimumDistance)) return targets;
+  return [...targets, next].slice(0, Math.max(1, maximum));
+}
+
 type RGB = { r: number; g: number; b: number };
 type Component = { pixels: number[]; minX: number; minY: number; maxX: number; maxY: number; centerX: number; centerY: number };
 

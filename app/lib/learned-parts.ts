@@ -1086,6 +1086,20 @@ async function recognizeTargetEnsemble(
   return recognized;
 }
 
+/**
+ * Recognize only the figures a person explicitly selected. This is the
+ * reliability-first path for busy paper photos: no connected-component scan
+ * is allowed to promote labels, paper edges, or nearby decoration into cast
+ * members.
+ */
+export async function recognizeDrawingsAtImageTargets(
+  imageUrl: string,
+  targets: CaptureTarget[],
+): Promise<DrawingExtraction[]> {
+  if (!targets.length) throw new Error("Choose at least one character before scanning.");
+  return recognizeTargetEnsemble(targets.slice(0, 6), (target) => recognizeDrawingFromImageUrl(imageUrl, target));
+}
+
 export function areDuplicateRecognizedDrawings(left: DrawingExtraction, right: DrawingExtraction) {
   const leftTarget = left.sourceTarget ?? { x: 0.5, y: 0.5 };
   const rightTarget = right.sourceTarget ?? { x: 0.5, y: 0.5 };
@@ -1111,6 +1125,19 @@ export async function recognizeDrawingsFromVideo(
 ): Promise<DrawingExtraction[]> {
   const targets = discoverCharacterTargetsFromVideo(video, primary, maximum);
   return recognizeTargetEnsemble(targets, (target) => recognizeDrawingFromVideo(video, target));
+}
+
+/**
+ * Camera equivalent of the explicit image-target path. Only people-selected
+ * targets may become cast members; wall texture, labels, and nearby drawings
+ * are never auto-promoted by connected-component discovery.
+ */
+export async function recognizeDrawingsAtVideoTargets(
+  video: HTMLVideoElement,
+  targets: CaptureTarget[],
+): Promise<DrawingExtraction[]> {
+  if (!targets.length) throw new Error("Tap at least one character before capturing.");
+  return recognizeTargetEnsemble(targets.slice(0, 6), (target) => recognizeDrawingFromVideo(video, target));
 }
 
 export async function recognizeDrawingsFromImageUrl(

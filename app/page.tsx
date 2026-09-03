@@ -6,9 +6,9 @@ import type { CSSProperties } from "react";
 import type { ARStageHandle, ARWorld, CameraPreset, CharacterAction, LightingMood, WorldObjectInteraction } from "./components/ARStage";
 import { DrawingWall } from "./components/DrawingWall";
 import { SharedRoomPanel } from "./components/SharedRoomPanel";
-import { createAniGenDemoDrawing, createDemoDoodle, POSE_SKELETON_EDGES, selectAnimatableRigParts, type CaptureTarget, type DrawingExtraction, type SemanticPart, type SemanticPartKind, type SemanticSide } from "./lib/drawing";
+import { appendCaptureTarget, createAniGenDemoDrawing, createDemoDoodle, POSE_SKELETON_EDGES, selectAnimatableRigParts, type CaptureTarget, type DrawingExtraction, type SemanticPart, type SemanticPartKind, type SemanticSide } from "./lib/drawing";
 import { inspectCharacterCapabilities as buildCharacterCapabilities, SAFE_SHOW_ACTIONS, validateCharacterMove, type CharacterCapability } from "./lib/creative-show";
-import { recognizeDrawingParts, recognizeDrawingsFromImageUrl, recognizeDrawingsFromVideo } from "./lib/learned-parts";
+import { recognizeDrawingParts, recognizeDrawingsAtImageTargets, recognizeDrawingsAtVideoTargets } from "./lib/learned-parts";
 import { createBundledAniGenAsset, disposeNeuralAsset, generateAniGenAsset, isAniGenUnavailableError, type NeuralAsset, type NeuralProgress } from "./lib/anigen";
 import { assessReconstructionReadiness } from "./lib/character-quality";
 import { getAccessibleWorldInteraction } from "./lib/world-interactions";
@@ -61,7 +61,7 @@ type Activity = {
   toolName?: string;
 };
 
-type PendingUpload = { url: string; fileName: string };
+type PendingUpload = { url: string; fileName: string; origin: "photo" | "wall" };
 
 type ShowMove = { characterIndex: number; action: CharacterAction };
 type ShowBeat = { caption: string; durationMs: number; world?: WorldId; moves: ShowMove[] };
@@ -104,7 +104,10 @@ const initialCharacter: CharacterState = {
 const toolNames = [
   ["inspect_creative_scene", "READ"],
   ["inspect_learning_progress", "READ"],
+  ["stage_next_learning_challenge", "STAGE"],
   ["inspect_character_capabilities", "READ"],
+  ["inspect_reconstruction_readiness", "READ"],
+  ["request_character_repair", "REQUEST"],
   ["request_rigged_3d_cast", "REQUEST"],
   ["stage_magic_show", "STAGE"],
   ["direct_live_ensemble", "LIVE"],
@@ -118,7 +121,7 @@ const toolNames = [
   ["list_collaboration_history", "READ"],
 ] as const;
 
-const suggestedJudgePrompt = "Inspect our shared room, creative scene, verified character abilities, and Story Passport. Stage a four-beat cooperation quest using only supported actions, then wait for my approval. After I perform and reflect, inspect learning progress and suggest one revision. Do not access the camera, share pixels, grade me, publish products, or buy anything.";
+const suggestedJudgePrompt = "Inspect reconstruction readiness for every figure. If one needs work, request its visible human repair and wait. Otherwise inspect our shared room and Story Passport, then stage the next learning challenge using only verified actions and wait for my approval. Do not access the camera, share pixels, correct my art, grade me, publish products, or buy anything.";
 
 const worlds: Array<{ id: WorldId; label: string; short: string }> = [
   { id: "studio", label: "My room", short: "ROOM" },
@@ -198,6 +201,7 @@ export default function Home() {
   const rotateGestureRef = useRef<{ pointerId: number; lastX: number; lastY: number; moved: boolean } | null>(null);
   const partDragRef = useRef<{ pointerId: number; partId: string } | null>(null);
   const pendingUploadRef = useRef<PendingUpload | null>(null);
+  const activeFigureIndexRef = useRef(0);
   const worldRef = useRef<WorldId>("studio");
   const magicShowPlanRef = useRef<MagicShowPlan | null>(null);
   const completedShowBeatsRef = useRef(0);
@@ -223,7 +227,7 @@ export default function Home() {
   const [agentLine, setAgentLine] = useState("Create together.");
   const [storyCaption, setStoryCaption] = useState("Ready for a new friend.");
   const [demoRunning, setDemoRunning] = useState(false);
-  const [captureTarget, setCaptureTarget] = useState<CaptureTarget>({ x: 0.5, y: 0.48 });
+  const [cameraTargets, setCameraTargets] = useState<CaptureTarget[]>([]);
   const [neuralAsset, setNeuralAsset] = useState<NeuralAsset | null>(null);
   const [neuralProgress, setNeuralProgress] = useState<NeuralProgress>({ phase: "idle", progress: 0, message: "" });
   const [neuralConsentVisible, setNeuralConsentVisible] = useState(false);
@@ -233,6 +237,8 @@ export default function Home() {
   const [selectedPartId, setSelectedPartId] = useState<string | null>(null);
   const [pendingPartKind, setPendingPartKind] = useState<(typeof anatomyKinds)[number] | null>(null);
   const [pendingUpload, setPendingUpload] = useState<PendingUpload | null>(null);
+  const [pendingUploadTargets, setPendingUploadTargets] = useState<CaptureTarget[]>([]);
+  const [activeFigureIndex, setActiveFigureIndex] = useState(0);
   const [drawingWallOpen, setDrawingWallOpen] = useState(false);
   const [sharedRoomOpen, setSharedRoomOpen] = useState(false);
   const [dismissedInvite, setDismissedInvite] = useState("");
@@ -310,7 +316,7 @@ export default function Home() {
     neuralAbortRef.current?.abort();
     showAbortRef.current?.abort();
     disposeNeuralAsset(neuralAssetRef.current);
-    if (pendingUploadRef.current) URL.revokeObjectURL(pendingUploadRef.current.url);
+    if (pendingUploadRef.current?.url.startsWith("blob:")) URL.revokeObjectURL(pendingUploadRef.current.url);
   }, []);
 
   const startCamera = useCallback(async () => {
@@ -320,7 +326,7 @@ export default function Home() {
       return;
     }
     setCameraState("requesting");
-    setCaptureTarget({ x: 0.5, y: 0.48 });
+    setCameraTargets([]);
     setNotice("Choose Allow to point WallAlive at a drawing.");
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -334,7 +340,7 @@ export default function Home() {
       }
       setCameraState("active");
       setStep("camera");
-      setNotice("Camera is live locally. Tap the character body to target it, then capture.");
+      setNotice("Camera is live locally. Tap each character body, then capture only those selections.");
       record("CHILD", "Opened the camera", "Video stays on this device and is never exposed as a WebMCP tool.");
     } catch (error) {
       setCameraState("denied");
@@ -374,8 +380,10 @@ export default function Home() {
     commitCharacter({ ...initialCharacter, created: isJudgeDemo, name: isJudgeDemo ? "Sunny" : "", accent: next.analysis.secondaryColor });
     captureRef.current = next;
     captureEnsembleRef.current = ensemble;
+    activeFigureIndexRef.current = 0;
     setCapture(next);
     setCaptureEnsemble(ensemble);
+    setActiveFigureIndex(0);
     setSelectedPartId(null);
     setPendingPartKind(null);
     setStep(isJudgeDemo ? "alive" : "captured");
@@ -384,12 +392,12 @@ export default function Home() {
     setNotice(isJudgeDemo
       ? "The deterministic rigged judge demo is ready."
       : ensemble.length > 1
-        ? `${ensemble.length} figures found. Each figure has its own cutout, skeleton, and movement rig.`
+        ? `${ensemble.length} selected figures isolated. Review each rig; movement unlocks only after verified branches pass.`
         : "Character cutout found. Check that the whole character—and only the character—is visible before generating real 3D.");
     setAgentLine(isJudgeDemo
       ? "The judge asset is a real skinned 3D mesh with generated back geometry."
       : ensemble.length > 1
-        ? `I separated ${ensemble.length} figures and verified each one independently. Their limb rigs will animate separately.`
+        ? `I isolated ${ensemble.length} exact selections independently. Movement stays locked for any figure that still needs rig review.`
         : `I verified ${next.characterValidation?.evidence.join(", ") || detected || "character structure"}${learned ? ` in ${learned.latencyMs} ms` : ""}. Review the isolated pixels before any image leaves this device.`);
     record("WALLALIVE", isJudgeDemo ? "Loaded the deterministic rigged demo" : "Prepared a verified character cutout", isJudgeDemo
       ? "Bundled colored GLB · generated full geometry · skeleton · skin weights."
@@ -414,14 +422,18 @@ export default function Home() {
 
   const captureDrawing = useCallback(async () => {
     if (!videoRef.current) return;
-    setNotice("Finding separate figures, then checking each skeleton locally…");
+    if (!cameraTargets.length) {
+      setNotice("Tap at least one character before capturing.");
+      return;
+    }
+    setNotice(`Checking ${cameraTargets.length} exact camera selection${cameraTargets.length === 1 ? "" : "s"} locally…`);
     try {
-      const drawings = await recognizeDrawingsFromVideo(videoRef.current, captureTarget);
+      const drawings = await recognizeDrawingsAtVideoTargets(videoRef.current, cameraTargets);
       setDrawing(drawings[0], "camera", drawings);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "The drawing could not be separated from the wall.");
     }
-  }, [captureTarget, setDrawing]);
+  }, [cameraTargets, setDrawing]);
 
   const loadDemoDrawing = useCallback(async () => {
     try {
@@ -447,53 +459,60 @@ export default function Home() {
       return;
     }
     const objectUrl = URL.createObjectURL(file);
-    if (pendingUploadRef.current) URL.revokeObjectURL(pendingUploadRef.current.url);
-    const next = { url: objectUrl, fileName: file.name };
+    if (pendingUploadRef.current?.url.startsWith("blob:")) URL.revokeObjectURL(pendingUploadRef.current.url);
+    const next: PendingUpload = { url: objectUrl, fileName: file.name, origin: "photo" };
     pendingUploadRef.current = next;
     setPendingUpload(next);
-    setNotice("Tap the character in your photo. The point prompt keeps nearby drawings out.");
+    setPendingUploadTargets([]);
+    setNotice("Tap every character you want, then scan only those selections.");
     input.value = "";
   }, []);
 
-  const processUploadedDrawing = useCallback(async (target: CaptureTarget) => {
+  const processUploadedDrawing = useCallback(async () => {
     const pending = pendingUploadRef.current;
     if (!pending) return;
+    const targets = pendingUploadTargets;
+    if (!targets.length) {
+      setNotice("Tap at least one character before scanning.");
+      return;
+    }
     setPendingUpload(null);
-    setNotice("Finding separate figures, then checking each skeleton locally…");
+    setNotice(`Checking ${targets.length} exact selection${targets.length === 1 ? "" : "s"} locally…`);
     try {
-      const drawings = await recognizeDrawingsFromImageUrl(pending.url, target);
+      const drawings = await recognizeDrawingsAtImageTargets(pending.url, targets);
       setDrawing(drawings[0], "upload", drawings);
-      record("CHILD", "Chose a drawing photo", `${pending.fileName} produced ${drawings.length} verified figure${drawings.length === 1 ? "" : "s"}, isolated and rigged locally. The original file was not uploaded.`);
+      const rejectedCount = targets.filter((target) => !drawings.some((drawing) => {
+        const accepted = drawing.sourceTarget;
+        return accepted && Math.hypot(accepted.x - target.x, accepted.y - target.y) < 0.08;
+      })).length;
+      record("CHILD", pending.origin === "wall" ? "Selected the cast from the Wall Studio" : "Selected the cast in a drawing photo", `${pending.fileName} · ${targets.length} explicit target${targets.length === 1 ? "" : "s"} · ${drawings.length} accepted cutout${drawings.length === 1 ? "" : "s"} · ${rejectedCount} rejected safely · no automatic background cast · original pixels stayed in this tab.`);
+      setNotice(rejectedCount
+        ? `${drawings.length}/${targets.length} selections passed. ${rejectedCount} uncertain selection${rejectedCount === 1 ? " was" : "s were"} left out instead of becoming a broken 3D figure.`
+        : `${drawings.length} selected figure${drawings.length === 1 ? "" : "s"} passed the cutout gate. Review each rig before movement.`);
     } catch (error) {
       console.warn("WallAlive local upload recognition was safely rejected", error);
       setNotice(error instanceof Error ? error.message : "The drawing image could not be processed.");
     } finally {
-      URL.revokeObjectURL(pending.url);
+      if (pending.url.startsWith("blob:")) URL.revokeObjectURL(pending.url);
       pendingUploadRef.current = null;
+      setPendingUploadTargets([]);
     }
-  }, [record, setDrawing]);
+  }, [pendingUploadTargets, record, setDrawing]);
 
-  const processWallDrawing = useCallback(async ({ dataUrl, target }: { dataUrl: string; target: CaptureTarget }) => {
+  const processWallDrawing = useCallback(async ({ dataUrl }: { dataUrl: string; target: CaptureTarget }) => {
     setDrawingWallOpen(false);
-    setNotice("Separating your wall into characters, then building one movement rig for each…");
-    try {
-      const drawings = await recognizeDrawingsFromImageUrl(dataUrl, target, 6);
-      setDrawing(drawings[0], "upload", drawings);
-      record("CHILD", "Painted on the Wall Studio", `${drawings.length} clean authored figure${drawings.length === 1 ? "" : "s"} found · separate masks and rigs · no paper, room, or camera noise.`);
-      setNotice(drawings.length > 1
-        ? `${drawings.length} characters found. Each one has its own cutout and movement rig.`
-        : "Character found. Check the clean cutout, then choose private or neural 3D.");
-    } catch (error) {
-      console.warn("WallAlive authored-wall recognition was safely rejected", error);
-      setDrawingWallOpen(true);
-      setNotice(error instanceof Error ? error.message : "I could not find a complete character on the wall yet.");
-    }
-  }, [record, setDrawing]);
+    const next: PendingUpload = { url: dataUrl, fileName: "Wall Studio artwork", origin: "wall" };
+    pendingUploadRef.current = next;
+    setPendingUpload(next);
+    setPendingUploadTargets([]);
+    setNotice("Tap every Wall Studio character you want in the cast. Only those exact selections will be scanned.");
+  }, []);
 
   const cancelPendingUpload = useCallback(() => {
-    if (pendingUploadRef.current) URL.revokeObjectURL(pendingUploadRef.current.url);
+    if (pendingUploadRef.current?.url.startsWith("blob:")) URL.revokeObjectURL(pendingUploadRef.current.url);
     pendingUploadRef.current = null;
     setPendingUpload(null);
+    setPendingUploadTargets([]);
     setNotice("Photo closed. Choose another image or start the camera.");
   }, []);
 
@@ -502,6 +521,8 @@ export default function Home() {
     if (!drawing) throw new Error("No drawing is approved. The child must capture or choose a drawing first.");
     const ensemble = captureEnsembleRef.current.length ? captureEnsembleRef.current : [drawing];
     const neural = neuralAssetRef.current;
+    const readiness = ensemble.map(assessReconstructionReadiness);
+    const motionReadyCount = readiness.filter((report) => report.motionReady).length;
     const next: CharacterState = {
       ...characterRef.current,
       created: true,
@@ -514,7 +535,9 @@ export default function Home() {
     };
     commitCharacter(next, neural
       ? `${next.name} is now a generated rigged 3D character.`
-      : `${next.name} is now an articulated closed-mesh 3D storybook puppet.`);
+      : motionReadyCount === ensemble.length
+        ? `${next.name} is now a reviewed, articulated spatial puppet.`
+        : `${next.name} is now a static spatial puppet. ${ensemble.length - motionReadyCount} figure${ensemble.length - motionReadyCount === 1 ? " needs" : "s need"} a rig check before limb movement.`);
     setStep("alive");
     const graphNodes = ensemble.reduce((sum, figure) => sum + (figure.topologyRecognition?.nodes.length ?? figure.rig.joints.length), 0);
     const graphEdges = ensemble.reduce((sum, figure) => {
@@ -523,11 +546,11 @@ export default function Home() {
     }, 0);
     setAgentLine(neural
       ? `${next.name} has generated surfaces, colors, bones, and skin weights. The agent can now direct the rig.`
-      : `${ensemble.length} artwork-preserving 3D puppet${ensemble.length === 1 ? " is" : "s are"} ready. Each figure keeps its own contour, texture, branches, and motion rig.`);
+      : `${ensemble.length} artwork-preserving spatial puppet${ensemble.length === 1 ? "" : "s"} ready · ${motionReadyCount}/${ensemble.length} verified for limb movement.`);
     setStoryCaption(`${next.name} lifts away from the wall for the first time.`);
     record(actor, neural ? "Loaded a rigged neural 3D character" : "Built an articulated local 3D cast", neural
       ? `${next.name} · ${neural.provider} · glTF SkinnedMesh · generated mesh, skeleton, and skin weights · ${graphNodes} semantic nodes · ${graphEdges} branches.`
-      : `${ensemble.length} high-resolution articulated relief previews · exact artwork fronts · ${graphNodes} rig nodes · ${graphEdges} verified branches · no upload.`, toolName);
+      : `${ensemble.length} closed-relief spatial preview${ensemble.length === 1 ? "" : "s"} · exact artwork fronts · ${motionReadyCount}/${ensemble.length} motion-ready · ${graphNodes} rig nodes · ${graphEdges} candidate branches · no upload.`, toolName);
     return next;
   }, [commitCharacter, record]);
 
@@ -544,13 +567,14 @@ export default function Home() {
       record("WALLALIVE", "Blocked an unsafe 3D reconstruction", `Figure ${blockedIndex + 1} · readiness ${report.score} · ${report.blockers.join(" · ")}`);
       return;
     }
+    const motionBlocked = readiness.filter((report) => !report.motionReady).length;
     setNeuralConsentVisible(true);
     setNeuralProgress({ phase: "consent-required", progress: 0, message: ensemble.length > 1
-      ? "Choose instant local 3D for the complete cast. Full AI sculpt supports one figure at a time."
-      : "Choose instant private 3D or approve a full external AI sculpt." });
+      ? `Choose instant local 3D for the complete cast. ${motionBlocked ? `${motionBlocked} figure${motionBlocked === 1 ? " needs" : "s need"} review before limb movement.` : "Every figure has verified movement."}`
+      : motionBlocked ? "The cutout can become a static spatial puppet. Review the skeleton to unlock verified limb movement, or approve a full external AI sculpt." : "Choose instant private 3D or approve a full external AI sculpt." });
     setNotice(ensemble.length > 1
-      ? `All ${ensemble.length} figures passed the cutout gate. Wake them together as separate local 3D puppets.`
-      : "Choose a private instant puppet or approve full AI reconstruction. The live camera is never uploaded.");
+      ? `All ${ensemble.length} figures passed the cutout gate · ${ensemble.length - motionBlocked}/${ensemble.length} passed the motion gate.`
+      : motionBlocked ? "The cutout is clean, but the skeleton still needs your check before limb movement." : "Choose a private instant puppet or approve full AI reconstruction. The live camera is never uploaded.");
   }, [record]);
 
   const startLocalReconstruction = useCallback(() => {
@@ -855,7 +879,11 @@ export default function Home() {
     drawingAnalysis: captureRef.current?.analysis ?? null,
     reconstruction: captureRef.current ? {
       localIsolation: "Authored alpha or prompt-mask-first segmentation; low-confidence heuristic fallback remains below the 3D readiness gate",
-      localPreview: characterRef.current.created ? "instant artwork-preserving articulated spatial puppet; not presented as a full neural sculpt" : "verified transparent character cutout awaiting human review",
+      localPreview: characterRef.current.created
+        ? assessReconstructionReadiness(captureRef.current).motionReady
+          ? "instant artwork-preserving spatial puppet with verified movement branches; not a full neural sculpt"
+          : "instant artwork-preserving static spatial puppet; limb movement remains locked pending human rig review"
+        : "verified transparent character cutout awaiting human review",
       method: neuralAssetRef.current
         ? `${neuralAssetRef.current.provider} full-volume neural mesh + skeleton skinning`
         : characterRef.current.created
@@ -863,7 +891,7 @@ export default function Home() {
           : "local drawing segmentation + reconstruction-readiness gate + human review",
       provider: neuralAssetRef.current?.provider ?? "WallAlive local recognition",
       model: neuralAssetRef.current?.model ?? captureRef.current.cutoutRecognition?.model ?? "authored-alpha-cutout",
-      assetType: neuralAssetRef.current ? "glTF SkinnedMesh" : characterRef.current.created ? "Three.js articulated relief preview" : "reviewed transparent 2D cutout",
+      assetType: neuralAssetRef.current ? "glTF SkinnedMesh" : characterRef.current.created ? "Three.js closed-relief spatial preview" : "reviewed transparent 2D cutout",
       topology: neuralAssetRef.current ? "generated full 3D surface including unseen views" : characterRef.current.created ? "closed relief volume; a preview, not unseen-view reconstruction" : "semantic evidence awaiting 3D choice",
       topologyConfidence: captureRef.current.rig.topologyConfidence ?? null,
       backInference: neuralAssetRef.current ? "full neural generative prior" : characterRef.current.created ? "bounded neutral relief; no invented rear artwork" : "not built yet",
@@ -896,7 +924,7 @@ export default function Home() {
       generatedAsset: riggedAssetInfoRef.current,
       characterValidation: captureRef.current.characterValidation ?? null,
       reconstructionReadiness: assessReconstructionReadiness(captureRef.current),
-      generationPhase: neuralAssetRef.current ? "neural-ready" : characterRef.current.created ? "local-articulated-ready" : "verified-cutout-review-ready",
+      generationPhase: neuralAssetRef.current ? "neural-ready" : characterRef.current.created ? assessReconstructionReadiness(captureRef.current).motionReady ? "local-motion-ready" : "local-static-needs-rig-review" : "verified-cutout-review-ready",
       neuralUpgrade: neuralAssetRef.current ? "active" : "optional-single-figure-human-approved-upgrade",
       externalUploadApproved: externalUploadApprovedRef.current,
     } : null,
@@ -935,8 +963,8 @@ export default function Home() {
       pendingShow: pending ? { id: pending.id, title: pending.title, learningGoal: pending.learningGoal, status: pending.status, beats: pending.beats.length, cast: pending.cast.length, stagedBy: pending.stagedBy } : null,
       humanOnlyControls: ["open_camera", "capture_frame", "approve_cutout", "approve_external_3d", "approve_and_play_staged_show"],
       agentWorkflow: characterRef.current.created
-        ? ["inspect_character_capabilities", "stage_magic_show", "wait_for_visible_human_approval"]
-        : ["ask_human_to_draw_or_capture", "request_rigged_3d_cast", "wait_for_visible_human_approval"],
+        ? ["inspect_reconstruction_readiness", "inspect_learning_progress", "stage_next_learning_challenge", "wait_for_visible_human_approval"]
+        : ["ask_human_to_draw_or_capture", "inspect_reconstruction_readiness", "request_character_repair_if_needed", "request_rigged_3d_cast", "wait_for_visible_human_approval"],
       cameraFeedExposed: false,
       externalUploadApproved: scene.reconstruction?.externalUploadApproved ?? false,
       arPlacement: scene.placementModes,
@@ -963,6 +991,45 @@ export default function Home() {
       worldTotals: Object.fromEntries(worlds.map(({ id }) => [id, worldActivities[id].objectIds.length])),
     });
   }, [worldInteractions]);
+
+  const inspectReconstructionReadiness = useCallback(() => {
+    const drawings = captureEnsembleRef.current.length
+      ? captureEnsembleRef.current
+      : captureRef.current
+        ? [captureRef.current]
+        : [];
+    const capabilities = currentCharacterCapabilities();
+    const figures = drawings.map((drawing, index) => {
+      const readiness = assessReconstructionReadiness(drawing);
+      const capability = capabilities[index];
+      return {
+        characterIndex: index,
+        selectedTarget: drawing.sourceTarget ?? null,
+        cutoutReady: readiness.cutoutReady,
+        motionReady: readiness.motionReady,
+        readinessScore: readiness.score,
+        blockers: readiness.blockers,
+        warnings: readiness.warnings,
+        detectedParts: capability?.semanticParts ?? {},
+        movableParts: capability?.movableParts ?? [],
+        availableActions: capability?.availableActions ?? ["idle", "hop", "hide", "spin"],
+        recommendedHumanAction: !readiness.cutoutReady
+          ? "Reselect this figure from a cleaner image."
+          : !readiness.motionReady
+            ? "Open the visible anatomy check and correct or approve movement branches."
+            : "Ready for capability-checked movement.",
+      };
+    });
+    return {
+      figureCount: figures.length,
+      allCutoutsReady: figures.length > 0 && figures.every((figure) => figure.cutoutReady),
+      allMotionReady: figures.length > 0 && figures.every((figure) => figure.motionReady),
+      figures,
+      policy: "A clean cutout may become a static spatial puppet. Playable movement is claimed only for verified or human-reviewed branches.",
+      cameraDataIncluded: false,
+      artworkPixelsIncluded: false,
+    };
+  }, [currentCharacterCapabilities]);
 
   const saveLearningReflection = useCallback(() => {
     const retell = reflectionRetell.trim().slice(0, 360);
@@ -1131,6 +1198,73 @@ export default function Home() {
     };
   }, [currentCharacterCapabilities, parseShowMoves, record]);
 
+  const stageNextLearningChallenge = useCallback((input: Record<string, unknown>) => {
+    const progress = inspectLearningProgress();
+    const capabilities = currentCharacterCapabilities();
+    if (!capabilities.length || !characterRef.current.created) throw new Error("A human-approved spatial cast is required before an adaptive challenge can be staged.");
+    const requestedFocus = stringValue(input.focus, "", 24);
+    const focus = (["sequencing", "collaboration", "expression", "observation"] as const).includes(requestedFocus as "sequencing")
+      ? requestedFocus as "sequencing" | "collaboration" | "expression" | "observation"
+      : progress.observedEvidence.participantCount > 1
+        ? "collaboration"
+        : progress.phase === "performed-needs-reflection"
+          ? "expression"
+          : "sequencing";
+    const worldCompletion = worlds.map(({ id }) => ({
+      id,
+      ratio: worldActivities[id].objectIds.length ? worldInteractions[id].length / worldActivities[id].objectIds.length : 0,
+    })).sort((left, right) => left.ratio - right.ratio);
+    const nextWorld = worldCompletion[0]?.id ?? "studio";
+    const revision = progress.reflection?.nextChange;
+    const learningGoal = focus === "collaboration"
+      ? "take turns, assign roles, and combine ideas into one three-part story"
+      : focus === "expression"
+        ? "name a feeling, show it through action, and retell what changed"
+        : focus === "observation"
+          ? "notice three interactive details and use them in a beginning, middle, and ending"
+          : "sequence a clear beginning, middle, and ending, then retell the order";
+    const actionPriority: CharacterAction[][] = [
+      ["wave", "hop", "spin", "hide"],
+      ["walk", "dance", "spin", "hop"],
+      ["dance", "wave", "hide", "spin"],
+    ];
+    const movesForBeat = (beatIndex: number) => capabilities.map((capability, castIndex) => ({
+      characterIndex: capability.characterIndex,
+      action: actionPriority[(beatIndex + castIndex) % actionPriority.length].find((action) => capability.availableActions.includes(action)) ?? "spin",
+    }));
+    const cast = capabilities.map((capability, index) => ({
+      characterIndex: capability.characterIndex,
+      name: capabilities.length === 1 ? characterRef.current.name || "Pip" : `Friend ${index + 1}`,
+      role: focus === "collaboration" ? ["idea starter", "helper", "story finisher"][index % 3] : ["explorer", "problem solver", "storyteller"][index % 3],
+      personality: characterRef.current.personality || "curious and kind",
+    }));
+    const revisionPhrase = revision ? ` using the learner's ${revision.replaceAll("-", " ")} choice` : "";
+    const staged = stageMagicShow({
+      title: revision ? "Our Story, Reimagined" : "The Three-Moment Quest",
+      theme: `${focus}${revisionPhrase}`,
+      learningGoal,
+      tone: focus === "expression" ? "gentle" : "adventurous",
+      world: nextWorld,
+      cast,
+      beats: [
+        { caption: "First, every friend notices the challenge and chooses a role.", durationMs: 1050, world: nextWorld, moves: movesForBeat(0) },
+        { caption: "Next, the cast combines different moves to solve it together.", durationMs: 1250, moves: movesForBeat(1) },
+        { caption: "Finally, they show what changed and get ready to tell the story back.", durationMs: 1150, moves: movesForBeat(2) },
+      ],
+    }, "BROWSER AGENT", "stage_next_learning_challenge");
+    return {
+      ...staged,
+      adaptiveBasis: {
+        previousPhase: progress.phase,
+        learnerRevisionChoice: revision ?? null,
+        participantCount: progress.observedEvidence.participantCount,
+        leastExploredWorld: nextWorld,
+        focus,
+        interpretationBoundary: progress.interpretationBoundary,
+      },
+    };
+  }, [currentCharacterCapabilities, inspectLearningProgress, stageMagicShow, worldInteractions]);
+
   const approveAndPlayMagicShow = useCallback(async () => {
     const current = magicShowPlanRef.current;
     if (!current || current.status !== "awaiting-human-approval" || showPlayingRef.current) return;
@@ -1219,6 +1353,23 @@ export default function Home() {
         },
       },
       {
+        name: "stage_next_learning_challenge",
+        title: "Stage the learner's next challenge",
+        description: "Use the private Story Passport, participant count, least-explored world, learner revision choice, and verified character actions to stage one visible next challenge. It is observational—not grading—and the human must approve playback.",
+        inputSchema: { ...base, properties: { focus: { type: "string", enum: ["sequencing", "collaboration", "expression", "observation"], description: "Optional learning focus. If omitted, WallAlive chooses from visible Story Passport evidence." } } },
+        annotations: { readOnlyHint: false, untrustedContentHint: true },
+        execute: async (input, options) => {
+          const signal = executionSignal(options);
+          try {
+            guard(signal);
+            const result = stageNextLearningChallenge(input);
+            await afterVisiblePaint();
+            guard(signal);
+            return ok(result);
+          } catch (error) { return fail(error); }
+        },
+      },
+      {
         name: "request_rigged_3d_cast",
         title: "Request a playable 3D cast",
         description: "Request rigged 3D for the human-reviewed artwork. This can surface the visible reconstruction choice but cannot approve external processing, open the camera, capture a frame, or receive pixels.",
@@ -1240,20 +1391,17 @@ export default function Home() {
             guard(signal);
             if (!captureRef.current) throw new Error("No drawing is approved. The child must capture or choose a drawing first.");
             if (input.reconstructionMode === "local-articulated") {
-              commitNeuralAsset(null);
-              const result = ok({
-                character: createCharacter(input, "BROWSER AGENT", "request_rigged_3d_cast"),
-                reconstructionMode: "local-articulated",
-                localRig: {
-                  figures: captureEnsembleRef.current.length || 1,
-                  rendering: "high-resolution articulated relief preview with exact artwork front; not a full unseen-view sculpt",
-                  private: true,
-                },
-                generatedAsset: null,
-              });
+              if (characterRef.current.created && !neuralAssetRef.current) return ok({ alreadyCreated: true, reconstructionMode: "local-articulated", readiness: inspectReconstructionReadiness() });
+              requestNeuralConsent();
               await afterVisiblePaint();
               guard(signal);
-              return result;
+              return ok({
+                requiresHumanApproval: true,
+                phase: "choice-required",
+                requestedMode: "local-articulated",
+                readiness: inspectReconstructionReadiness(),
+                message: "The visible reconstruction card is open. The human must choose the private spatial puppet or review a blocked figure; the agent cannot create or approve it.",
+              });
             }
             if (!neuralAssetRef.current) {
               requestNeuralConsent();
@@ -1280,6 +1428,54 @@ export default function Home() {
         inputSchema: { ...base, properties: {} },
         annotations: { readOnlyHint: true, untrustedContentHint: true },
         execute: async (_input, options) => { const signal = executionSignal(options); guard(signal); const capabilities = currentCharacterCapabilities(); return ok({ characterCount: capabilities.length, capabilities, instruction: "Only assign actions listed in availableActions.", cameraDataIncluded: false }); },
+      },
+      {
+        name: "inspect_reconstruction_readiness",
+        title: "Inspect every selected figure before 3D",
+        description: "Read per-figure cutout and motion readiness, blockers, warnings, verified movable parts, and the next human repair action. Returns structured evidence only—never camera frames or artwork pixels.",
+        inputSchema: { ...base, properties: {} },
+        annotations: { readOnlyHint: true, untrustedContentHint: true },
+        execute: async (_input, options) => { const signal = executionSignal(options); guard(signal); return ok({ readiness: inspectReconstructionReadiness(), observedAt: new Date().toISOString() }); },
+      },
+      {
+        name: "request_character_repair",
+        title: "Request a visible human rig repair",
+        description: "Open the anatomy check for one selected figure and explain its current blockers. The agent cannot move joints, alter the drawing, approve the rig, or access pixels; the human performs and approves every correction.",
+        inputSchema: {
+          ...base,
+          properties: {
+            characterIndex: { type: "integer", minimum: 0, maximum: 5, description: "Figure index returned by inspect_reconstruction_readiness." },
+            focus: { type: "string", enum: ["cutout", "face", "arms", "legs", "movement"], description: "Area the agent wants the human to verify." },
+          },
+          required: ["characterIndex", "focus"],
+        },
+        annotations: { readOnlyHint: false, untrustedContentHint: true },
+        execute: async (input, options) => {
+          const signal = executionSignal(options);
+          try {
+            guard(signal);
+            const drawings = captureEnsembleRef.current.length ? captureEnsembleRef.current : captureRef.current ? [captureRef.current] : [];
+            const characterIndex = Math.round(numberValue(input.characterIndex, -1));
+            const drawing = drawings[characterIndex];
+            if (!drawing) throw new Error(`Figure ${characterIndex} does not exist. Inspect reconstruction readiness first.`);
+            const readiness = assessReconstructionReadiness(drawing);
+            activeFigureIndexRef.current = characterIndex;
+            setActiveFigureIndex(characterIndex);
+            setSelectedPartId(null);
+            setPendingPartKind(null);
+            setPartEditorOpen(true);
+            const focus = stringValue(input.focus, "movement", 16);
+            const guidance = !readiness.cutoutReady
+              ? `The cutout has a blocker: ${readiness.blockers[0]} Close this check and reselect the figure if the boundary is wrong.`
+              : `Check ${focus}; drag incorrect parts, add missing parts, remove false parts, then use Approve rig.`;
+            setAgentLine(`I found uncertainty in figure ${characterIndex + 1}. You stay in control of the correction.`);
+            setNotice(guidance);
+            record("BROWSER AGENT", "Requested a human anatomy check", `Figure ${characterIndex + 1} · ${focus} · agent made no pixel or rig changes.`, "request_character_repair");
+            await afterVisiblePaint();
+            guard(signal);
+            return ok({ characterIndex, focus, readinessBeforeRepair: readiness, visibleRepairOpen: true, requiresHumanApproval: true, agentChangedRig: false, guidance });
+          } catch (error) { return fail(error); }
+        },
       },
       {
         name: "stage_magic_show",
@@ -1556,7 +1752,7 @@ export default function Home() {
       setWebMcpStatus("error");
     });
     return () => controller.abort();
-  }, [commitNeuralAsset, createCharacter, currentCharacterCapabilities, directEnsembleBeat, inspectCreativeScene, inspectCreatorDrop, inspectLearningProgress, interactWithWorldObject, orchestrateSpatialCinematics, parseShowMoves, prepareRoomInvite, recommendProductsForArtwork, record, requestNeuralConsent, stageMagicShow, stageShopifyImportKit, worldInteractions]);
+  }, [commitNeuralAsset, createCharacter, currentCharacterCapabilities, directEnsembleBeat, inspectCreativeScene, inspectCreatorDrop, inspectLearningProgress, inspectReconstructionReadiness, interactWithWorldObject, orchestrateSpatialCinematics, parseShowMoves, prepareRoomInvite, recommendProductsForArtwork, record, requestNeuralConsent, stageMagicShow, stageNextLearningChallenge, stageShopifyImportKit, worldInteractions]);
 
   const runMagicDemo = useCallback(async () => {
     if (demoRunning) return;
@@ -1609,8 +1805,13 @@ export default function Home() {
     const y = (event.clientY - bounds.top) / bounds.height;
     if (cameraState === "active") {
       const target = { x: Math.min(0.92, Math.max(0.08, x)), y: Math.min(0.84, Math.max(0.09, y)) };
-      setCaptureTarget(target);
-      setNotice("Character targeted. Capture will reject paper edges, text, and dense foreground clutter.");
+      setCameraTargets((current) => {
+        const next = appendCaptureTarget(current, target, 6);
+        setNotice(next.length === current.length
+          ? "That character is already selected. Tap a different character or capture now."
+          : `${next.length} character${next.length === 1 ? "" : "s"} selected. Tap more, or capture only this cast.`);
+        return next;
+      });
       return;
     }
     if (!characterRef.current.created) return;
@@ -1682,8 +1883,25 @@ export default function Home() {
     setNotice("Suggested judge demo prompt copied.");
   }, []);
 
+  const selectRigFigure = useCallback((index: number) => {
+    const ensemble = captureEnsembleRef.current.length ? captureEnsembleRef.current : captureRef.current ? [captureRef.current] : [];
+    const safeIndex = Math.min(Math.max(0, index), Math.max(0, ensemble.length - 1));
+    activeFigureIndexRef.current = safeIndex;
+    setActiveFigureIndex(safeIndex);
+    setSelectedPartId(null);
+    setPendingPartKind(null);
+  }, []);
+
+  const openRigEditor = useCallback((index = 0) => {
+    selectRigFigure(index);
+    setPartEditorOpen(true);
+    setNotice(`Reviewing figure ${index + 1}. Move, resize, add, or remove parts before approving movement.`);
+  }, [selectRigFigure]);
+
   const commitRigEdit = useCallback((parts: SemanticPart[], message: string) => {
-    const current = captureRef.current;
+    const ensemble = captureEnsembleRef.current.length ? captureEnsembleRef.current : captureRef.current ? [captureRef.current] : [];
+    const index = Math.min(activeFigureIndexRef.current, Math.max(0, ensemble.length - 1));
+    const current = ensemble[index];
     if (!current) return;
     const validIds = new Set(parts.map((part) => part.id));
     const normalized = parts.map((part) => part.parentId && !validIds.has(part.parentId) ? { ...part, parentId: "body" } : part);
@@ -1702,19 +1920,25 @@ export default function Home() {
         detectedKinds: [...new Set(normalized.map((part) => part.kind))],
       },
     };
-    captureRef.current = next;
-    setCapture(next);
-    setCaptureEnsemble((currentEnsemble) => currentEnsemble.length ? currentEnsemble.map((figure, index) => index === 0 ? next : figure) : [next]);
+    const nextEnsemble = ensemble.map((figure, figureIndex) => figureIndex === index ? next : figure);
+    captureEnsembleRef.current = nextEnsemble;
+    setCaptureEnsemble(nextEnsemble);
+    if (index === 0) {
+      captureRef.current = next;
+      setCapture(next);
+    }
     setNotice(message);
   }, []);
 
   const partSide = useCallback((x: number): SemanticSide => {
-    const bodyX = captureRef.current?.rig.parts.find((part) => part.kind === "body")?.center.x ?? 0;
+    const ensemble = captureEnsembleRef.current.length ? captureEnsembleRef.current : captureRef.current ? [captureRef.current] : [];
+    const current = ensemble[activeFigureIndexRef.current];
+    const bodyX = current?.rig.parts.find((part) => part.kind === "body")?.center.x ?? 0;
     return x < bodyX - 0.04 ? "left" : x > bodyX + 0.04 ? "right" : "center";
   }, []);
 
   const moveRigPart = useCallback((partId: string, x: number, y: number) => {
-    const current = captureRef.current;
+    const current = (captureEnsembleRef.current.length ? captureEnsembleRef.current : captureRef.current ? [captureRef.current] : [])[activeFigureIndexRef.current];
     if (!current) return;
     const parts = current.rig.parts.map((part) => {
       if (part.id !== partId) return part;
@@ -1742,7 +1966,7 @@ export default function Home() {
   }, []);
 
   const addRigPart = useCallback((kind: (typeof anatomyKinds)[number], x: number, y: number) => {
-    const current = captureRef.current;
+    const current = (captureEnsembleRef.current.length ? captureEnsembleRef.current : captureRef.current ? [captureRef.current] : [])[activeFigureIndexRef.current];
     if (!current) return;
     const body = current.rig.parts.find((part) => part.kind === "body");
     if (!body) return;
@@ -1783,7 +2007,7 @@ export default function Home() {
   }, [commitRigEdit, partSide]);
 
   const resizeSelectedPart = useCallback((amount: number) => {
-    const current = captureRef.current;
+    const current = (captureEnsembleRef.current.length ? captureEnsembleRef.current : captureRef.current ? [captureRef.current] : [])[activeFigureIndexRef.current];
     if (!current || !selectedPartId) return;
     const parts = current.rig.parts.map((part) => {
       if (part.id !== selectedPartId) return part;
@@ -1802,7 +2026,7 @@ export default function Home() {
   }, [commitRigEdit, selectedPartId]);
 
   const approveRigReview = useCallback(() => {
-    const current = captureRef.current;
+    const current = (captureEnsembleRef.current.length ? captureEnsembleRef.current : captureRef.current ? [captureRef.current] : [])[activeFigureIndexRef.current];
     if (!current) return;
     const body = current.rig.parts.find((part) => part.kind === "body");
     const movableKinds = new Set<SemanticPartKind>(["arm", "leg", "wing", "fin", "tail", "tentacle", "trunk", "branch", "segment", "linkage"]);
@@ -1815,13 +2039,13 @@ export default function Home() {
         { x: part.center.x, y: part.center.y, z: 0 },
       ];
       return { ...part, anchor: { ...anchor }, path, reviewed: true };
-    }), "Rig approved. Reviewed limb paths can now drive articulated joints.");
+    }), `Figure ${activeFigureIndexRef.current + 1} approved. Reviewed limb paths can now drive articulated joints.`);
     setPartEditorOpen(false);
     setPendingPartKind(null);
   }, [commitRigEdit]);
 
   const deleteSelectedPart = useCallback(() => {
-    const current = captureRef.current;
+    const current = (captureEnsembleRef.current.length ? captureEnsembleRef.current : captureRef.current ? [captureRef.current] : [])[activeFigureIndexRef.current];
     if (!current || !selectedPartId) return;
     const selected = current.rig.parts.find((part) => part.id === selectedPartId);
     if (!selected || selected.kind === "body") return;
@@ -1829,7 +2053,25 @@ export default function Home() {
     setSelectedPartId(null);
   }, [commitRigEdit, selectedPartId]);
 
+  const removeFigure = useCallback((index: number) => {
+    const ensemble = captureEnsembleRef.current.length ? captureEnsembleRef.current : captureRef.current ? [captureRef.current] : [];
+    if (ensemble.length <= 1) {
+      setNotice("Keep one figure in the cast. Choose Try again if this cutout is wrong.");
+      return;
+    }
+    const next = ensemble.filter((_, figureIndex) => figureIndex !== index);
+    captureEnsembleRef.current = next;
+    captureRef.current = next[0];
+    setCaptureEnsemble(next);
+    setCapture(next[0]);
+    selectRigFigure(Math.min(index, next.length - 1));
+    setNotice(`Removed background selection ${index + 1}. ${next.length} figure${next.length === 1 ? "" : "s"} remain.`);
+    record("CHILD", "Removed a mistaken cast selection", `Figure ${index + 1} removed before 3D; ${next.length} figure${next.length === 1 ? "" : "s"} remain.`);
+  }, [record, selectRigFigure]);
+
   const latestAgentActivity = useMemo(() => activity.find((item) => item.actor === "BROWSER AGENT"), [activity]);
+  const activeRigDrawing = captureEnsemble[activeFigureIndex] ?? capture;
+  const ensembleReadiness = useMemo(() => captureEnsemble.map(assessReconstructionReadiness), [captureEnsemble]);
   const movablePartCount = useMemo(() => captureEnsemble.reduce((sum, figure) => sum + selectAnimatableRigParts(figure.rig, {
     poseApplicable: Boolean(figure.poseRecognition?.applicable),
     topologyApplicable: Boolean(figure.topologyRecognition?.applicable),
@@ -1961,10 +2203,24 @@ export default function Home() {
           >
             <div>
               <span className="summary-spark">✦</span>
-              <p><b>{captureEnsemble.length > 1 ? `${captureEnsemble.length} figures found` : "Artwork preserved"}</b><small>{captureEnsemble.length > 1 ? "separate masks + rigs" : capture.cutoutRecognition?.model === "mediapipe-magic-touch-v2" ? "point-guided cutout" : "local cutout"}</small></p>
+              <p><b>{captureEnsemble.length > 1 ? `${captureEnsemble.length} figures selected` : "Artwork preserved"}</b><small>{captureEnsemble.length > 1 ? "separate cutouts · rig checks" : capture.cutoutRecognition?.model === "mediapipe-magic-touch-v2" ? "point-guided cutout" : "local cutout"}</small></p>
             </div>
             <div className="anatomy-pills"><span>Transparent</span><span>{captureEnsemble.length > 1 ? `${movablePartCount} moving limbs` : "Local only"}</span><span>Human check</span></div>
-            <button onClick={() => setPartEditorOpen(true)}>REVIEW RIG</button>
+            <button onClick={() => openRigEditor(0)}>REVIEW RIG</button>
+          </div> : null}
+
+          {captureEnsemble.length > 1 ? <div className="cast-check" aria-label="Selected character readiness">
+            <div><span>YOUR CAST</span><small>Check every figure before movement</small></div>
+            <div className="cast-check-list">{captureEnsemble.map((figure, index) => {
+              const readiness = ensembleReadiness[index];
+              const status = !readiness?.cutoutReady ? "RESELECT" : readiness.motionReady ? "READY" : "FIX RIG";
+              return <article key={`${figure.textureUrl.slice(-24)}-${index}`} className={readiness?.motionReady ? "is-ready" : "needs-review"}>
+                <button className="cast-figure" onClick={() => openRigEditor(index)} aria-label={`Review figure ${index + 1}, ${status.toLowerCase()}`}>
+                  <img src={figure.textureUrl} alt="" /><b>{index + 1}</b><span>{status}</span>
+                </button>
+                <button className="cast-remove" onClick={() => removeFigure(index)} aria-label={`Remove figure ${index + 1}`}>×</button>
+              </article>;
+            })}</div>
           </div> : null}
 
           <div className={`camera-frame step-${step} world-${world}`} onPointerDown={handleStagePointerDown} onPointerMove={handleStagePointerMove} onPointerUp={handleStagePointerUp} onPointerCancel={() => { rotateGestureRef.current = null; }}>
@@ -1972,12 +2228,12 @@ export default function Home() {
             {cameraState !== "active" && world === "studio" ? <div className="demo-room"><span className="frame-a" /><span className="frame-b" /><span className="shelf" /><span className="plant" /><span className="baseboard" /></div> : null}
             {capture && cameraState !== "active" && world === "studio" ? <img className="captured-room" src={capture.previewUrl} alt="Original drawing scene" /> : null}
             {capture && cameraState !== "active" && !character.created ? <div className="cutout-review" onPointerDown={(event) => event.stopPropagation()}><img src={capture.textureUrl} alt="Isolated character cutout to review" /><span>{captureEnsemble.length > 1 ? `${captureEnsemble.length} SEPARATE FIGURES FOUND` : "IS THE WHOLE CHARACTER VISIBLE?"}</span><div><button onClick={requestNeuralConsent}>YES · CONTINUE</button><button onClick={() => capture.sourceScope === "camera" ? startCamera() : uploadRef.current?.click()}>NO · TRY AGAIN</button></div></div> : null}
-            {step === "camera" ? <><div className="capture-guide"><span /><b>TAP CHARACTER · THEN CAPTURE</b></div><div className="capture-target" style={{ left: `${captureTarget.x * 100}%`, top: `${captureTarget.y * 100}%` }}><i /></div></> : null}
+            {step === "camera" ? <><div className="capture-guide"><span /><b>TAP EACH CHARACTER · THEN CAPTURE</b></div>{cameraTargets.map((target, index) => <div key={`${target.x}-${target.y}-${index}`} className="capture-target camera-cast-target" style={{ left: `${target.x * 100}%`, top: `${target.y * 100}%` }}><i>{index + 1}</i></div>)}</> : null}
             {character.created ? <Suspense fallback={<div className="three-layer" aria-hidden="true" />}>
               <ARStage ref={stageRef} characters={character.created && !neuralAsset ? captureEnsemble : null} contour={capture?.contour ?? null} skeleton={capture?.skeleton ?? null} textureUrl={capture?.textureUrl ?? null} rig={capture?.rig ?? null} depth={capture?.depthRecognition ?? null} action={character.action} ensembleActions={ensembleActions} world={world} lightingMood={lightingMood} cameraPreset={cameraPreset} accent={character.accent} inflation={character.inflation} neuralAssetUrl={neuralAsset?.meshUrl ?? null} visible onCapability={handleARCapability} onRendererCapability={handleRendererCapability} onPlaced={handleARPlaced} onNeuralAssetInfo={handleRiggedAssetInfo} onWorldInteraction={handleStageWorldInteraction} />
             </Suspense> : null}
             {neuralConsentVisible ? <div className="neural-consent" role="dialog" aria-modal="true" aria-labelledby="neural-consent-title" onPointerDown={(event) => event.stopPropagation()}>
-              <span>CHOOSE YOUR QUALITY</span><h2 id="neural-consent-title">Wake {captureEnsemble.length > 1 ? "the whole cast" : "this drawing"}</h2><p>{captureEnsemble.length > 1 ? "Preview the cast now with separate confidence-gated rigs. Full sculpt currently handles one figure at a time." : "Use an instant private spatial puppet—or approve a full AI sculpt with generated unseen views."}</p><div><button onClick={startLocalReconstruction}>INSTANT PUPPET · PRIVATE</button>{captureEnsemble.length === 1 ? <button onClick={startNeuralReconstruction}>FULL 3D SCULPT · AI</button> : null}<button onClick={() => { setNeuralConsentVisible(false); setPartEditorOpen(true); }}>CHECK SKELETON</button></div>
+              <span>CHOOSE YOUR QUALITY</span><h2 id="neural-consent-title">Wake {captureEnsemble.length > 1 ? "the whole cast" : "this drawing"}</h2><p>{ensembleReadiness.some((report) => !report.motionReady) ? "A clean static spatial puppet is available now. Check every uncertain rig before expecting arms or legs to move." : captureEnsemble.length > 1 ? "Every selected figure passed the motion gate. Full sculpt currently handles one figure at a time." : "Use an instant private spatial puppet—or approve a full AI sculpt with generated unseen views."}</p><div><button onClick={startLocalReconstruction}>{ensembleReadiness.every((report) => report.motionReady) ? "PLAYABLE PUPPET · PRIVATE" : "STATIC PUPPET · PRIVATE"}</button>{captureEnsemble.length === 1 ? <button onClick={startNeuralReconstruction}>FULL 3D SCULPT · AI</button> : null}<button onClick={() => { setNeuralConsentVisible(false); openRigEditor(ensembleReadiness.findIndex((report) => !report.motionReady) < 0 ? 0 : ensembleReadiness.findIndex((report) => !report.motionReady)); }}>CHECK SKELETON</button></div>
             </div> : null}
             {neuralBusy ? <div className="neural-progress" role="status" onPointerDown={(event) => event.stopPropagation()}><span>ANIGEN · RIGGED 3D</span><b>{neuralProgress.message}</b><div><i style={{ width: `${Math.round(neuralProgress.progress * 100)}%` }} /></div><small>{Math.round(neuralProgress.progress * 100)}% · PUBLIC GPU</small></div> : null}
             {magicShowPlan?.status === "awaiting-human-approval" ? <div className="magic-show-approval" role="dialog" aria-modal="false" aria-labelledby="magic-show-title" onPointerDown={(event) => event.stopPropagation()}>
@@ -2075,7 +2331,7 @@ export default function Home() {
 
           {panelTab === "tools" ? (
             <div className="panel-body">
-              <p className="kicker">WEBMCP INSPECTOR</p><h2>One shared creative loop.</h2><p>Inspect state → check abilities → stage a show → human approves → perform and verify. Camera authority never crosses into the tool surface.</p>
+              <p className="kicker">WEBMCP INSPECTOR</p><h2>Agent sees uncertainty. You fix it.</h2><p>Inspect each figure → request visible repair → adapt the next challenge → human approves → perform and reflect. Camera pixels, correction, grading, publishing, and purchase stay outside the tool surface.</p>
               <div className="tools-list">{toolNames.map(([name, mode], index) => <div key={name}><span>{String(index + 1).padStart(2, "0")}</span><code>{name}</code><i>{mode}</i></div>)}</div>
             </div>
           ) : null}
@@ -2182,21 +2438,24 @@ export default function Home() {
       />
       {pendingUpload ? <div className="paper-picker-backdrop" role="dialog" aria-modal="true" aria-labelledby="paper-picker-title">
         <section className="paper-picker">
-          <header><div><span>ONE QUICK TAP</span><h2 id="paper-picker-title">Which drawing?</h2></div><button onClick={cancelPendingUpload} aria-label="Close photo">×</button></header>
-          <button
-            className="paper-picker-image"
+          <header><div><span>SELECT THE CAST · UP TO 6</span><h2 id="paper-picker-title">Tap every character.</h2></div><button onClick={cancelPendingUpload} aria-label="Close photo">×</button></header>
+          <div className="paper-picker-image"><button
+            className="paper-picker-canvas"
+            aria-label="Tap the center of each character to select it"
             onClick={(event) => {
-              const image = event.currentTarget.querySelector("img");
-              const bounds = image?.getBoundingClientRect() ?? event.currentTarget.getBoundingClientRect();
-              processUploadedDrawing({ x: clamp01((event.clientX - bounds.left) / bounds.width), y: clamp01((event.clientY - bounds.top) / bounds.height) });
+              const bounds = event.currentTarget.getBoundingClientRect();
+              const target = { x: clamp01((event.clientX - bounds.left) / bounds.width), y: clamp01((event.clientY - bounds.top) / bounds.height) };
+              setPendingUploadTargets((current) => appendCaptureTarget(current, target, 6));
             }}
-          ><img src={pendingUpload.url} alt="Choose one character from the uploaded sheet" /><span><i /> TAP INSIDE THE CHARACTER</span></button>
-          <p>Paper edges, labels, grid lines, and nearby doodles will be treated as background.</p>
+          ><img src={pendingUpload.url} alt="Uploaded artwork with selected character markers" />{pendingUploadTargets.map((target, index) => <i key={`${target.x}-${target.y}`} className="paper-target" style={{ left: `${target.x * 100}%`, top: `${target.y * 100}%` }}>{index + 1}</i>)}</button></div>
+          <footer className="paper-picker-actions"><button disabled={!pendingUploadTargets.length} onClick={processUploadedDrawing}>SCAN {pendingUploadTargets.length || ""} CHARACTER{pendingUploadTargets.length === 1 ? "" : "S"}</button><button disabled={!pendingUploadTargets.length} onClick={() => setPendingUploadTargets((current) => current.slice(0, -1))}>UNDO</button><button disabled={!pendingUploadTargets.length} onClick={() => setPendingUploadTargets([])}>CLEAR</button></footer>
+          <p>Only numbered selections become characters. Labels, paper edges, and nearby decoration are ignored.</p>
         </section>
       </div> : null}
-      {partEditorOpen && capture ? <div className="part-editor-backdrop" role="dialog" aria-modal="true" aria-labelledby="part-editor-title">
+      {partEditorOpen && activeRigDrawing ? <div className="part-editor-backdrop" role="dialog" aria-modal="true" aria-labelledby="part-editor-title">
         <section className="part-editor">
-          <header><div><span>ANATOMY CHECK</span><h2 id="part-editor-title">Make it match.</h2></div><button onClick={() => { setPartEditorOpen(false); setPendingPartKind(null); }}>×</button></header>
+          <header><div><span>ANATOMY CHECK · FIGURE {activeFigureIndex + 1}/{captureEnsemble.length || 1}</span><h2 id="part-editor-title">Make it match.</h2></div><button onClick={() => { setPartEditorOpen(false); setPendingPartKind(null); }}>×</button></header>
+          {captureEnsemble.length > 1 ? <nav className="part-editor-cast" aria-label="Choose figure to repair">{captureEnsemble.map((figure, index) => <button key={index} className={activeFigureIndex === index ? "active" : ""} onClick={() => selectRigFigure(index)}><img src={figure.textureUrl} alt="" /><span>FIGURE {index + 1}</span><small>{ensembleReadiness[index]?.motionReady ? "READY" : "CHECK"}</small></button>)}</nav> : null}
           <div className="part-editor-workspace">
             <svg
               className={pendingPartKind ? "is-adding" : ""}
@@ -2207,8 +2466,8 @@ export default function Home() {
                 addRigPart(pendingPartKind, point.x, point.y);
               }}
             >
-              <image href={capture.textureUrl} x="0" y="0" width="100" height="100" preserveAspectRatio="xMidYMid meet" />
-              {capture.rig.parts.filter((part) => anatomyKinds.includes(part.kind as (typeof anatomyKinds)[number])).map((part) => {
+              <image href={activeRigDrawing.textureUrl} x="0" y="0" width="100" height="100" preserveAspectRatio="xMidYMid meet" />
+              {activeRigDrawing.rig.parts.filter((part) => anatomyKinds.includes(part.kind as (typeof anatomyKinds)[number])).map((part) => {
                 const x = (part.center.x / 1.4 + 0.5) * 100;
                 const y = (0.5 - part.center.y / 1.4) * 100;
                 const width = Math.max(4, part.size.x / 1.4 * 100);

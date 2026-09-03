@@ -41,6 +41,7 @@ yarn-error.log*
 .gstack/
 
 # local ML tooling
+.venv/
 __pycache__/
 *.py[cod]
 *.tsbuildinfo

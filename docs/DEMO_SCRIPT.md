@@ -10,9 +10,9 @@ Show the participant avatars and room code. Do not show session tokens or person
 
 ## 0:22–0:48 — Recognition with an honest quality gate
 
-Press **Make it 3D** on a wall containing two clear figures. Show separate cutouts and **Review rig**.
+Press **Make it 3D** on a wall containing two clear figures. Number both figures in the explicit cast picker. Show the two separate readiness cards and open **Review rig** for figure 2.
 
-**Voiceover:** “Local drawing models separate the cast, preserve the original face and color, and propose a variable skeleton. If an arm or leg is uncertain, that movement stays locked. The instant private result is an articulated spatial puppet—not a falsely advertised full sculpt.”
+**Voiceover:** “The child identifies the cast; background decoration never becomes a character automatically. Local models preserve each face and color, then propose a variable skeleton. If an arm or leg is uncertain, that movement stays locked until a person repairs and approves that figure. The private result is a spatial puppet—not a falsely advertised full sculpt.”
 
 Show **Choose your quality**. Explain that full unseen-view generation requires separate human approval and a GPU. Use the bundled verified neural asset for the demo so shared GPU capacity cannot interrupt the video.
 
@@ -20,11 +20,11 @@ Show **Choose your quality**. Explain that full unseen-view generation requires 
 
 In ChatGPT’s in-app browser, prompt:
 
-> Inspect our shared room, creative scene, verified character abilities, and current story-world objects. Stage a four-beat cooperation quest, use only supported character actions, and wait for my approval. Do not access the camera, share pixels, publish products, or buy anything.
+> Inspect reconstruction readiness for every figure. If one needs work, request its visible human repair and wait. Otherwise inspect our shared room and Story Passport, then stage the next learning challenge using only verified actions and wait for my approval. Do not access the camera, share pixels, correct my art, grade me, publish products, or buy anything.
 
-Show `inspect_shared_room`, `inspect_character_capabilities`, and `stage_magic_show` results. Hold on participant handles, blocked movements, validated cast roles, and `requiresHumanApproval: true`.
+Show `inspect_reconstruction_readiness`, `request_character_repair` if needed, `inspect_shared_room`, and `stage_next_learning_challenge` results. Hold on per-figure blockers, participant handles, adaptive basis, validated actions, and `requiresHumanApproval: true`.
 
-**Voiceover:** “WebMCP is the control plane. The agent reads structured room, rig, and world state instead of guessing through screenshots. It can coordinate the cast, but it cannot see pixels, open the camera, approve playback, or send an invitation.”
+**Voiceover:** “WebMCP is the control plane. The agent reads structured readiness, room, rig, world, and Story Passport state instead of guessing through screenshots. It can find uncertainty and ask the child to repair one figure, but it cannot see pixels, alter a joint, open the camera, grade the learner, approve playback, or send an invitation.”
 
 ## 1:12–1:38 — Play a real interactive world
 

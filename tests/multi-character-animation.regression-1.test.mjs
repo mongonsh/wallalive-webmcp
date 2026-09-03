@@ -87,6 +87,9 @@ test("the stage and page carry an ensemble instead of one rigid blob", async () 
   assert.match(stage, /wallaliveBasePosition/);
   assert.match(recognition, /recognizeDrawingsFromImageUrl/);
   assert.match(recognition, /recognizeDrawingsFromVideo/);
+  assert.match(recognition, /recognizeDrawingsAtVideoTargets/);
+  assert.match(page, /cameraTargets\.map/);
+  assert.match(page, /recognizeDrawingsAtVideoTargets/);
   assert.match(page, /captureEnsembleRef/);
   assert.match(page, /figures found/i);
 });

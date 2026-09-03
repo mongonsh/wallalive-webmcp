@@ -38,12 +38,15 @@ test("server-renders the WallAlive product shell and security headers", async ()
   assert.doesNotMatch(html, /codex-preview|react-loading-skeleton|Starter Project|CutRoom/i);
 });
 
-test("registers fourteen goal-level WebMCP collaboration tools with learning evidence, spatial direction, and creator commerce", async () => {
+test("registers seventeen goal-level WebMCP collaboration tools with repair, adaptive learning, spatial direction, and creator commerce", async () => {
   const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
   const expectedTools = [
     "inspect_creative_scene",
     "inspect_learning_progress",
+    "stage_next_learning_challenge",
     "inspect_character_capabilities",
+    "inspect_reconstruction_readiness",
+    "request_character_repair",
     "request_rigged_3d_cast",
     "stage_magic_show",
     "direct_live_ensemble",
@@ -60,11 +63,11 @@ test("registers fourteen goal-level WebMCP collaboration tools with learning evi
   for (const tool of expectedTools) assert.match(page, new RegExp(`name: ["']${tool}["']`));
 
   const registeredNames = [...page.matchAll(/name: ["']([^"']+)["']/g)].map((match) => match[1]);
-  assert.equal(registeredNames.filter((name) => expectedTools.includes(name)).length, 14);
+  assert.equal(registeredNames.filter((name) => expectedTools.includes(name)).length, 17);
   const toolSurface = page.slice(page.indexOf("const tools: WebMCPTool[]"), page.indexOf("registerAndVerifyWebMCP(context, tools"));
-  assert.equal([...toolSurface.matchAll(/\n\s+name: ["']/g)].length, 14, "every registered tool must be represented exactly once");
-  assert.equal([...toolSurface.matchAll(/\n\s+title: ["']/g)].length, 14, "every registered tool needs a human-readable title");
-  assert.equal([...toolSurface.matchAll(/\n\s+annotations: \{ readOnlyHint: (?:true|false), untrustedContentHint: true \}/g)].length, 14, "every tool must declare trust and read/write intent");
+  assert.equal([...toolSurface.matchAll(/\n\s+name: ["']/g)].length, 17, "every registered tool must be represented exactly once");
+  assert.equal([...toolSurface.matchAll(/\n\s+title: ["']/g)].length, 17, "every registered tool needs a human-readable title");
+  assert.equal([...toolSurface.matchAll(/\n\s+annotations: \{ readOnlyHint: (?:true|false), untrustedContentHint: true \}/g)].length, 17, "every tool must declare trust and read/write intent");
   assert.equal(registeredNames.some((name) => /camera|capture|upload/.test(name)), false);
   assert.match(page, /document\.modelContext/);
   const runtime = await readFile(new URL("../app/lib/webmcp-runtime.ts", import.meta.url), "utf8");
@@ -98,7 +101,8 @@ test("registers fourteen goal-level WebMCP collaboration tools with learning evi
   assert.match(page, /variable graph decoded from learned centerline, endpoints, and junction fields/);
   assert.match(page, /world: worldRef\.current/);
   assert.match(page, />DRAW <span>✦/);
-  assert.match(page, /recognizeDrawingsFromImageUrl\(dataUrl, target, 6\)/);
+  assert.match(page, /recognizeDrawingsAtImageTargets\(pending\.url, targets\)/);
+  assert.match(page, /Tap every Wall Studio character you want in the cast/);
   assert.match(page, /className="agent-prompt"/);
   assert.match(page, /cyberpunk-neon/);
   assert.match(page, /CREATOR PRODUCTS · OFFLINE IMPORT KIT/);
@@ -117,7 +121,7 @@ test("registers fourteen goal-level WebMCP collaboration tools with learning evi
   assert.match(page, /LEARNING LOOP/);
 });
 
-test("keeps submission claims aligned with the shipped fourteen-tool educational and creator-commerce loops", async () => {
+test("keeps submission claims aligned with the shipped seventeen-tool educational and creator-commerce loops", async () => {
   const files = await Promise.all([
     readFile(new URL("../README.md", import.meta.url), "utf8"),
     readFile(new URL("../docs/DEVPOST_SUBMISSION.md", import.meta.url), "utf8"),
@@ -129,7 +133,7 @@ test("keeps submission claims aligned with the shipped fourteen-tool educational
   assert.doesNotMatch(claims, /(?:Six|six) (?:goal-level WebMCP|imperative) tools/);
   assert.doesNotMatch(claims, /(?:Six|six)(?:-graph| local| same-origin| ONNX)|six-model/);
   assert.match(claims, /Seven local ONNX graphs/);
-  assert.match(claims, /Fourteen goal-level WebMCP tools/);
+  assert.match(claims, /Seventeen goal-level WebMCP tools/);
   assert.match(claims, /Imagine.*Sequence.*Perform.*Reflect/);
   assert.match(claims, /not measured learning (?:gains|claims|outcomes)/i);
   assert.doesNotMatch(claims, /art therapy/i);

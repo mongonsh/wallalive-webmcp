@@ -19,13 +19,13 @@ A shared drawing-to-story world where friends create a cast together and a WebMC
 
 ## Short description
 
-WallAlive lets friends join by guest username, paint one vector wall, combine separate figures into a cast, and play cooperative activities in original 3D worlds. Seven local ONNX graphs isolate the selected figure, preserve artwork, decode variable skeletons, and lock uncertain movement. The private tier is honestly labeled an articulated spatial puppet; optional AniGen generates full unseen surfaces. Fourteen WebMCP tools inspect the room, verified rigs, and private Story Passport; prepare invites without sending messages; stage capability-safe stories; activate real 3D quest objects; recommend collaborative products; and stage a creator-credited Shopify handoff. Camera, pixels, performance approval, contributor permission, publishing, and purchase stay human-controlled.
+WallAlive lets friends join by guest username, paint one vector wall, combine separate figures into a cast, and play cooperative activities in original 3D worlds. Seven local ONNX graphs isolate selected figures, preserve artwork, decode variable skeletons, and lock uncertain movement. The private tier is honestly labeled a spatial puppet; optional AniGen generates full unseen surfaces. Seventeen WebMCP tools inspect the room, per-figure reconstruction readiness, verified rigs, and private Story Passport; request visible human repair; adapt the next challenge; prepare invites; stage capability-safe stories; activate real 3D quest objects; recommend collaborative products; and stage a creator-credited Shopify handoff. Camera, pixels, correction, approval, publishing, and purchase stay human-controlled.
 
 ## Judging case
 
 ### 1. Use of WebMCP
 
-WebMCP is the creative control plane, not decorative integration. Fourteen imperative tools implement four shared-authority loops: inspect room → prepare invite → co-create; inspect rigs/objects → stage → human-approved performance; inspect Story Passport → adapt the next learning scaffold; and inspect artwork evidence → recommend products → stage Creator Drop → adult and contributor-approved export. The agent coordinates structured work while the person retains sensor, sharing, publishing, commerce, and final-performance authority.
+WebMCP is the creative control plane, not decorative integration. Seventeen imperative tools implement five shared-authority loops: inspect readiness → request visible human repair → re-inspect; inspect room → prepare invite → co-create; inspect rigs/objects → stage → human-approved performance; inspect Story Passport → stage the next evidence-based scaffold; and inspect artwork evidence → recommend products → stage Creator Drop → adult and contributor-approved export. The agent coordinates structured work while the person retains sensor, correction, sharing, publishing, commerce, and final-performance authority.
 
 ### 2. Quality of idea and execution
 
