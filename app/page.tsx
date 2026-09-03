@@ -11,6 +11,7 @@ import { inspectCharacterCapabilities as buildCharacterCapabilities, SAFE_SHOW_A
 import { recognizeDrawingParts, recognizeDrawingsFromImageUrl, recognizeDrawingsFromVideo } from "./lib/learned-parts";
 import { createBundledAniGenAsset, disposeNeuralAsset, generateAniGenAsset, isAniGenUnavailableError, type NeuralAsset, type NeuralProgress } from "./lib/anigen";
 import { assessReconstructionReadiness } from "./lib/character-quality";
+import { getAccessibleWorldInteraction } from "./lib/world-interactions";
 import type { RiggedAssetInfo } from "./lib/rigged-model";
 import {
   CREATOR_PRODUCT_IDS,
@@ -629,14 +630,20 @@ export default function Home() {
   }, [handleWorldInteraction]);
 
   const interactWithWorldObject = useCallback((objectId: string, actor: Actor = "BROWSER AGENT") => {
-    const activity = worldActivities[worldRef.current];
+    const currentWorld = worldRef.current;
+    const activity = worldActivities[currentWorld];
     if (!activity.objectIds.includes(objectId)) throw new Error(`That object is not part of ${worldRef.current}. Inspect the scene for current object ids.`);
-    worldInteractionActorRef.current = { actor, toolName: actor === "BROWSER AGENT" ? "interact_story_world" : undefined };
+    const toolName = actor === "BROWSER AGENT" ? "interact_story_world" : undefined;
+    worldInteractionActorRef.current = { actor, toolName };
     const activated = stageRef.current?.interactWorldObject(objectId) ?? false;
     worldInteractionActorRef.current = { actor: "CHILD" };
-    if (!activated) throw new Error("The 3D object is not ready yet.");
-    return { objectId, world: worldRef.current, activated, visibleWorldUpdated: true };
-  }, []);
+    if (!activated) {
+      const fallbackInteraction = getAccessibleWorldInteraction(currentWorld, objectId);
+      if (!fallbackInteraction) throw new Error("That story object is not ready yet.");
+      handleWorldInteraction(fallbackInteraction, actor, toolName);
+    }
+    return { objectId, world: currentWorld, activated: true, renderedIn3D: activated, accessibleFallback: !activated, visibleWorldUpdated: true };
+  }, [handleWorldInteraction]);
 
   const animateCharacter = useCallback((action: CharacterAction, actor: Actor, toolName?: string, caption?: string) => {
     const current = characterRef.current;
